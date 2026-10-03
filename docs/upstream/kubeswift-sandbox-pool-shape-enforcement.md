@@ -1,6 +1,6 @@
 # KubeSwift requirement: enforce the full slot shape on warm-pool checkout
 
-Status: proposal for KubeSwift. Observed in KubeSwift v0.15.1.
+Status: proposal for KubeSwift. Observed in KubeSwift v0.15.1. Tracked in [kubeswift-io/kubeswift#733](https://github.com/kubeswift-io/kubeswift/issues/733).
 
 ## User problem
 

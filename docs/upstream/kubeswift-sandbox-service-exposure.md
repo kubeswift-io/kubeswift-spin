@@ -1,6 +1,6 @@
 # KubeSwift requirement: inbound port exposure for SwiftSandbox
 
-Status: proposal for KubeSwift. Not implemented in KubeSwift v0.15.1.
+Status: proposal for KubeSwift. Not implemented in KubeSwift v0.15.1. Tracked in [kubeswift-io/kubeswift#729](https://github.com/kubeswift-io/kubeswift/issues/729).
 
 ## User problem
 

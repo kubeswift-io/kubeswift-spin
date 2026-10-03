@@ -1,6 +1,6 @@
 # KubeSwift requirement: egress allowlist for restricted sandboxes
 
-Status: proposal for KubeSwift. Not implemented in KubeSwift v0.15.1.
+Status: proposal for KubeSwift. Not implemented in KubeSwift v0.15.1. Tracked in [kubeswift-io/kubeswift#732](https://github.com/kubeswift-io/kubeswift/issues/732).
 
 ## User problem
 
