@@ -177,7 +177,7 @@ func TestFailedChildIsReplacedAfterBackoff(t *testing.T) {
 		Type: sandboxv1alpha1.SwiftSandboxConditionGuestRunning, Status: metav1.ConditionFalse,
 		Reason: "WorkloadFailed", Message: "workload exited 1"})
 	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxFailed)
-	if c := findCond(a, status.TypeProgressing); !strings.Contains(c.Message, "swiftctl sandbox logs hello-0") {
+	if c := findCond(a, status.TypeProgressing); !strings.Contains(c.Message, "swiftctl -n "+ns+" sandbox logs hello-0") {
 		t.Fatalf("message %q", c.Message)
 	}
 

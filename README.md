@@ -18,11 +18,11 @@ KubeSwift.
 
 Early, unreleased (v0.1.0 in development). Read this before deploying:
 
-- SpinApps are translated, reconciled, scaled, rolled and deleted, and
-  their sandboxes boot the Spin runtime. This is covered by unit tests, an
-  envtest suite against the real CRDs, a kind integration test with Spin
-  Operator installed, and Docker tests of the runtime image. It has **not**
-  yet been run end to end on KVM for this release
+- SpinApps are translated, reconciled, scaled, rolled and deleted. This is
+  covered by unit tests, an envtest suite against the real CRDs and a kind
+  integration test with Spin Operator installed. The runtime image is tested
+  with Docker. Booting that image in a KubeSwift microVM has **not** yet
+  been run end to end on KVM for this release
   ([test/e2e](test/e2e/README.md)).
 - **HTTP applications are not reachable yet.** KubeSwift v0.15.1 sandboxes
   deny all ingress and cannot expose ports. kubeswift-spin does not work
@@ -95,7 +95,8 @@ docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r1
 
 KubeSwift pulls the runtime image on the nodes; if the registry is private,
 create a docker-registry Secret in each SpinApp namespace and set the
-executor's `runtimeImagePullSecret` value.
+executor's `runtimeImagePullSecret` value. The controller image uses the
+chart's `imagePullSecrets` value instead.
 
 Install the chart and create a `kubeswift` executor in namespace `demo`:
 
@@ -159,9 +160,9 @@ serverless AI and an experimental MCP server, are in [examples](examples/).
 make verify
 ```
 
-runs formatting, vet, lint, the prose check, unit and envtest tests, and the
-chart checks. `make verify-all` adds the vulnerability scan, the example
-tests and the runtime image tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
+runs formatting, vet, lint, the workflow lint, the prose check, unit and
+envtest tests, and the chart checks. `make verify-all` adds the
+vulnerability scan, the example tests and the runtime image tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

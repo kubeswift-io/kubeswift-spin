@@ -522,6 +522,7 @@ func (r *SpinAppReconciler) finish(ctx context.Context, app *spinv1alpha1.SpinAp
 func (r *SpinAppReconciler) finishWithInstances(ctx context.Context, app *spinv1alpha1.SpinApp, instances []status.Instance,
 	revision string, blocker *status.Blocker, exposure status.Exposure, retryIn, eventReason string) error {
 	res := status.Compute(status.Input{
+		Namespace:  app.Namespace,
 		Generation: app.Generation,
 		Replicas:   app.Spec.Replicas,
 		Revision:   revision,

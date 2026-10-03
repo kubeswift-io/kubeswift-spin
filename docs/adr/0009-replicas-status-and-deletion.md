@@ -23,6 +23,6 @@ SpinApp status is written by nobody else for external executors.
 ## Consequences
 
 - Deterministic names and idempotent reconciliation; tested with envtest
-  and kind, including controller restarts.
+  (including a controller restart) and kind.
 - A single-replica app has a short gap during replacement.
 - Deletion can never be blocked by kubeswift-spin.

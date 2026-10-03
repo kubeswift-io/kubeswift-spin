@@ -3,7 +3,7 @@
 ## Controller metrics
 
 The controller serves Prometheus metrics on `--metrics-bind-address`
-(chart default `:8080`, Service `<release>-metrics`, port `metrics`), next to
+(chart default `:8080`, Service `<fullname>-metrics`, port `metrics`), next to
 the standard `controller_runtime_*`, `workqueue_*` and Go runtime metrics.
 
 | Metric | Type | Labels | Meaning |
@@ -39,8 +39,10 @@ With `metrics.serviceMonitor.enabled=true` the chart creates a
 ServiceMonitor for the Prometheus Operator. With `metrics.secure=true` the
 endpoint is served over HTTPS and requires a bearer token authorized for
 `get` on the non-resource URL `/metrics`; the chart creates a
-`<release>-metrics-reader` ClusterRole to bind to the Prometheus service
-account. controller-runtime then serves a self-signed certificate, so the
+`<fullname>-metrics-reader` ClusterRole to bind to the Prometheus service
+account. `<fullname>` is the release name when it contains
+`kubeswift-spin` (so `kubeswift-spin` for the install command in the
+README), otherwise `<release>-kubeswift-spin`. controller-runtime then serves a self-signed certificate, so the
 generated ServiceMonitor skips certificate verification and Prometheus sends
 its token without authenticating the server (see
 [security-model.md](security-model.md#metrics-endpoint)).

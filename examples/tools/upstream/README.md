@@ -8,6 +8,8 @@ a third-party endpoint.
 | `GET /` | `outbound-ok` (target for outbound-http) |
 | `POST /v1/chat/completions` | deterministic OpenAI-style completion (for serverless-ai) |
 
+From the repository root:
+
 ```bash
 go run ./examples/tools/upstream --listen 127.0.0.1:8090
 ```

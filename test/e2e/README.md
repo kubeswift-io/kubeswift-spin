@@ -40,3 +40,4 @@ created when it exits.
 `.github/workflows/kvm-e2e.yaml` runs this script on a self-hosted runner
 labelled `kvm`, on manual dispatch only. Public GitHub runners do not
 provide KubeSwift-capable KVM nodes, so pull requests do not depend on it.
+The workflow has not been run.

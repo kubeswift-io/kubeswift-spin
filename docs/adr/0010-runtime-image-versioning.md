@@ -22,7 +22,8 @@ every SpinApp.
   or the base image changes, with an upgrade note.
 - A golden test pins the revision of a reference SpinApp, so any change to
   the rendered sandbox spec, including one caused by a dependency bump that
-  alters JSON encoding of upstream types, fails CI until it is acknowledged.
+  alters JSON encoding of upstream types, fails the unit tests until it is
+  acknowledged.
 
 ## Consequences
 

@@ -1,7 +1,9 @@
 # Example Spin applications
 
 Each directory is a complete Spin application with a `spin.toml`, Rust
-source, a `spinapp.yaml` for the `kubeswift` executor, and a README.
+source, a `spinapp.yaml`, and a README. The SpinApps use the `kubeswift`
+executor, except serverless-ai (and `outbound-http/spinapp-open.yaml`),
+which use `kubeswift-open` because they call in-cluster services.
 
 | Example | Demonstrates |
 |---|---|
@@ -59,9 +61,10 @@ The artifact must be pullable without credentials from inside the sandbox
 
 ## What works in a KubeSwift sandbox today
 
-With KubeSwift v0.15.1 every example deploys, its sandboxes reach `Running`,
-and Spin starts serving inside the guest. The HTTP listener cannot be reached
-from outside the sandbox yet, because SwiftSandbox has no inbound port
+With KubeSwift v0.15.1 each example is expected to deploy, reach `Running`
+and start Spin inside the guest; this has not been verified on KVM yet (see
+[test/e2e](../test/e2e/README.md)). The HTTP listener cannot be reached
+from outside the sandbox, because SwiftSandbox has no inbound port
 exposure; each SpinApp therefore reports `Available=False` with reason
 `NetworkUnavailable`. The HTTP behavior of each example is tested locally
 with `spin up` and in the runtime image with Docker

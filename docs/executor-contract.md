@@ -19,8 +19,10 @@ creates a Deployment for it and owns the SpinApp status. kubeswift-spin
 records an `ExecutorInvalid` Warning Event on each affected SpinApp and does
 not write their status, so the two controllers never overwrite each other.
 
-SpinApps whose executor lacks the label are ignored entirely: kubeswift-spin
-creates nothing and writes no status for them.
+SpinApps whose executor lacks the label are ignored: kubeswift-spin creates
+nothing and writes no status for them. Sandboxes it created while the
+SpinApp used a managed executor are deleted (see
+[Executor changes](#executor-changes)).
 
 ## What Spin Operator still does
 

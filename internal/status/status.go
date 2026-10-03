@@ -97,6 +97,8 @@ type Blocker struct {
 
 // Input is everything status computation needs.
 type Input struct {
+	// Namespace is the SpinApp namespace, used in remediation hints.
+	Namespace  string
 	Generation int64
 	Replicas   int32
 	Revision   string
@@ -166,7 +168,7 @@ func Compute(in Input) Result {
 		}
 		msg := fmt.Sprintf("sandbox %s failed (%s)", f.Name, detail(f.FailureReason, f.FailureMessage))
 		if reason == ReasonSandboxFailed {
-			msg += "; inspect the Spin output with `swiftctl sandbox logs " + f.Name + "`"
+			msg += "; inspect the Spin output with `swiftctl -n " + in.Namespace + " sandbox logs " + f.Name + "`"
 		}
 		if in.RetryIn != "" {
 			msg += "; replacing in " + in.RetryIn

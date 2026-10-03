@@ -56,4 +56,4 @@ reach only the hosts, variables and stores its manifest allows. Running Spin
 inside a KubeSwift microVM adds a second, independent boundary: a guest
 kernel and a hypervisor between the tool and the node. Neither boundary
 removes the need to trust the KubeSwift launcher, the hypervisor or the host
-kernel; see [docs/security-model.md](../../docs/security-model.md).
+kernel; see [docs/security-model.md](../../../docs/security-model.md).

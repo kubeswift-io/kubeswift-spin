@@ -102,8 +102,9 @@ namespace.
 Consequently:
 
 - `variables[].valueFrom.secretKeyRef`, `runtimeConfig.loadFromSecret`,
-  secret-backed runtime-config options, `imagePullSecrets` and executor
-  `caCertSecret` are rejected with `UnsupportedConfiguration`.
+  secret-backed runtime-config options and `imagePullSecrets` are rejected
+  with `UnsupportedConfiguration`. An executor that sets
+  `deploymentConfig.caCertSecret` is invalid (`ExecutorInvalid`).
 - Runtime-config options whose names denote credentials must be empty, and
   URLs with embedded credentials are rejected, so a user cannot paste a
   token into the SpinApp and have it copied into a ConfigMap.

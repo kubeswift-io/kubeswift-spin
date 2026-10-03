@@ -58,7 +58,11 @@ The `Progressing` message carries KubeSwift's reason:
   and wait until it is `Ready`.
 - No reason, pod unschedulable: no node is labelled
   `kubeswift.io/kernel-node=true`, or the executor's node selector matches
-  none. Check `kubectl describe pod <app>-0`.
+  none. Check the launcher pod, which has the sandbox's name:
+
+```bash
+kubectl -n <namespace> describe pod <app>-0
+```
 
 ## Spin exits right after start
 

@@ -79,7 +79,7 @@ func TestProgressingReasons(t *testing.T) {
 		{"waiting on kernel", Input{Replicas: 1, Revision: "r1", Instances: []Instance{waiting}}, metav1.ConditionTrue, ReasonSandboxCreating, "KernelNotFound"},
 		{"rolling", Input{Replicas: 2, Revision: "r2", Instances: []Instance{si(0, "r1", rollout.Running), si(1, "r2", rollout.Running)}}, metav1.ConditionTrue, ReasonRollingUpdate, "1 of 2 updated"},
 		{"runtime image failure", Input{Replicas: 1, Revision: "r1", Instances: []Instance{failedImg}, RetryIn: "20s"}, metav1.ConditionFalse, ReasonRuntimeImageUnavailable, "replacing in 20s"},
-		{"workload failure", Input{Replicas: 1, Revision: "r1", Instances: []Instance{failedApp}}, metav1.ConditionFalse, ReasonSandboxFailed, "swiftctl sandbox logs app-0"},
+		{"workload failure", Input{Replicas: 1, Revision: "r1", Instances: []Instance{failedApp}}, metav1.ConditionFalse, ReasonSandboxFailed, "sandbox logs app-0"},
 		{"blocker", Input{Replicas: 1, Revision: "r1", Blocker: &Blocker{Reason: ReasonUnsupportedConfiguration, Message: "spec.volumes is not supported"}}, metav1.ConditionFalse, ReasonUnsupportedConfiguration, "spec.volumes"},
 	}
 	for _, tc := range cases {

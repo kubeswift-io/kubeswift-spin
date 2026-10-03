@@ -71,6 +71,6 @@ from the cluster.
 
 The intended architecture runs the inference server in a KubeSwift GPU
 sandbox or guest and keeps Spin sandboxes GPU-free. See
-[docs/serverless-ai.md](../../docs/serverless-ai.md) for the layout and an
-example SwiftSandbox running vLLM. That document describes a design; the
-GPU path has not been validated by this project.
+[docs/serverless-ai.md](../../docs/serverless-ai.md) for the layout. That
+document describes a design and ships no inference manifests; the GPU path
+has not been validated by this project.

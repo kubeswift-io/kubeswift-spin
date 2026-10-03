@@ -18,8 +18,9 @@
 
 You need Go (version in `go.mod`), Docker, Helm 3, kubectl, kind, Rust via
 rustup, and Python 3 with PyYAML (for the chart policy check). Pinned
-developer tools (golangci-lint, govulncheck, setup-envtest, kubeconform and
-the Spin CLI) are installed into `bin/` by the Makefile on first use.
+developer tools (golangci-lint, govulncheck, setup-envtest, kubeconform,
+actionlint and the Spin CLI) are installed into `bin/` by the Makefile on
+first use.
 
 ```bash
 make help
@@ -31,8 +32,9 @@ make help
 make verify
 ```
 
-This runs `gofmt`, `go vet`, golangci-lint, the prose check, unit tests, the
-envtest controller suite and the Helm chart checks. For changes to the
+This runs `gofmt`, `go vet`, golangci-lint, actionlint on the workflows, the
+prose check, unit tests, the envtest controller suite and the Helm chart
+checks. For changes to the
 runtime image, the entrypoint or the examples, also run:
 
 ```bash

@@ -4,7 +4,8 @@ Releases are cut from `main` by pushing a semver tag. The release workflow
 (`.github/workflows/release.yaml`) runs only for tags in
 `kubeswift-io/kubeswift-spin` and waits for approval of the `release`
 environment, which must be configured with required reviewers in the
-repository settings.
+repository settings. The workflow has not been run on GitHub yet; the
+artifacts below describe what it is written to publish.
 
 ## Checklist
 
