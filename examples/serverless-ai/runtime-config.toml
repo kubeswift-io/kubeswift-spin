@@ -1,0 +1,11 @@
+# Local runtime configuration for `spin up`. It points Spin's LLM API at the
+# mock server in examples/tools/upstream. In Kubernetes the same settings
+# come from SpinApp.spec.runtimeConfig.llmCompute.
+[llm_compute]
+type = "remote_http"
+url = "http://127.0.0.1:8090"
+api_type = "open_ai"
+# Spin requires the key. The mock server ignores it; a real endpoint that
+# needs a token cannot be configured through kubeswift-spin yet (see
+# docs/upstream/kubeswift-sandbox-secret-projection.md).
+auth_token = ""

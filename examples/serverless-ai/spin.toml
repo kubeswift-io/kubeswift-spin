@@ -1,0 +1,27 @@
+spin_manifest_version = 2
+
+[application]
+name = "serverless-ai"
+version = "0.1.0"
+description = "Sends prompts to an OpenAI-compatible inference endpoint through the Spin LLM API"
+
+[variables]
+llm_model = { default = "default-model" }
+
+[[trigger.http]]
+route = "/..."
+component = "serverless-ai"
+
+[component.serverless-ai]
+source = "../target/wasm32-wasip2/release/serverless_ai.wasm"
+allowed_outbound_hosts = []
+# Spin only lets the component use models listed here. The inference server
+# must serve a model under this name.
+ai_models = ["default-model"]
+
+[component.serverless-ai.variables]
+llm_model = "{{ llm_model }}"
+
+[component.serverless-ai.build]
+command = "cargo build --target wasm32-wasip2 --release"
+watch = ["src/**/*.rs", "Cargo.toml"]

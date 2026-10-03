@@ -1,0 +1,26 @@
+spin_manifest_version = 2
+
+[application]
+name = "request-info"
+version = "0.1.0"
+description = "Returns safe information about each request"
+
+[variables]
+app_version = { default = "dev" }
+greeting = { default = "hello" }
+
+[[trigger.http]]
+route = "/..."
+component = "request-info"
+
+[component.request-info]
+source = "../target/wasm32-wasip2/release/request_info.wasm"
+allowed_outbound_hosts = []
+
+[component.request-info.variables]
+app_version = "{{ app_version }}"
+greeting = "{{ greeting }}"
+
+[component.request-info.build]
+command = "cargo build --target wasm32-wasip2 --release"
+watch = ["src/**/*.rs", "Cargo.toml"]

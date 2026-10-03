@@ -1,0 +1,8 @@
+# Keep the build context to what the images need.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+cmd/**/*_test.go
+internal/**/*_test.go

@@ -1,0 +1,26 @@
+spin_manifest_version = 2
+
+[application]
+name = "mcp-tools"
+version = "0.1.0"
+description = "Experimental minimal MCP tool server over Streamable HTTP"
+
+[variables]
+# Comma-separated Origin values accepted from browsers. Requests without an
+# Origin header (non-browser MCP clients) are always accepted.
+allowed_origins = { default = "" }
+
+[[trigger.http]]
+route = "/..."
+component = "mcp-tools"
+
+[component.mcp-tools]
+source = "../../target/wasm32-wasip2/release/mcp_tools.wasm"
+allowed_outbound_hosts = []
+
+[component.mcp-tools.variables]
+allowed_origins = "{{ allowed_origins }}"
+
+[component.mcp-tools.build]
+command = "cargo build --target wasm32-wasip2 --release"
+watch = ["src/**/*.rs", "Cargo.toml"]

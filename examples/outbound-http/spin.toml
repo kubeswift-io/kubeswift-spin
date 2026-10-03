@@ -1,0 +1,27 @@
+spin_manifest_version = 2
+
+[application]
+name = "outbound-http"
+version = "0.1.0"
+description = "Makes one controlled outbound HTTP request to observe sandbox egress"
+
+[variables]
+target_url = { default = "http://127.0.0.1:8090/" }
+target_origin = { default = "http://127.0.0.1:8090" }
+
+[[trigger.http]]
+route = "/..."
+component = "outbound-http"
+
+[component.outbound-http]
+source = "../target/wasm32-wasip2/release/outbound_http.wasm"
+# Spin enforces this allowlist before any network policy applies. The
+# origin is a variable so the same artifact can target a different host.
+allowed_outbound_hosts = ["{{ target_origin }}"]
+
+[component.outbound-http.variables]
+target_url = "{{ target_url }}"
+
+[component.outbound-http.build]
+command = "cargo build --target wasm32-wasip2 --release"
+watch = ["src/**/*.rs", "Cargo.toml"]

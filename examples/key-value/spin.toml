@@ -1,0 +1,19 @@
+spin_manifest_version = 2
+
+[application]
+name = "key-value"
+version = "0.1.0"
+description = "Exercises Spin's key-value API through the default store"
+
+[[trigger.http]]
+route = "/..."
+component = "key-value"
+
+[component.key-value]
+source = "../target/wasm32-wasip2/release/key_value.wasm"
+allowed_outbound_hosts = []
+key_value_stores = ["default"]
+
+[component.key-value.build]
+command = "cargo build --target wasm32-wasip2 --release"
+watch = ["src/**/*.rs", "Cargo.toml"]

@@ -1,0 +1,6 @@
+# Pinned toolchain for the example Spin applications. spin-sdk 7 needs
+# rustc 1.94 or newer.
+[toolchain]
+channel = "1.97.1"
+targets = ["wasm32-wasip2"]
+profile = "minimal"

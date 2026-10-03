@@ -1,0 +1,19 @@
+# Build outputs
+/bin/
+/dist/
+/examples/target/
+*.test
+*.out
+cover.out
+coverage.html
+
+# Helm packaging
+/charts/*.tgz
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Spin local state (spin up)
+.spin/
