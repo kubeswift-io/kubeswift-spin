@@ -1,0 +1,37 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - nolintlint
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+  exclusions:
+    rules:
+      # Tests build fixtures with literal values and ignore some errors on
+      # purpose.
+      - path: _test\.go
+        linters: [gosec, unparam, errcheck]
+      # The example fixture server is a local test helper.
+      - path: examples/tools/
+        linters: [gosec]
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/kubeswift-io/kubeswift-spin

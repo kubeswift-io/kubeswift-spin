@@ -55,7 +55,8 @@ func TestSandboxNameIsDeterministicAndCollisionFree(t *testing.T) {
 	if SandboxName("my.app", 0) == SandboxName("my-app", 0) {
 		t.Fatalf("my.app and my-app collided")
 	}
-	if SandboxName(a, 3) != SandboxName(a, 3) {
+	first, second := SandboxName(a, 3), SandboxName(a, 3)
+	if first != second {
 		t.Fatalf("not deterministic")
 	}
 }

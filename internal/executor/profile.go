@@ -251,7 +251,7 @@ func ValidateRuntimeImage(ref string) error {
 		return fmt.Errorf("no runtime image configured (set the controller --runtime-image flag or the %s annotation)", AnnRuntimeImage)
 	}
 	if _, err := name.ParseReference(ref, name.StrictValidation); err != nil {
-		return fmt.Errorf("%q must include a registry and an explicit tag or digest: %v", ref, err)
+		return fmt.Errorf("%q must include a registry and an explicit tag or digest: %w", ref, err)
 	}
 	return nil
 }

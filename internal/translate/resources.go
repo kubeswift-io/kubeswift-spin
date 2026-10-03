@@ -75,11 +75,14 @@ func VCPUs(res spinv1alpha1.Resources, def resource.Quantity, policy ResourcePol
 		return 0, fmt.Errorf("%s value %s is out of range", source, q.String())
 	}
 	vcpus := (q.MilliValue() + 999) / 1000
+	if vcpus > math.MaxInt32 {
+		return 0, fmt.Errorf("%s value %s is out of range", source, q.String())
+	}
 	if policy.MaxVCPU > 0 && vcpus > int64(policy.MaxVCPU) {
 		return 0, fmt.Errorf("%s is %s (%d vCPUs after rounding up), above the maximum of %d vCPUs per replica",
 			source, q.String(), vcpus, policy.MaxVCPU)
 	}
-	return int32(vcpus), nil
+	return int32(vcpus), nil //nolint:gosec // vcpus is bounded by math.MaxInt32 above
 }
 
 // Memory converts the SpinApp memory quantity to the guest RAM size.

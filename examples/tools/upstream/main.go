@@ -35,7 +35,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("content-type", "text/plain; charset=utf-8")
-		fmt.Fprint(w, "outbound-ok\n")
+		_, _ = fmt.Fprint(w, "outbound-ok\n")
 	})
 	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		var req chatRequest

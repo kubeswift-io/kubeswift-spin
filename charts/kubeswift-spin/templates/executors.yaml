@@ -1,0 +1,41 @@
+{{- range $e := .Values.executors }}
+{{- $ann := dict }}
+{{- with $e.networkMode }}{{ $_ := set $ann "spin.kubeswift.io/network-mode" . }}{{ end }}
+{{- with $e.rootfsMode }}{{ $_ := set $ann "spin.kubeswift.io/rootfs-mode" . }}{{ end }}
+{{- with $e.kernelProfile }}{{ $_ := set $ann "spin.kubeswift.io/kernel-profile" . }}{{ end }}
+{{- with $e.sandboxPool }}{{ $_ := set $ann "spin.kubeswift.io/sandbox-pool" . }}{{ end }}
+{{- with $e.defaultCPU }}{{ $_ := set $ann "spin.kubeswift.io/default-cpu" (toString .) }}{{ end }}
+{{- with $e.defaultMemory }}{{ $_ := set $ann "spin.kubeswift.io/default-memory" (toString .) }}{{ end }}
+{{- with $e.runtimeImage }}{{ $_ := set $ann "spin.kubeswift.io/runtime-image" . }}{{ end }}
+{{- with $e.runtimeImagePullSecret }}{{ $_ := set $ann "spin.kubeswift.io/runtime-image-pull-secret" . }}{{ end }}
+{{- with $e.runtimeImageVerifyKeySecret }}{{ $_ := set $ann "spin.kubeswift.io/runtime-image-verify-key-secret" . }}{{ end }}
+{{- with $e.nodeSelector }}
+{{- $pairs := list }}
+{{- range $k, $v := . }}{{ $pairs = append $pairs (printf "%s=%s" $k $v) }}{{ end }}
+{{- $_ := set $ann "spin.kubeswift.io/node-selector" (join "," $pairs) }}
+{{- end }}
+{{- range $ns := required "each executor needs a namespaces list" $e.namespaces }}
+---
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinAppExecutor
+metadata:
+  name: {{ required "each executor needs a name" $e.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kubeswift-spin.labels" $ | nindent 4 }}
+    spin.kubeswift.io/managed-by: kubeswift-spin
+  {{- with $ann }}
+  annotations:
+    {{- range $k, $v := . }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  createDeployment: false
+  {{- with $e.otel }}
+  deploymentConfig:
+    otel:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
+{{- end }}
+{{- end }}

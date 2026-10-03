@@ -1,0 +1,119 @@
+# Least-privilege RBAC. kubeswift-spin reads SpinApps and executors, owns the
+# SpinApp status fields it reports, and creates and deletes SwiftSandboxes.
+# It needs no access to Secrets, ConfigMaps, Pods or Services.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["core.spinkube.dev"]
+    resources: ["spinapps", "spinappexecutors"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["core.spinkube.dev"]
+    resources: ["spinapps/status"]
+    verbs: ["get", "patch"]
+  # Setting blockOwnerDeletion on the SwiftSandbox owner reference requires
+  # update on the owner's finalizers subresource. No finalizer is added.
+  - apiGroups: ["core.spinkube.dev"]
+    resources: ["spinapps/finalizers"]
+    verbs: ["update"]
+  # SwiftSandbox specs are immutable, so there is no update or patch.
+  - apiGroups: ["sandbox.kubeswift.io"]
+    resources: ["swiftsandboxes"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["sandbox.kubeswift.io"]
+    resources: ["swiftsandboxpools"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubeswift-spin.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeswift-spin.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Leader election uses a single Lease in the release namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kubeswift-spin.fullname" . }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeswift-spin.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if and .Values.metrics.enabled .Values.metrics.secure }}
+---
+# Secure metrics: the controller authenticates scrapers with TokenReview and
+# authorizes them with SubjectAccessReview.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-metrics-auth
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-metrics-auth
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubeswift-spin.fullname" . }}-metrics-auth
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeswift-spin.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Bind this role to the Prometheus service account to allow scraping.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-metrics-reader
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+{{- end }}

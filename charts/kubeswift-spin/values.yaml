@@ -1,0 +1,109 @@
+# Default values for kubeswift-spin.
+#
+# The chart installs only kubeswift-spin. KubeSwift and Spin Operator are
+# prerequisites: their CRDs must exist before installing, and the controller
+# refuses to start without them.
+
+image:
+  repository: ghcr.io/kubeswift-io/kubeswift-spin
+  # Defaults to the chart appVersion.
+  tag: ""
+  # When set (sha256:...), the image is pulled by digest and tag is ignored.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# Runtime rootfs image booted by every SwiftSandbox. It is passed to the
+# controller as --runtime-image and can be overridden per executor.
+runtimeImage:
+  repository: ghcr.io/kubeswift-io/kubeswift-spin-runtime
+  tag: ""
+  digest: ""
+
+imagePullSecrets: []
+
+replicaCount: 1
+
+controller:
+  # CPU and memory used when a SpinApp sets no resources.
+  defaultCPU: "1"
+  defaultMemory: 512Mi
+  # Bounds on what a SpinApp may request per replica.
+  minMemory: 256Mi
+  maxMemory: 16Gi
+  maxVCPUs: 8
+  # Largest spec.replicas accepted per SpinApp.
+  maxReplicas: 20
+  # Restrict the namespaces watched. Empty watches all namespaces. RBAC is
+  # still cluster-scoped.
+  watchNamespaces: []
+  # debug, info or error.
+  logLevel: info
+  extraArgs: []
+
+# Default SpinAppExecutors. SpinAppExecutor is namespaced: create one per
+# namespace that runs SpinApps. Each entry becomes a separate executor
+# profile; see docs/executor-contract.md.
+executors:
+  - name: kubeswift
+    namespaces: [default]
+    # networkMode: restricted     # restricted (default) or open
+    # rootfsMode: block           # block or virtiofs
+    # kernelProfile: sandbox
+    # sandboxPool: spin-warm
+    # nodeSelector: {}
+    # defaultCPU: "1"
+    # defaultMemory: 512Mi
+    # runtimeImage: ""            # overrides runtimeImage for this executor
+    # runtimeImagePullSecret: ""
+    # runtimeImageVerifyKeySecret: ""
+    # otel:
+    #   exporter_otlp_endpoint: http://otel-collector.observability:4318
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+metrics:
+  enabled: true
+  port: 8080
+  # Serve metrics over HTTPS with Kubernetes token authentication and
+  # authorization. Adds RBAC for tokenreviews and subjectaccessreviews.
+  secure: false
+  service:
+    annotations: {}
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}

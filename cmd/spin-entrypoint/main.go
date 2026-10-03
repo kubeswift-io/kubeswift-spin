@@ -55,7 +55,9 @@ func run(args []string) error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("set no_new_privs: %w", err)
 	}
-	return syscall.Exec(runtimecontract.SpinPath, p.argv, p.env)
+	// The binary path is a constant and the arguments are the `spin up`
+	// flags the controller built; buildPlan rejects any other command.
+	return syscall.Exec(runtimecontract.SpinPath, p.argv, p.env) //nolint:gosec // fixed binary, validated arguments
 }
 
 // buildPlan validates the arguments and computes the Spin argv and
@@ -148,7 +150,7 @@ func prepare(p *plan, asRoot bool) error {
 		return nil
 	}
 	path := runtimecontract.RuntimeConfigPath
-	if err := os.WriteFile(path, p.runtimeConfig, 0o600); err != nil {
+	if err := os.WriteFile(path, p.runtimeConfig, 0o600); err != nil { //nolint:gosec // path is a compile-time constant
 		return fmt.Errorf("write runtime config: %w", err)
 	}
 	if asRoot {

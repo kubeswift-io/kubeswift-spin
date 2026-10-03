@@ -337,7 +337,7 @@ func validateAppImage(ref string) error {
 		return fmt.Errorf("is not a valid OCI reference")
 	}
 	if _, err := name.ParseReference(ref, name.WeakValidation); err != nil {
-		return fmt.Errorf("is not a valid OCI reference: %v", err)
+		return fmt.Errorf("is not a valid OCI reference: %w", err)
 	}
 	return nil
 }

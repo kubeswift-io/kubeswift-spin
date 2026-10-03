@@ -107,7 +107,7 @@ func Compute(in Input) Result {
 	var waiting *Instance
 	for i := range in.Instances {
 		inst := in.Instances[i]
-		if inst.Deleting || inst.Stale || int32(inst.Ordinal) >= in.Replicas {
+		if inst.Deleting || inst.Stale || inst.Ordinal >= int(in.Replicas) {
 			continue
 		}
 		if inst.Revision == in.Revision {

@@ -1,0 +1,18 @@
+kubeswift-spin {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+Runtime image: {{ include "kubeswift-spin.imageRef" (list .Values.runtimeImage .Chart.AppVersion) }}
+
+Executors created:
+{{- range $e := .Values.executors }}{{ range $ns := $e.namespaces }}
+  {{ $ns }}/{{ $e.name }}
+{{- end }}{{ end }}
+
+Each namespace that runs SpinApps also needs a Ready SwiftKernel named
+"sandbox" (a KubeSwift prerequisite for SwiftSandbox).
+
+Check the controller:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "kubeswift-spin.fullname" . }}
+
+With KubeSwift v0.15.1, SwiftSandboxes cannot be exposed or probed, so
+SpinApps run but report Available=False (NetworkUnavailable). See
+docs/networking.md.

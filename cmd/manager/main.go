@@ -31,6 +31,13 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/version"
 )
 
+// Upper bounds for the sizing flags. Replica ordinals use at most four
+// digits in sandbox names (see translate.SandboxName).
+const (
+	maxReplicasFlag = 1000
+	maxVCPUFlag     = 256
+)
+
 type options struct {
 	metricsAddr     string
 	metricsSecure   bool
@@ -137,7 +144,7 @@ func run(o options) error {
 		Scheme:      mgr.GetScheme(),
 		Recorder:    mgr.GetEventRecorder("kubeswift-spin"),
 		Defaults:    defaults,
-		Options:     compatibility.Options{MaxReplicas: int32(o.maxReplicas), Resources: policy},
+		Options:     compatibility.Options{MaxReplicas: int32(o.maxReplicas), Resources: policy}, //nolint:gosec // bounded in policy()
 		Detector:    &capabilities.OpenAPIDetector{Discovery: cs.Discovery(), TTL: o.capabilityTTL},
 		PoolsServed: poolsServed,
 	}
@@ -182,11 +189,11 @@ func (o options) policy() (executor.Defaults, translate.ResourcePolicy, error) {
 	if p.MaxMemory, err = parse("max-memory", o.maxMemory); err != nil {
 		return d, p, err
 	}
-	if o.maxVCPUs < 1 {
-		return d, p, fmt.Errorf("--max-vcpus must be at least 1")
+	if o.maxVCPUs < 1 || o.maxVCPUs > maxVCPUFlag {
+		return d, p, fmt.Errorf("--max-vcpus must be between 1 and %d", maxVCPUFlag)
 	}
-	if o.maxReplicas < 1 {
-		return d, p, fmt.Errorf("--max-replicas must be at least 1")
+	if o.maxReplicas < 1 || o.maxReplicas > maxReplicasFlag {
+		return d, p, fmt.Errorf("--max-replicas must be between 1 and %d", maxReplicasFlag)
 	}
 	p.MaxVCPU = int32(o.maxVCPUs)
 	if o.runtimeImage != "" {

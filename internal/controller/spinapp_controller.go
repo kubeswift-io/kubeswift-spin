@@ -190,7 +190,7 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		// a workload because its executor is temporarily missing.
 		blocker := &status.Blocker{Reason: status.ReasonExecutorNotFound,
 			Message: fmt.Sprintf("SpinAppExecutor %q not found in namespace %q; existing sandboxes are left running", app.Spec.Executor, app.Namespace)}
-		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, status.Exposure{}, "", EventExecutorNotFound)
+		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, status.Exposure{}, EventExecutorNotFound)
 	case execErr != nil:
 		return ctrl.Result{}, execErr
 	}
@@ -217,7 +217,7 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	profile, perr := executor.Parse(&exec, r.Defaults)
 	if perr != nil {
 		blocker := &status.Blocker{Reason: status.ReasonExecutorInvalid, Message: perr.Error()}
-		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, "", EventExecutorInvalid)
+		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, EventExecutorInvalid)
 	}
 
 	findings := compatibility.Analyze(&app, profile, r.Options)
@@ -233,20 +233,20 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	}
 	if compatibility.Blocking(findings) {
 		blocker := &status.Blocker{Reason: status.ReasonUnsupportedConfiguration, Message: compatibility.Summary(findings)}
-		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, "", EventUnsupported)
+		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, EventUnsupported)
 	}
 
 	tmpl, err := translate.BuildTemplate(&app, profile, r.Options.Resources)
 	if err != nil {
 		blocker := &status.Blocker{Reason: status.ReasonUnsupportedConfiguration, Message: err.Error()}
-		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, "", EventUnsupported)
+		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, EventUnsupported)
 	}
 
 	if profile.SandboxPool != "" {
 		if blocker, err := r.checkPool(ctx, &app, profile, tmpl); err != nil {
 			return ctrl.Result{}, err
 		} else if blocker != nil {
-			return ctrl.Result{}, r.finish(ctx, &app, owned, tmpl.Revision, blocker, exposure, "", EventWarmPool)
+			return ctrl.Result{}, r.finish(ctx, &app, owned, tmpl.Revision, blocker, exposure, EventWarmPool)
 		}
 	}
 
@@ -451,7 +451,7 @@ func rolloutView(in []status.Instance) []rollout.Instance {
 }
 
 func (r *SpinAppReconciler) finish(ctx context.Context, app *spinv1alpha1.SpinApp, owned []sandboxv1alpha1.SwiftSandbox,
-	revision string, blocker *status.Blocker, exposure status.Exposure, retryIn, eventReason string) error {
+	revision string, blocker *status.Blocker, exposure status.Exposure, eventReason string) error {
 	instances := make([]status.Instance, 0, len(owned))
 	for i := range owned {
 		instances = append(instances, Classify(app.Name, &owned[i]))
@@ -461,7 +461,7 @@ func (r *SpinAppReconciler) finish(ctx context.Context, app *spinv1alpha1.SpinAp
 		// replicas already run so they are not reported as outdated.
 		revision = commonRevision(instances)
 	}
-	return r.finishWithInstances(ctx, app, instances, revision, blocker, exposure, retryIn, eventReason)
+	return r.finishWithInstances(ctx, app, instances, revision, blocker, exposure, "", eventReason)
 }
 
 func (r *SpinAppReconciler) finishWithInstances(ctx context.Context, app *spinv1alpha1.SpinApp, instances []status.Instance,

@@ -121,7 +121,7 @@ func TestParseRejects(t *testing.T) {
 			e.Spec.DeploymentConfig = &spinv1alpha1.ExecutorDeploymentConfig{CACertSecret: "my-ca"}
 		}, "caCertSecret is not supported"},
 		"unknown annotation": {func(e *spinv1alpha1.SpinAppExecutor) {
-			e.Annotations = map[string]string{Prefix + "netwrok-mode": "open"}
+			e.Annotations = map[string]string{Prefix + "network": "open"}
 		}, "unknown annotation"},
 		"network none":        {func(e *spinv1alpha1.SpinAppExecutor) { e.Annotations = map[string]string{AnnNetworkMode: "none"} }, "network-mode=none is not supported"},
 		"network bogus":       {func(e *spinv1alpha1.SpinAppExecutor) { e.Annotations = map[string]string{AnnNetworkMode: "public"} }, "must be restricted or open"},
