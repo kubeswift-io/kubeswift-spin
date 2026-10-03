@@ -18,10 +18,16 @@ const (
 	// ordinalReserve is the space kept for "-<ordinal>". The replica limit
 	// is far below 10000, so four characters are always enough.
 	ordinalReserve = 5
-	hashLen        = 8
+	hashLen        = 12
 )
 
-var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+var (
+	dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	// hashedSuffix matches the suffix baseName appends. A literal name that
+	// already ends this way is hashed too, so a literal and a hashed prefix
+	// can never be equal.
+	hashedSuffix = regexp.MustCompile(`-[0-9a-f]{12}$`)
+)
 
 // shortHash is a stable, non-reversible identifier derived from s.
 func shortHash(s string) string {
@@ -32,12 +38,14 @@ func shortHash(s string) string {
 // baseName returns the deterministic prefix used for all children of a
 // SpinApp. A name that is already a short DNS label is used unchanged, so a
 // SpinApp named "hello" gets sandboxes "hello-0", "hello-1". Longer names,
-// and names containing dots (legal for a SpinApp, not for a pod hostname),
-// are truncated and suffixed with a hash of the full name so two different
-// SpinApps can never map to the same prefix.
+// names containing dots (legal for a SpinApp, not for a pod hostname), and
+// names that already end in a 12-character hex suffix are truncated and
+// suffixed with a 48-bit hash of the full name. Literal and hashed prefixes
+// are therefore disjoint, and two SpinApps in one namespace collide only on
+// a hash collision.
 func baseName(app string) string {
 	limit := maxSandboxName - ordinalReserve
-	if len(app) <= limit && dnsLabel.MatchString(app) {
+	if len(app) <= limit && dnsLabel.MatchString(app) && !hashedSuffix.MatchString(app) {
 		return app
 	}
 	clean := strings.Trim(strings.ReplaceAll(app, ".", "-"), "-")

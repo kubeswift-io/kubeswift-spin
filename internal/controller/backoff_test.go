@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -45,14 +46,50 @@ func TestBackoffLifecycle(t *testing.T) {
 		t.Fatalf("next delay %s", d)
 	}
 
-	// Running again resets the count.
-	b.RecordRunning("ns/a", 0)
-	if pending, _ := b.Pending("ns/a", failed, now); pending[0] {
-		t.Fatal("running did not reset backoff")
+	// Running briefly does not reset the count; running for the stability
+	// window does.
+	b.RecordRunning("ns/a", 0, "uid-3", now)
+	if pending, _ := b.Pending("ns/a", failed, now.Add(15*time.Second)); !pending[0] {
+		t.Fatal("a brief Running observation reset the backoff")
+	}
+	b.RecordRunning("ns/a", 0, "uid-3", now.Add(11*time.Minute))
+	if pending, _ := b.Pending("ns/a", failed, now.Add(11*time.Minute)); pending[0] {
+		t.Fatal("running for the stability window did not reset backoff")
 	}
 
 	b.Forget("ns/a")
 	if len(b.apps) != 0 {
 		t.Fatal("forget left state")
+	}
+}
+
+// TestBackoffEscalatesForCrashLoops covers the common failure: the guest
+// reaches Running, then Spin fails to start, again and again.
+func TestBackoffEscalatesForCrashLoops(t *testing.T) {
+	b := NewBackoff()
+	now := time.Unix(0, 0)
+	var delays []time.Duration
+	for i := 1; i <= 7; i++ {
+		uid := fmt.Sprintf("uid-%d", i)
+		b.RecordRunning("ns/a", 0, uid, now) // no-op before the first failure
+		now = now.Add(5 * time.Second)
+		b.RecordRunning("ns/a", 0, uid, now)
+		b.RecordFailure("ns/a", 0, uid, now)
+		delays = append(delays, b.apps["ns/a"][0].notBefore.Sub(now))
+		now = b.apps["ns/a"][0].notBefore
+	}
+	want := []time.Duration{10 * time.Second, 20 * time.Second, 40 * time.Second, 80 * time.Second, 160 * time.Second, 5 * time.Minute, 5 * time.Minute}
+	for i := range want {
+		if delays[i] != want[i] {
+			t.Fatalf("delays %v, want %v", delays, want)
+		}
+	}
+
+	// A replica that ran past the stability window starts over at the base.
+	b.RecordRunning("ns/a", 0, "uid-long", now)
+	b.RecordRunning("ns/a", 0, "uid-long", now.Add(time.Hour))
+	b.RecordFailure("ns/a", 0, "uid-long", now.Add(time.Hour))
+	if d := b.apps["ns/a"][0].notBefore.Sub(now.Add(time.Hour)); d != 10*time.Second {
+		t.Fatalf("delay after a long healthy run = %s", d)
 	}
 }

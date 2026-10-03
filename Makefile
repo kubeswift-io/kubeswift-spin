@@ -149,11 +149,11 @@ example-test: spin ## Run every example locally under spin up and check its beha
 
 .PHONY: example-build
 example-build: spin ## Build one example: make example-build EXAMPLE=hello-http
-	$(SPIN) build -f examples/$(EXAMPLE)/spin.toml
+	'$(SPIN)' build -f 'examples/$(EXAMPLE)/spin.toml'
 
 .PHONY: example-push
 example-push: example-build ## Push one example as a Spin OCI artifact: make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/you EXAMPLE_TAG=v0.1.0
-	cd examples/$(EXAMPLE) && $(SPIN) registry push $(EXAMPLE_REGISTRY)/$(EXAMPLE_NAME):$(EXAMPLE_TAG)
+	cd 'examples/$(EXAMPLE)' && '$(SPIN)' registry push '$(EXAMPLE_REGISTRY)/$(EXAMPLE_NAME):$(EXAMPLE_TAG)'
 
 .PHONY: example-deploy
 example-deploy: ## Apply one example SpinApp: make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/you EXAMPLE_TAG=v0.1.0

@@ -15,5 +15,5 @@ allowed_outbound_hosts = []
 key_value_stores = ["default"]
 
 [component.key-value.build]
-command = "cargo build --target wasm32-wasip2 --release"
+command = "cargo build --locked --target wasm32-wasip2 --release"
 watch = ["src/**/*.rs", "Cargo.toml"]

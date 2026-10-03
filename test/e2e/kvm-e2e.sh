@@ -84,8 +84,8 @@ kind: SpinApp
 metadata:
   name: $APP
 spec:
-  image: $APP_IMAGE
-  executor: $EXECUTOR
+  image: "$APP_IMAGE"
+  executor: "$EXECUTOR"
   replicas: 1
 YAML
 until_true "SwiftSandbox $APP-0 created" kubectl -n "$NS" get swiftsandbox "$APP-0"

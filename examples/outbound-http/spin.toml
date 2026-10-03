@@ -23,5 +23,5 @@ allowed_outbound_hosts = ["{{ target_origin }}"]
 target_url = "{{ target_url }}"
 
 [component.outbound-http.build]
-command = "cargo build --target wasm32-wasip2 --release"
+command = "cargo build --locked --target wasm32-wasip2 --release"
 watch = ["src/**/*.rs", "Cargo.toml"]

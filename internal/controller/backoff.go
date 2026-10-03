@@ -11,12 +11,20 @@ import (
 const (
 	backoffBase = 10 * time.Second
 	backoffMax  = 5 * time.Minute
+	// backoffStable is how long a replica must run without failing before
+	// its failure count resets, as kubelet does for CrashLoopBackOff. A
+	// guest is Running before Spin has even pulled the application, so
+	// resetting on the first Running observation would keep the delay at
+	// the base value for an application that always fails.
+	backoffStable = 10 * time.Minute
 )
 
 type ordinalState struct {
-	failures  int
-	lastUID   string
-	notBefore time.Time
+	failures     int
+	lastUID      string
+	notBefore    time.Time
+	runningUID   string
+	runningSince time.Time
 }
 
 // Backoff delays the replacement of a replica that keeps failing, the
@@ -30,6 +38,9 @@ type Backoff struct {
 	// Base is the delay after the first failure; it doubles per failure up
 	// to Max.
 	Base, Max time.Duration
+	// Stable is how long a replica must run before its failures are
+	// forgotten.
+	Stable time.Duration
 
 	mu   sync.Mutex
 	apps map[string]map[int]*ordinalState
@@ -37,7 +48,7 @@ type Backoff struct {
 
 // NewBackoff returns an empty Backoff with the default delays.
 func NewBackoff() *Backoff {
-	return &Backoff{Base: backoffBase, Max: backoffMax, apps: map[string]map[int]*ordinalState{}}
+	return &Backoff{Base: backoffBase, Max: backoffMax, Stable: backoffStable, apps: map[string]map[int]*ordinalState{}}
 }
 
 func delayFor(failures int) time.Duration { return NewBackoff().delayFor(failures) }
@@ -76,21 +87,36 @@ func (b *Backoff) RecordFailure(app string, ord int, uid string, now time.Time) 
 	if s.lastUID == uid {
 		return false
 	}
+	if s.runningUID == uid && now.Sub(s.runningSince) >= b.Stable {
+		// This sandbox ran long enough before failing: start over.
+		s.failures = 0
+	}
+	s.runningUID, s.runningSince = "", time.Time{}
 	s.lastUID = uid
 	s.failures++
 	s.notBefore = now.Add(b.delayFor(s.failures))
 	return true
 }
 
-// RecordRunning resets the failure count once a replica runs again.
-func (b *Backoff) RecordRunning(app string, ord int) {
+// RecordRunning notes that the sandbox with uid is running. Once it has run
+// for Stable, the failure count of its ordinal resets.
+func (b *Backoff) RecordRunning(app string, ord int, uid string, now time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if m, ok := b.apps[app]; ok {
-		if s, ok := m[ord]; ok {
-			s.failures = 0
-			s.notBefore = time.Time{}
-		}
+	m, ok := b.apps[app]
+	if !ok {
+		return
+	}
+	s, ok := m[ord]
+	if !ok {
+		return
+	}
+	if s.runningUID != uid {
+		s.runningUID, s.runningSince = uid, now
+	}
+	if now.Sub(s.runningSince) >= b.Stable {
+		s.failures = 0
+		s.notBefore = time.Time{}
 	}
 }
 

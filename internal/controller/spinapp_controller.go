@@ -453,7 +453,7 @@ func (r *SpinAppReconciler) observe(app *spinv1alpha1.SpinApp, owned []sandboxv1
 			}
 		}
 		if inst.Health == rollout.Running && inst.Revision == revision {
-			r.Backoff.RecordRunning(key, inst.Ordinal)
+			r.Backoff.RecordRunning(key, inst.Ordinal, string(sb.UID), now)
 		}
 		out = append(out, inst)
 	}
@@ -532,7 +532,7 @@ func (r *SpinAppReconciler) finishWithInstances(ctx context.Context, app *spinv1
 	})
 
 	prev := apimeta.FindStatusCondition(app.Status.Conditions, status.TypeProgressing)
-	if blocker != nil && (prev == nil || prev.Reason != blocker.Reason || prev.Message != blocker.Message) {
+	if blocker != nil && (prev == nil || prev.Reason != blocker.Reason || prev.Message != res.Progressing.Message) {
 		r.event(app, corev1.EventTypeWarning, eventReason, "Reconcile", "%s", blocker.Message)
 	}
 
@@ -599,8 +599,11 @@ func (r *SpinAppReconciler) event(app *spinv1alpha1.SpinApp, eventType, reason, 
 	if r.Recorder == nil {
 		return
 	}
-	r.Recorder.Eventf(app, nil, eventType, reason, action, note, args...)
+	// events.k8s.io/v1 rejects notes longer than 1024 bytes.
+	r.Recorder.Eventf(app, nil, eventType, reason, action, "%s", status.Truncate(fmt.Sprintf(note, args...), maxEventNote))
 }
+
+const maxEventNote = 1000
 
 func (r *SpinAppReconciler) forget(key string) {
 	r.Metrics.Forget(key)

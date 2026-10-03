@@ -55,6 +55,11 @@ func TestSandboxNameIsDeterministicAndCollisionFree(t *testing.T) {
 	if SandboxName("my.app", 0) == SandboxName("my-app", 0) {
 		t.Fatalf("my.app and my-app collided")
 	}
+	// A literal name may not reproduce another app's hashed prefix.
+	hashed := baseName("a.b")
+	if baseName(hashed) == hashed {
+		t.Fatalf("literal name %q maps to the hashed prefix of a.b", hashed)
+	}
 	first, second := SandboxName(a, 3), SandboxName(a, 3)
 	if first != second {
 		t.Fatalf("not deterministic")

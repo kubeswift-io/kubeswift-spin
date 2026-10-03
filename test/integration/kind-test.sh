@@ -27,7 +27,9 @@ CLUSTER="${CLUSTER:-kubeswift-spin-it}"
 NS=kss-it
 SYS=kubeswift-spin-system
 CERT_MANAGER_VERSION=v1.21.2
+CERT_MANAGER_SHA256=e03b668ec8675214af6b0a671699d088f2601fa3878e0dbe1b41d3feafd1879f
 SPIN_OPERATOR_VERSION=v0.6.1
+SPIN_OPERATOR_CHART_SHA256=640fcbf0da182ab0482228aa33872a06adec1d3849bea234ae8f725d1de60ff5
 CTX="kind-$CLUSTER"
 K="kubectl --context $CTX"
 FAILED=0
@@ -108,10 +110,17 @@ $K create namespace "$NS" >/dev/null
 
 if [[ "${WITH_SPIN_OPERATOR:-}" == "1" ]]; then
   log "installing cert-manager $CERT_MANAGER_VERSION and Spin Operator $SPIN_OPERATOR_VERSION"
-  $K apply -f "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml" >/dev/null
+  dl="$(mktemp -d)"
+  curl -fsSL --proto '=https' -o "$dl/cert-manager.yaml" \
+    "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml"
+  curl -fsSL --proto '=https' -o "$dl/spin-operator.tgz" \
+    "https://github.com/spinframework/spin-operator/releases/download/$SPIN_OPERATOR_VERSION/spin-operator-${SPIN_OPERATOR_VERSION#v}.tgz"
+  printf '%s  %s\n%s  %s\n' "$CERT_MANAGER_SHA256" "$dl/cert-manager.yaml" "$SPIN_OPERATOR_CHART_SHA256" "$dl/spin-operator.tgz" | sha256sum -c - >/dev/null
+  $K apply -f "$dl/cert-manager.yaml" >/dev/null
   $K -n cert-manager wait --for=condition=Available deploy --all --timeout=180s >/dev/null
-  helm --kube-context "$CTX" install spin-operator --namespace spin-operator --create-namespace --wait --timeout 300s \
-    "https://github.com/spinframework/spin-operator/releases/download/$SPIN_OPERATOR_VERSION/spin-operator-${SPIN_OPERATOR_VERSION#v}.tgz" >/dev/null
+  helm --kube-context "$CTX" install spin-operator "$dl/spin-operator.tgz" --namespace spin-operator --create-namespace \
+    --wait --timeout 300s >/dev/null
+  rm -rf "$dl"
   ok "Spin Operator installed"
 fi
 

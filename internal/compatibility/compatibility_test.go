@@ -1,6 +1,7 @@
 package compatibility
 
 import (
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -316,5 +317,44 @@ func TestNestedUpstreamFieldsAreHandled(t *testing.T) {
 				t.Errorf("%s has no field %q any more; update handledNested and the translation", typ.Name(), f)
 			}
 		}
+	}
+}
+
+func TestURLCredentialDetectionFailsClosed(t *testing.T) {
+	for _, v := range []string{
+		"redis://:hunter2@redis:6379",
+		"redis://:hun^ter2@redis:6379",
+		"redis://user:p{w}d@redis:6379",
+		"postgres://u:p@h:bad/db",
+		"libsql://db.example.com?authToken=abc",
+		"https://llm.example.com/v1?api_key=abc",
+		"https://example.com/x?X-Amz-Signature=abc",
+	} {
+		if !urlHasCredentials(v) {
+			t.Errorf("%q not detected", v)
+		}
+	}
+	for _, v := range []string{
+		"http://llm.inference.svc:8000",
+		"redis://redis:6379/0",
+		"https://example.com/path@with-at",
+		"/var/lib/kubeswift-spin/state/kv.db",
+		"open_ai",
+		"https://example.com/?region=eu&table=t",
+	} {
+		if urlHasCredentials(v) {
+			t.Errorf("%q falsely detected", v)
+		}
+	}
+}
+
+func TestSummaryIsBounded(t *testing.T) {
+	a := app()
+	for i := 0; i < 300; i++ {
+		a.Spec.Components = append(a.Spec.Components, fmt.Sprintf("Bad_%d_%s", i, strings.Repeat("x", 200)))
+	}
+	s := Summary(Analyze(a, profile(), opts()))
+	if len(s) > 2000 || !strings.Contains(s, "more problems") {
+		t.Fatalf("summary not bounded (%d bytes): %.200s", len(s), s)
 	}
 }

@@ -41,7 +41,9 @@ endpoint is served over HTTPS and requires a bearer token authorized for
 `get` on the non-resource URL `/metrics`; the chart creates a
 `<release>-metrics-reader` ClusterRole to bind to the Prometheus service
 account. controller-runtime then serves a self-signed certificate, so the
-generated ServiceMonitor skips certificate verification.
+generated ServiceMonitor skips certificate verification and Prometheus sends
+its token without authenticating the server (see
+[security-model.md](security-model.md#metrics-endpoint)).
 
 ## Logs
 

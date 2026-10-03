@@ -126,3 +126,10 @@ func TestApplyPreservesForeignConditions(t *testing.T) {
 		t.Fatal("re-applying identical status reported a change")
 	}
 }
+
+func TestMessagesAreBounded(t *testing.T) {
+	r := Compute(Input{Replicas: 1, Revision: "r1", Blocker: &Blocker{Reason: ReasonUnsupportedConfiguration, Message: strings.Repeat("x", 100000)}})
+	if len(r.Progressing.Message) > maxMessage || !strings.HasSuffix(r.Progressing.Message, "(truncated)") {
+		t.Fatalf("message not bounded: %d bytes", len(r.Progressing.Message))
+	}
+}

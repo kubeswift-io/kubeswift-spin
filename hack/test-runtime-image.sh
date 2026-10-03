@@ -99,7 +99,7 @@ docker run --rm --entrypoint /usr/local/bin/kubeswift-spin-entrypoint "$IMAGE" b
 docker run -d --name kss-test-registry -p "127.0.0.1:$REG_PORT:5000" "$REGISTRY_IMAGE" >/dev/null
 CONTAINERS+=(kss-test-registry)
 wait_http "http://127.0.0.1:$REG_PORT/v2/" || { fail "registry did not start"; exit 1; }
-(cd "$ROOT/examples" && cargo build --quiet --target wasm32-wasip2 --release)
+(cd "$ROOT/examples" && cargo build --locked --quiet --target wasm32-wasip2 --release)
 for app in hello-http key-value serverless-ai; do
   (cd "$ROOT/examples/$app" && "$SPIN" registry push --insecure "localhost:$REG_PORT/$app:test" >/dev/null)
 done

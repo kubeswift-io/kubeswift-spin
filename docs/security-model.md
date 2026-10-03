@@ -161,11 +161,14 @@ application artifact, which are not supported.
   (including gosec), actionlint, Grype image scans that fail on fixable
   high or critical vulnerabilities, and generates SPDX SBOMs for both
   images.
-- **Releases** (`.github/workflows/release.yaml`) run only for tags in the
-  canonical repository after approval of the `release` environment. They
-  build multi-architecture images with BuildKit SBOM and provenance
-  attestations, sign images and the chart with cosign keyless signing, and
-  pin the image digests into the published chart.
+- **Releases** (`.github/workflows/release.yaml`) run only for validated
+  semver tags in the canonical repository after approval of the `release`
+  environment. They build multi-architecture images with BuildKit SBOM and
+  provenance attestations, sign images and the chart with cosign keyless
+  signing, and pin the image digests into the published chart. An existing
+  runtime image is reused only after `cosign verify` confirms it was signed
+  by this release workflow. Jobs that run third-party build code (cargo)
+  have read-only tokens; checkouts do not persist credentials.
 
 None of these workflows has run yet, because the repository has not been
 published. Locally, the equivalent `make` targets have been run.
@@ -198,8 +201,12 @@ executor names a cosign key Secret.
 
 - A SpinApp can only use an executor in its own namespace, and executors
   are created by whoever can create SpinAppExecutors there (by default the
-  Helm chart). Profile settings are therefore under the control of executor
-  authors, not SpinApp authors.
+  Helm chart). Profile settings are under the control of executor authors,
+  not SpinApp authors. However, any SpinApp author in a namespace can select
+  any executor in that namespace: nothing ties an executor to particular
+  applications. Put executors with weaker isolation, in particular
+  `network-mode: open`, only in namespaces whose SpinApp authors are
+  trusted with them.
 - Sandboxes are created in the SpinApp's namespace, and KubeSwift resolves
   kernels and Secrets in that namespace.
 - Ownership is by controller owner reference UID, so a user cannot make
@@ -220,7 +227,13 @@ executor names a cosign key Secret.
   against Spin's naming rules; runtime-config options named `type` are
   rejected so they cannot override the store type.
 - Names of child objects are derived deterministically and length-bounded,
-  with a hash suffix for long or dotted names.
+  with a 48-bit hash suffix for long or dotted names. Literal names that
+  already end in a hash-like suffix are hashed too, so a SpinApp cannot
+  claim another SpinApp's sandbox names by choosing its name; a collision
+  needs a hash collision and only blocks (it never adopts).
+- Condition messages are bounded (five problems, 64-character names, 4096
+  bytes) and Event notes are capped at 1000 bytes, so oversized input cannot
+  make status updates or Events fail.
 
 ## Denial of service and capacity
 
@@ -233,7 +246,8 @@ lifetime. Controls:
 - CPU is rounded up, never down, and the rounding is visible in the
   sandbox spec,
 - failed replicas are replaced with exponential backoff (10 seconds to
-  5 minutes), so a crashing application cannot churn microVMs.
+  5 minutes), which resets only after 10 minutes of healthy running, so a
+  crashing application cannot churn microVMs.
 
 These limits are per SpinApp, not per namespace. Use Kubernetes
 ResourceQuota on `count/swiftsandboxes.sandbox.kubeswift.io` (object count
@@ -245,6 +259,16 @@ kubeswift-spin adds no finalizer. Deleting a SpinApp removes its sandboxes
 through owner-reference garbage collection, so a broken or removed
 controller can never block deletion. Sandboxes are deleted with foreground
 propagation so a replacement does not race KubeSwift's cleanup.
+
+## Metrics endpoint
+
+By default metrics are served over plain HTTP without authentication. They
+carry no tenant identifiers (no namespace or application labels). With
+`metrics.secure=true`, the endpoint requires an authorized bearer token, but
+controller-runtime serves a self-signed certificate and the chart's
+ServiceMonitor skips certificate verification, so the scraper's token is
+sent without server authentication. Provide a certificate and configure the
+ServiceMonitor TLS settings if that matters in your environment.
 
 ## Status and Event leakage
 

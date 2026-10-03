@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -137,10 +138,10 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 	seenComponent := map[string]bool{}
 	for _, c := range s.Components {
 		if !spinComponentID.MatchString(c) {
-			block("components", Unsupported, "spec.components entry %q is not a valid Spin component ID", c)
+			block("components", Unsupported, "spec.components entry %s is not a valid Spin component ID", quoteName(c))
 		}
 		if seenComponent[c] {
-			block("components", Unsupported, "spec.components lists %q more than once", c)
+			block("components", Unsupported, "spec.components lists %s more than once", quoteName(c))
 		}
 		seenComponent[c] = true
 	}
@@ -148,23 +149,23 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 	seenVar := map[string]bool{}
 	for _, v := range s.Variables {
 		if !spinVariableName.MatchString(v.Name) {
-			block("variables", Unsupported, "variable %q is not a valid Spin variable name (lowercase letters, digits and underscores, starting with a letter)", v.Name)
+			block("variables", Unsupported, "variable %s is not a valid Spin variable name (lowercase letters, digits and underscores, starting with a letter)", quoteName(v.Name))
 		}
 		if seenVar[v.Name] {
-			block("variables", Unsupported, "variable %q is defined more than once", v.Name)
+			block("variables", Unsupported, "variable %s is defined more than once", quoteName(v.Name))
 		}
 		seenVar[v.Name] = true
 		if vf := v.ValueFrom; vf != nil {
 			switch {
 			case vf.SecretKeyRef != nil:
 				block("variables", Unsupported,
-					"variable %q uses secretKeyRef, but the installed KubeSwift SwiftSandbox API does not provide secure secret projection (see docs/upstream/kubeswift-sandbox-secret-projection.md)", v.Name)
+					"variable %s uses secretKeyRef, but the installed KubeSwift SwiftSandbox API does not provide secure secret projection (see docs/upstream/kubeswift-sandbox-secret-projection.md)", quoteName(v.Name))
 			case vf.ConfigMapKeyRef != nil:
 				block("variables", Unsupported,
-					"variable %q uses configMapKeyRef, which the KubeSwift executor does not resolve; use a literal value", v.Name)
+					"variable %s uses configMapKeyRef, which the KubeSwift executor does not resolve; use a literal value", quoteName(v.Name))
 			default:
 				block("variables", Unsupported,
-					"variable %q uses a valueFrom source (fieldRef or resourceFieldRef) that has no meaning inside a sandbox guest", v.Name)
+					"variable %s uses a valueFrom source (fieldRef or resourceFieldRef) that has no meaning inside a sandbox guest", quoteName(v.Name))
 			}
 		}
 	}
@@ -188,7 +189,7 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 
 	for k, v := range s.InvocationLimits {
 		if k != "memory" {
-			block("invocationLimits", Unsupported, "spec.invocationLimits key %q is not supported; only memory is", k)
+			block("invocationLimits", Unsupported, "spec.invocationLimits key %s is not supported; only memory is", quoteName(k))
 			continue
 		}
 		q, err := resource.ParseQuantity(v)
@@ -233,14 +234,14 @@ func analyzeRuntimeConfig(rc *spinv1alpha1.RuntimeConfig, block func(string, Lev
 	}
 	check := func(kind, storeName, typ string, opts []spinv1alpha1.RuntimeConfigOption) {
 		if storeName != "" && !configName.MatchString(storeName) {
-			block("runtimeConfig", Unsupported, "%s name %q is not valid", kind, storeName)
+			block("runtimeConfig", Unsupported, "%s name %s is not valid", kind, quoteName(storeName))
 		}
 		if typ == "" {
-			block("runtimeConfig", Unsupported, "%s %q has no type", kind, storeName)
+			block("runtimeConfig", Unsupported, "%s %s has no type", kind, quoteName(storeName))
 		}
 		seen := map[string]bool{}
 		for _, o := range opts {
-			label := fmt.Sprintf("%s %q option %q", kind, storeName, o.Name)
+			label := fmt.Sprintf("%s %s option %s", kind, quoteName(storeName), quoteName(o.Name))
 			if !configName.MatchString(o.Name) || o.Name == "type" {
 				block("runtimeConfig", Unsupported, "%s: invalid option name", label)
 				continue
@@ -285,7 +286,7 @@ func analyzeRuntimeConfig(rc *spinv1alpha1.RuntimeConfig, block func(string, Lev
 		seen := map[string]bool{}
 		for _, n := range names {
 			if seen[n] {
-				block("runtimeConfig", Unsupported, "%s %q is defined more than once", kind, n)
+				block("runtimeConfig", Unsupported, "%s %s is defined more than once", kind, quoteName(n))
 			}
 			seen[n] = true
 		}
@@ -318,12 +319,41 @@ func IsCredentialOption(n string) bool {
 	return false
 }
 
+// urlHasCredentials reports whether a value looks like a URL carrying
+// credentials, either as user information or as a credential-named query
+// parameter. It fails closed: it inspects the raw text and does not depend on
+// the URL parsing successfully, because Spin's URL parser accepts inputs
+// that Go's rejects.
 func urlHasCredentials(v string) bool {
-	if !strings.Contains(v, "@") || !strings.Contains(v, "://") {
+	_, rest, ok := strings.Cut(v, "://")
+	if !ok {
 		return false
 	}
-	u, err := url.Parse(v)
-	return err == nil && u.User != nil
+	authority, tail := rest, ""
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		authority, tail = rest[:i], rest[i:]
+	}
+	if strings.Contains(authority, "@") {
+		return true
+	}
+	_, query, ok := strings.Cut(tail, "?")
+	if !ok {
+		return false
+	}
+	query, _, _ = strings.Cut(query, "#")
+	for _, pair := range strings.Split(query, "&") {
+		name, _, _ := strings.Cut(pair, "=")
+		if unescaped, err := url.QueryUnescape(name); err == nil {
+			name = unescaped
+		}
+		name = strings.ToLower(name)
+		for _, word := range []string{"token", "password", "passwd", "secret", "auth", "key", "sig", "credential"} {
+			if strings.Contains(name, word) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // validateAppImage accepts any registry reference the OCI client can parse,
@@ -352,13 +382,35 @@ func Blocking(fs []Finding) bool {
 	return false
 }
 
+// maxSummarized bounds how many findings a condition message lists, so a
+// SpinApp with hundreds of invalid entries still gets a status update (the
+// CRD limits condition messages to 32768 bytes).
+const maxSummarized = 5
+
 // Summary joins the messages of blocking findings for a condition message.
 func Summary(fs []Finding) string {
 	var msgs []string
+	n := 0
 	for _, f := range fs {
-		if f.Blocking {
+		if !f.Blocking {
+			continue
+		}
+		n++
+		if len(msgs) < maxSummarized {
 			msgs = append(msgs, f.Message)
 		}
 	}
+	if n > maxSummarized {
+		msgs = append(msgs, fmt.Sprintf("and %d more problems", n-maxSummarized))
+	}
 	return strings.Join(msgs, "; ")
+}
+
+// quoteName quotes a user-provided name for a message, bounded in length.
+func quoteName(s string) string {
+	const maxName = 64
+	if len(s) > maxName {
+		s = s[:maxName] + "..."
+	}
+	return strconv.Quote(s)
 }

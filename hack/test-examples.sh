@@ -162,7 +162,7 @@ test_mcp() {
 main() {
   [[ -x "$SPIN" ]] || { echo "spin not found at $SPIN; run make spin" >&2; exit 1; }
   log "building examples"
-  (cd "$EX" && cargo build --quiet --target wasm32-wasip2 --release)
+  (cd "$EX" && cargo build --locked --quiet --target wasm32-wasip2 --release)
   (cd "$ROOT" && go build -o "$TMP/upstream" ./examples/tools/upstream)
   start_upstream
 

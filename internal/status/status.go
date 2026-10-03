@@ -48,6 +48,19 @@ const (
 // maxDetail bounds text copied from a SwiftSandbox status message.
 const maxDetail = 200
 
+// maxMessage bounds every condition message. The SpinApp CRD allows 32768
+// bytes; staying far below keeps status readable and patches small.
+const maxMessage = 4096
+
+// Truncate shortens s to at most n bytes, marking the cut.
+func Truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	const mark = " ... (truncated)"
+	return s[:n-len(mark)] + mark
+}
+
 // Instance is the status view of one replica.
 type Instance struct {
 	rollout.Instance
@@ -138,7 +151,7 @@ func Compute(in Input) Result {
 
 	r := Result{ReadyReplicas: ready}
 	cond := func(t string, s metav1.ConditionStatus, reason, msg string) metav1.Condition {
-		return metav1.Condition{Type: t, Status: s, Reason: reason, Message: msg, ObservedGeneration: in.Generation}
+		return metav1.Condition{Type: t, Status: s, Reason: reason, Message: Truncate(msg, maxMessage), ObservedGeneration: in.Generation}
 	}
 
 	// Progressing.

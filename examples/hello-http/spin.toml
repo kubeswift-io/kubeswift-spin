@@ -14,5 +14,5 @@ source = "../target/wasm32-wasip2/release/hello_http.wasm"
 allowed_outbound_hosts = []
 
 [component.hello-http.build]
-command = "cargo build --target wasm32-wasip2 --release"
+command = "cargo build --locked --target wasm32-wasip2 --release"
 watch = ["src/**/*.rs", "Cargo.toml"]

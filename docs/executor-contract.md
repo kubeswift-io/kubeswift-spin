@@ -76,9 +76,12 @@ in the SpinApp's namespace.
 Each replica is one SwiftSandbox in the SpinApp's namespace:
 
 - **Name**: `<spinapp>-<ordinal>`, for example `hello-0`. Names longer than
-  58 characters, or containing dots, are truncated and suffixed with a hash
-  of the full SpinApp name so that the result is a valid DNS label of at
-  most 63 characters and never collides with another SpinApp.
+  58 characters, names containing dots, and names that already end in `-`
+  followed by 12 hexadecimal characters are truncated and suffixed with a
+  12-character (48-bit) hash of the full SpinApp name. The result is a valid
+  DNS label of at most 63 characters; because literal names never end in a
+  hash suffix, two SpinApps in a namespace can share a prefix only through a
+  hash collision.
 - **Owner**: a controller owner reference to the SpinApp, so deleting the
   SpinApp deletes its sandboxes through garbage collection. No finalizer is
   used.
@@ -165,7 +168,10 @@ user) and removes the variable from Spin's environment.
 Options whose name denotes a credential (`token`, `password`, `key`,
 `secret`, `credentials`, `connection_string`, and names ending in `_token`,
 `_password`, `_secret`, `_key` or `_credentials`) must be empty or absent.
-URLs with embedded user information are rejected. Spin requires an
+Values that look like URLs with user information, or with a query parameter
+whose name contains `token`, `password`, `passwd`, `secret`, `auth`, `key`,
+`sig` or `credential`, are rejected. The check works on the raw text and
+rejects even when the URL does not parse. Spin requires an
 `auth_token` key for `llm_compute` type `remote_http`; an empty value is
 accepted.
 
@@ -207,9 +213,11 @@ sandboxes; every transition below is covered by unit and envtest tests.
   therefore stops the rollout after one replica.
 - **Failure**: KubeSwift launcher pods never restart, so when Spin exits the
   sandbox becomes `Completed` or `Failed`. kubeswift-spin replaces it after a
-  backoff of 10 seconds, doubling per consecutive failure up to 5 minutes,
-  and resets the backoff once the replica runs again. The backoff state is in
-  memory and restarts from 10 seconds after a controller restart.
+  backoff of 10 seconds, doubling per consecutive failure up to 5 minutes.
+  The count resets only after a replica has run for 10 minutes without
+  failing, because a guest is `Running` before Spin has pulled the
+  application. The backoff state is in memory and restarts from 10 seconds
+  after a controller restart.
 - **Deletion**: sandboxes are deleted with foreground propagation, so a
   replacement with the same name is created only after KubeSwift's launcher
   pod, runtime-intent ConfigMap and NetworkPolicy are gone.
@@ -312,7 +320,10 @@ KubeSwift v0.15.1 has no way to check, so `readyReplicas` stays 0.
 | Available | False | `NetworkUnavailable` | sandboxes run, but readiness cannot be verified and the app cannot be exposed |
 | Available | False | same as Progressing | nothing is running yet |
 
-Messages name fields, variables and objects, never values.
+Messages name fields, variables and objects, never values. A condition
+message lists at most five problems ("and N more problems"), echoes names
+truncated to 64 characters, and is capped at 4096 bytes; Event notes are
+capped at 1000 bytes.
 
 ## Events
 
