@@ -1,0 +1,29 @@
+name: KVM e2e
+
+# Runs test/e2e/kvm-e2e.sh on a self-hosted runner whose kubeconfig points
+# at a cluster with KubeSwift, Spin Operator and kubeswift-spin installed
+# (see test/e2e/README.md). Manual only: public runners have no
+# KubeSwift-capable KVM nodes.
+on:
+  workflow_dispatch:
+    inputs:
+      app_image:
+        description: hello-http Spin OCI artifact reachable from the sandbox
+        required: true
+      namespace:
+        description: namespace with the kubeswift executor and SwiftKernel
+        default: kubeswift-spin-e2e
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: [self-hosted, linux, kvm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run
+        env:
+          APP_IMAGE: ${{ inputs.app_image }}
+          E2E_NAMESPACE: ${{ inputs.namespace }}
+        run: make e2e

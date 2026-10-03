@@ -21,13 +21,16 @@ GOLANGCI_LINT_VERSION ?= v2.14.0
 GOVULNCHECK_VERSION ?= v1.8.0
 SETUP_ENVTEST_VERSION ?= v0.25.2
 KUBECONFORM_VERSION ?= v0.8.0
+ACTIONLINT_VERSION ?= v1.7.12
 ENVTEST_K8S_VERSION ?= 1.34.1
-KIND_K8S_IMAGE ?= kindest/node:v1.34.0
+KIND_K8S_IMAGE ?= kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a
+WITH_SPIN_OPERATOR ?=
 
 GOLANGCI_LINT := $(BIN)/golangci-lint
 GOVULNCHECK := $(BIN)/govulncheck
 SETUP_ENVTEST := $(BIN)/setup-envtest
 KUBECONFORM := $(BIN)/kubeconform
+ACTIONLINT := $(BIN)/actionlint
 SPIN := $(BIN)/spin
 
 EXAMPLES := hello-http request-info outbound-http key-value serverless-ai experimental/mcp
@@ -66,6 +69,10 @@ lint: $(GOLANGCI_LINT) ## Run golangci-lint.
 check-prose: ## Reject em dashes and section signs in project-authored text.
 	hack/check-prose.sh
 
+.PHONY: lint-workflows
+lint-workflows: $(ACTIONLINT) ## Lint GitHub Actions workflows.
+	$(ACTIONLINT) .github/workflows/*.yaml
+
 .PHONY: vulncheck
 vulncheck: $(GOVULNCHECK) ## Scan Go dependencies for known vulnerabilities.
 	$(GOVULNCHECK) ./...
@@ -87,7 +94,7 @@ runtime-test: runtime-image spin ## Test the runtime image with Docker (no Kuber
 
 .PHONY: kind-test
 kind-test: image ## Controller integration test on kind (API reconciliation only, no KVM).
-	IMAGE=$(IMAGE) KIND_K8S_IMAGE=$(KIND_K8S_IMAGE) test/integration/kind-test.sh
+	IMAGE=$(IMAGE) KIND_K8S_IMAGE=$(KIND_K8S_IMAGE) WITH_SPIN_OPERATOR=$(WITH_SPIN_OPERATOR) test/integration/kind-test.sh
 
 .PHONY: e2e
 e2e: ## KVM end-to-end test against the current kubeconfig context. See test/e2e/README.md.
@@ -152,7 +159,7 @@ example-deploy: ## Apply one example SpinApp: make example-deploy EXAMPLE=hello-
 ##@ Quality gate
 
 .PHONY: verify
-verify: fmt-check vet lint check-prose test helm-lint ## Pre-commit gate: formatting, vet, lint, prose, tests, chart.
+verify: fmt-check vet lint lint-workflows check-prose test helm-lint ## Pre-commit gate: formatting, vet, lint, prose, tests, chart.
 
 .PHONY: verify-all
 verify-all: verify vulncheck example-test runtime-test ## verify plus vulnerability scan, example tests and runtime image tests.
@@ -167,6 +174,9 @@ $(GOVULNCHECK):
 
 $(SETUP_ENVTEST):
 	GOBIN=$(BIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)
+
+$(ACTIONLINT):
+	GOBIN=$(BIN) go install github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 
 $(KUBECONFORM):
 	GOBIN=$(BIN) go install github.com/yannh/kubeconform/cmd/kubeconform@$(KUBECONFORM_VERSION)

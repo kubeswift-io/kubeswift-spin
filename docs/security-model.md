@@ -149,19 +149,26 @@ application artifact, which are not supported.
 - **Spin**: the static release binary is downloaded during the image build
   and verified against SHA-256 digests pinned in `runtime/Dockerfile`, taken
   from the release's `checksums-v4.2.1.txt`. A replaced release asset fails
-  the build. The release archive also contains a Sigstore signature
-  (`spin.sig`, `crt.pem`); verifying it is part of the documented update
-  procedure ([runtime-image.md](runtime-image.md#updating-spin)), not of
-  every build.
+  the build. `hack/verify-spin-release.sh` additionally checks the pins
+  against the published checksums and verifies the Sigstore signature of
+  each binary against the identity of Spin's release workflow for the tag;
+  CI runs it on every change.
 - **Base images** are pinned by digest. **Go modules** are pinned in
   `go.sum`; **Rust crates** in `examples/Cargo.lock`, with `spin-sdk` pinned
-  to an exact version. **GitHub Actions** are pinned by commit SHA.
-- **CI** runs `govulncheck`, golangci-lint (including gosec), Trivy image
-  scans, and generates SBOMs. The release workflow builds images with
-  BuildKit provenance and SBOM attestations, signs images with cosign
-  keyless signing, and publishes the chart as an OCI artifact. These
-  workflows are defined in `.github/workflows`; they have not run yet
-  because the repository has not been published.
+  to an exact version. **GitHub Actions** are pinned by commit SHA, and
+  Dependabot proposes updates.
+- **CI** (`.github/workflows/ci.yaml`) runs `govulncheck`, golangci-lint
+  (including gosec), actionlint, Grype image scans that fail on fixable
+  high or critical vulnerabilities, and generates SPDX SBOMs for both
+  images.
+- **Releases** (`.github/workflows/release.yaml`) run only for tags in the
+  canonical repository after approval of the `release` environment. They
+  build multi-architecture images with BuildKit SBOM and provenance
+  attestations, sign images and the chart with cosign keyless signing, and
+  pin the image digests into the published chart.
+
+None of these workflows has run yet, because the repository has not been
+published. Locally, the equivalent `make` targets have been run.
 
 ## Application artifacts
 
@@ -254,7 +261,7 @@ They never contain values of variables or runtime-config options.
   KubeSwift runtime-intent ConfigMaps.
 - `open` network mode grants unrestricted egress.
 - The KVM execution path has not been end-to-end tested for this release.
-- The release supply-chain workflows have not run yet.
+- The CI and release workflows have not run on GitHub yet.
 
 ## Reporting vulnerabilities
 
