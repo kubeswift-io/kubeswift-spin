@@ -16,7 +16,7 @@ helm install kubeswift-spin charts/kubeswift-spin --namespace kubeswift-spin-sys
 | `image.tag` | chart appVersion | controller image tag |
 | `image.digest` | `""` | pull by digest (`sha256:...`); overrides the tag |
 | `runtimeImage.repository` | `ghcr.io/kubeswift-io/kubeswift-spin-runtime` | runtime rootfs booted by every sandbox |
-| `runtimeImage.tag` / `runtimeImage.digest` | chart appVersion / `""` | as above |
+| `runtimeImage.tag` / `runtimeImage.digest` | `spin-4.2.1-r1` / `""` | versioned independently of the controller (`runtime/VERSION`); changing it replaces every replica using it |
 | `replicaCount` | `1` | controller replicas; leader election is always on |
 | `controller.defaultCPU` | `"1"` | CPU when a SpinApp sets none |
 | `controller.defaultMemory` | `512Mi` | memory when a SpinApp sets none |

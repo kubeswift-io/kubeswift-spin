@@ -129,15 +129,15 @@ func TestReadinessGatesRolloutWhenObservable(t *testing.T) {
 	}
 }
 
-func TestStaleAndBlocked(t *testing.T) {
+func TestStaleInstanceIsRemoved(t *testing.T) {
 	stale := inst(0, "r1", Running)
 	stale.Name, stale.Stale = "app-renamed", true
-	p := Compute(Input{Replicas: 2, Revision: "r1", Instances: []Instance{stale}, Blocked: map[int]bool{1: true}})
+	p := Compute(Input{Replicas: 2, Revision: "r1", Instances: []Instance{stale}})
 	if !reflect.DeepEqual(deletions(p), map[string]Reason{"app-renamed": ReasonStale}) {
 		t.Fatalf("delete %+v", p.Delete)
 	}
-	if !reflect.DeepEqual(p.Create, []int{0}) || !p.Waiting {
-		t.Fatalf("create %v waiting %v", p.Create, p.Waiting)
+	if !reflect.DeepEqual(p.Create, []int{0, 1}) {
+		t.Fatalf("create %v", p.Create)
 	}
 }
 

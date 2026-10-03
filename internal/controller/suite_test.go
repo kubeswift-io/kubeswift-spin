@@ -148,10 +148,11 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 			DefaultCPU:    resource.MustParse("1"),
 			DefaultMemory: resource.MustParse("512Mi"),
 		},
-		Options:     compatibility.Options{MaxReplicas: o.maxReplicas, Resources: translate.DefaultResourcePolicy()},
-		Detector:    o.detector,
-		PoolsServed: true,
-		Backoff:     b,
+		Options:        compatibility.Options{MaxReplicas: o.maxReplicas, Resources: translate.DefaultResourcePolicy()},
+		Detector:       o.detector,
+		PoolsServed:    true,
+		Backoff:        b,
+		WaitingRequeue: 500 * time.Millisecond,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := r.SetupWithManager(ctx, mgr); err != nil {

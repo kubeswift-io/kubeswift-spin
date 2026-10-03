@@ -77,7 +77,9 @@ missing.
 
 No images or chart have been published yet. Build and push them to a
 registry your cluster can pull from (`make` targets are listed by
-`make help`):
+`make help`). The runtime image has its own version, read from
+`runtime/VERSION` (currently `spin-4.2.1-r1`), so that controller upgrades
+do not replace running replicas:
 
 ```bash
 make image runtime-image REGISTRY=<registry> VERSION=v0.1.0-dev
@@ -88,7 +90,7 @@ docker push <registry>/kubeswift-spin:v0.1.0-dev
 ```
 
 ```bash
-docker push <registry>/kubeswift-spin-runtime:v0.1.0-dev
+docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r1
 ```
 
 KubeSwift pulls the runtime image on the nodes; if the registry is private,
@@ -101,7 +103,7 @@ Install the chart and create a `kubeswift` executor in namespace `demo`:
 helm install kubeswift-spin charts/kubeswift-spin \
   --namespace kubeswift-spin-system --create-namespace \
   --set image.repository=<registry>/kubeswift-spin --set image.tag=v0.1.0-dev \
-  --set runtimeImage.repository=<registry>/kubeswift-spin-runtime --set runtimeImage.tag=v0.1.0-dev \
+  --set runtimeImage.repository=<registry>/kubeswift-spin-runtime \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
 

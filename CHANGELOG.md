@@ -27,7 +27,9 @@ Initial implementation, targeting v0.1.0.
   conditions.
 - Startup checks for required APIs and RBAC; OpenAPI-based detection of
   sandbox port exposure.
-- Runtime image with Spin v4.2.1 and a privilege-dropping entrypoint.
+- Runtime image `spin-4.2.1-r1` with Spin v4.2.1 and a privilege-dropping
+  entrypoint, versioned independently of the controller so that controller
+  upgrades do not replace running replicas.
 - Helm chart, Prometheus metrics, example Spin applications, and upstream
   KubeSwift requirement proposals.
 

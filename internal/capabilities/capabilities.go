@@ -117,36 +117,43 @@ type OpenAPIDetector struct {
 
 	mu      sync.Mutex
 	cached  Sandbox
+	lastErr error
 	fetched time.Time
 }
 
 const sandboxSchemaName = "io.kubeswift.sandbox.v1alpha1.SwiftSandbox"
 
 // Sandbox returns the detected features.
-func (d *OpenAPIDetector) Sandbox(ctx context.Context) (Sandbox, error) {
+// Failures are cached for the TTL too, so a cluster without OpenAPI v3 does
+// not cost a discovery round trip on every reconcile.
+func (d *OpenAPIDetector) Sandbox(_ context.Context) (Sandbox, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.fetched.IsZero() && time.Since(d.fetched) < d.TTL {
-		return d.cached, nil
+		return d.cached, d.lastErr
 	}
+	s, err := d.fetch()
+	d.fetched, d.lastErr = time.Now(), err
+	if err == nil {
+		d.cached = s
+	}
+	return d.cached, err
+}
+
+func (d *OpenAPIDetector) fetch() (Sandbox, error) {
 	paths, err := d.Discovery.OpenAPIV3().Paths()
 	if err != nil {
-		return d.cached, fmt.Errorf("read OpenAPI v3 paths: %w", err)
+		return Sandbox{}, fmt.Errorf("read OpenAPI v3 paths: %w", err)
 	}
 	gv, ok := paths["apis/sandbox.kubeswift.io/v1alpha1"]
 	if !ok {
-		return d.cached, fmt.Errorf("OpenAPI v3 schema for sandbox.kubeswift.io/v1alpha1 is not published")
+		return Sandbox{}, fmt.Errorf("OpenAPI v3 schema for sandbox.kubeswift.io/v1alpha1 is not published")
 	}
 	raw, err := gv.Schema("application/json")
 	if err != nil {
-		return d.cached, fmt.Errorf("read sandbox.kubeswift.io OpenAPI schema: %w", err)
+		return Sandbox{}, fmt.Errorf("read sandbox.kubeswift.io OpenAPI schema: %w", err)
 	}
-	s, err := ParseSandboxSchema(raw)
-	if err != nil {
-		return d.cached, err
-	}
-	d.cached, d.fetched = s, time.Now()
-	return s, nil
+	return ParseSandboxSchema(raw)
 }
 
 type schemaNode struct {

@@ -11,3 +11,4 @@
 | [0007](0007-warm-pools.md) | Warm pools are optional capacity, checked for compatibility |
 | [0008](0008-executor-profiles-without-crd.md) | Executor profiles as labels and annotations, no new CRD |
 | [0009](0009-replicas-status-and-deletion.md) | StatefulSet-like replicas, owned status fields, no finalizer |
+| [0010](0010-runtime-image-versioning.md) | Version the runtime image independently of the controller |

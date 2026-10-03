@@ -46,7 +46,7 @@ spec:
             {{- else }}
             - --metrics-bind-address=0
             {{- end }}
-            - --runtime-image={{ include "kubeswift-spin.imageRef" (list .Values.runtimeImage .Chart.AppVersion) }}
+            - --runtime-image={{ include "kubeswift-spin.imageRef" (list .Values.runtimeImage (required "runtimeImage.tag or runtimeImage.digest is required" (.Values.runtimeImage.tag | default .Values.runtimeImage.digest))) }}
             - --default-cpu={{ .Values.controller.defaultCPU }}
             - --default-memory={{ .Values.controller.defaultMemory }}
             - --min-memory={{ .Values.controller.minMemory }}

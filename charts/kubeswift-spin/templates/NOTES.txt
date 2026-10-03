@@ -1,6 +1,6 @@
 kubeswift-spin {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
 
-Runtime image: {{ include "kubeswift-spin.imageRef" (list .Values.runtimeImage .Chart.AppVersion) }}
+Runtime image: {{ include "kubeswift-spin.imageRef" (list .Values.runtimeImage .Values.runtimeImage.tag) }}
 
 Executors created:
 {{- range $e := .Values.executors }}{{ range $ns := $e.namespaces }}

@@ -374,17 +374,37 @@ func TestExecutorDeletionKeepsWorkloads(t *testing.T) {
 func TestInvalidExecutorBlocks(t *testing.T) {
 	startManager(t, harnessOpts{})
 	ns := newNamespace(t)
-	bad := managedExecutor(ns, "kubeswift", map[string]string{executor.AnnNetworkMode: "none"})
-	bad.Spec.CreateDeployment = true
+	bad := managedExecutor(ns, "kubeswift", map[string]string{executor.AnnNetworkMode: "none", executor.Prefix + "typo": "x"})
 	mustCreate(t, bad, spinApp(ns, "hello", "kubeswift", 1))
 	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonExecutorInvalid)
 	msg := findCond(a, status.TypeProgressing).Message
-	if !strings.Contains(msg, "createDeployment must be false") || !strings.Contains(msg, "network-mode=none") {
+	if !strings.Contains(msg, "network-mode=none") || !strings.Contains(msg, "unknown annotation") {
 		t.Fatalf("message %q", msg)
 	}
 	if n := len(listSandboxes(t, ns)); n != 0 {
 		t.Fatalf("%d sandboxes for an invalid executor", n)
 	}
+}
+
+// A labelled executor with createDeployment: true is Spin Operator's to
+// realize, and Spin Operator rewrites the status of its SpinApps. kubeswift-spin
+// must report the problem without becoming a second status writer.
+func TestCreateDeploymentExecutorStatusLeftToSpinOperator(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	bad := managedExecutor(ns, "kubeswift", nil)
+	bad.Spec.CreateDeployment = true
+	mustCreate(t, bad, spinApp(ns, "hello", "kubeswift", 1))
+	expectEvent(t, ns, "hello", EventExecutorInvalid)
+	consistently(t, "no status and no sandboxes", time.Second, func() error {
+		if a := getApp(t, ns, "hello"); len(a.Status.Conditions) != 0 || a.Status.ActiveScheduler != "" {
+			return fmt.Errorf("status written: %+v", a.Status)
+		}
+		if n := len(listSandboxes(t, ns)); n != 0 {
+			return fmt.Errorf("%d sandboxes", n)
+		}
+		return nil
+	})
 }
 
 func TestMultipleNamespacesAndProfiles(t *testing.T) {
@@ -436,6 +456,23 @@ func TestConflictingSandboxIsNeverAdopted(t *testing.T) {
 		}
 		return nil
 	})
+
+	// Removing the squatter is noticed without any event on the SpinApp.
+	if err := testClient.Delete(ctx, getSandbox(t, ns, "hello-0")); err != nil {
+		t.Fatal(err)
+	}
+	app := getApp(t, ns, "hello")
+	eventually(t, "hello-0 recreated and owned", func() error {
+		var sb sandboxv1alpha1.SwiftSandbox
+		if err := testClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "hello-0"}, &sb); err != nil {
+			return err
+		}
+		if !metav1.IsControlledBy(&sb, app) {
+			return fmt.Errorf("hello-0 not owned yet")
+		}
+		return nil
+	})
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxCreating)
 }
 
 func TestStaleOwnedSandboxIsRemoved(t *testing.T) {

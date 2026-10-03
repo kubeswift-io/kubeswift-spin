@@ -15,3 +15,12 @@ render | check
 render --set metrics.secure=true --set metrics.serviceMonitor.enabled=true | check
 render --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
        --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 | check
+
+# The chart's default runtime image must be the version in runtime/VERSION.
+want="$(cat runtime/VERSION)"
+got="$(python3 -c "import yaml; print(yaml.safe_load(open('charts/kubeswift-spin/values.yaml'))['runtimeImage']['tag'])")"
+if [[ "$got" != "$want" ]]; then
+  echo "charts/kubeswift-spin/values.yaml runtimeImage.tag is $got, runtime/VERSION is $want" >&2
+  exit 1
+fi
+echo "runtime image version: $want"

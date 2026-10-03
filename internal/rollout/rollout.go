@@ -63,9 +63,6 @@ type Input struct {
 	ReadinessObservable bool
 	// InBackoff holds ordinals whose failed replica must not be replaced yet.
 	InBackoff map[int]bool
-	// Blocked holds ordinals whose name is occupied by an object the SpinApp
-	// does not own. Those ordinals are never created.
-	Blocked map[int]bool
 }
 
 // Deletion is one replica to delete.
@@ -81,6 +78,7 @@ type Plan struct {
 	Delete []Deletion
 	// Waiting is true when work remains that this plan does not perform yet
 	// (deletions in flight, backoff, or a rollout gated on availability).
+	// The reconciler requeues as a safety net in that case.
 	Waiting bool
 }
 
@@ -117,10 +115,6 @@ func Compute(in Input) Plan {
 		inst, ok := byOrdinal[ord]
 		switch {
 		case !ok:
-			if in.Blocked[ord] {
-				p.Waiting = true
-				continue
-			}
 			p.Create = append(p.Create, ord)
 		case inst.Deleting:
 			// Recreated once the old object is gone.

@@ -59,9 +59,13 @@ const (
 
 // SpinAppReconciler realizes SpinApps as SwiftSandboxes.
 type SpinAppReconciler struct {
-	Client   client.Client
-	Scheme   *runtime.Scheme
-	Recorder events.EventRecorder
+	Client client.Client
+	// APIReader reads directly from the API server. It is used to tell a
+	// genuine name conflict from the controller's own sandbox that the
+	// informer cache has not seen yet.
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
+	Recorder  events.EventRecorder
 
 	Defaults executor.Defaults
 	Options  compatibility.Options
@@ -72,6 +76,10 @@ type SpinAppReconciler struct {
 	Metrics *metrics.Tracker
 	Backoff *Backoff
 	Now     func() time.Time
+	// WaitingRequeue is how long to wait before rechecking a SpinApp whose
+	// rollout waits on something no watch reports, such as a foreign object
+	// occupying a sandbox name. Defaults to 30 seconds.
+	WaitingRequeue time.Duration
 }
 
 // SetupWithManager registers the controller, its watches and the field index.
@@ -84,6 +92,12 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	}
 	if r.Metrics == nil {
 		r.Metrics = metrics.NewTracker()
+	}
+	if r.WaitingRequeue == 0 {
+		r.WaitingRequeue = 30 * time.Second
+	}
+	if r.APIReader == nil {
+		r.APIReader = mgr.GetAPIReader()
 	}
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &spinv1alpha1.SpinApp{}, ExecutorIndex,
 		func(o client.Object) []string {
@@ -216,6 +230,16 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 
 	profile, perr := executor.Parse(&exec, r.Defaults)
 	if perr != nil {
+		if exec.Spec.CreateDeployment {
+			// Spin Operator owns the SpinApp status of executors with
+			// createDeployment: true and rewrites it with a full update, so
+			// writing it here would make two controllers overwrite each
+			// other. Report through an Event only; existing sandboxes are
+			// left running.
+			r.event(&app, corev1.EventTypeWarning, EventExecutorInvalid, "Reconcile", "%s", perr.Error())
+			r.forget(key)
+			return ctrl.Result{}, nil
+		}
 		blocker := &status.Blocker{Reason: status.ReasonExecutorInvalid, Message: perr.Error()}
 		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, EventExecutorInvalid)
 	}
@@ -274,20 +298,33 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	}
 
 	var blocker *status.Blocker
+	requeue := plan.Waiting
 	for _, ord := range plan.Create {
 		sb := translate.NewSandbox(&app, profile.ExecutorName, tmpl, ord)
 		if err := controllerutil.SetControllerReference(&app, sb, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
 		if err := r.Client.Create(ctx, sb); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				// The name is taken by an object this SpinApp does not
-				// control (it would be in owned otherwise). Never adopt it.
-				blocker = &status.Blocker{Reason: status.ReasonSandboxConflict,
-					Message: fmt.Sprintf("SwiftSandbox %s already exists and is not controlled by this SpinApp; delete or rename it", sb.Name)}
+			if !apierrors.IsAlreadyExists(err) {
+				return ctrl.Result{}, fmt.Errorf("create SwiftSandbox %s: %w", sb.Name, err)
+			}
+			requeue = true
+			mine, err := r.controlledByApp(ctx, &app, sb.Name)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			if mine {
+				// Created by an earlier reconcile; the cache has not
+				// caught up yet.
 				continue
 			}
-			return ctrl.Result{}, fmt.Errorf("create SwiftSandbox %s: %w", sb.Name, err)
+			// The name is taken by an object this SpinApp does not control.
+			// Never adopt it. Such an object has no owner reference to this
+			// SpinApp and may not even be cached, so its removal triggers
+			// no event: requeue to notice when the name is free.
+			blocker = &status.Blocker{Reason: status.ReasonSandboxConflict,
+				Message: fmt.Sprintf("SwiftSandbox %s already exists and is not controlled by this SpinApp; delete or rename it", sb.Name)}
+			continue
 		}
 		metrics.SandboxCreations.Inc()
 		logger.Info("created sandbox", "sandbox", sb.Name, "revision", tmpl.Revision)
@@ -300,7 +337,25 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	if retryIn != "" {
 		return ctrl.Result{RequeueAfter: r.Backoff.NextDelay(key, now)}, nil
 	}
+	if requeue {
+		// Watches normally trigger the next step (owned sandbox events);
+		// this is a bounded safety net for conflicts and in-flight work.
+		return ctrl.Result{RequeueAfter: r.WaitingRequeue}, nil
+	}
 	return ctrl.Result{}, nil
+}
+
+// controlledByApp reads a sandbox from the API server, bypassing the cache,
+// and reports whether this SpinApp controls it.
+func (r *SpinAppReconciler) controlledByApp(ctx context.Context, app *spinv1alpha1.SpinApp, name string) (bool, error) {
+	var sb sandboxv1alpha1.SwiftSandbox
+	if err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: name}, &sb); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read SwiftSandbox %s: %w", name, err)
+	}
+	return metav1.IsControlledBy(&sb, app), nil
 }
 
 // exposure reports whether replicas can be put behind a Service. This build
@@ -328,7 +383,7 @@ func (r *SpinAppReconciler) isNewGeneration(app *spinv1alpha1.SpinApp) bool {
 func (r *SpinAppReconciler) checkPool(ctx context.Context, app *spinv1alpha1.SpinApp, p *executor.Profile, tmpl *translate.Template) (*status.Blocker, error) {
 	if !r.PoolsServed {
 		return &status.Blocker{Reason: status.ReasonWarmPoolIncompatible,
-			Message: fmt.Sprintf("executor %q selects SwiftSandboxPool %q, but the SwiftSandboxPool API is not installed", p.ExecutorName, p.SandboxPool)}, nil
+			Message: fmt.Sprintf("executor %q selects SwiftSandboxPool %q, but the SwiftSandboxPool API was not installed when kubeswift-spin started; install it and restart the controller", p.ExecutorName, p.SandboxPool)}, nil
 	}
 	var pool sandboxv1alpha1.SwiftSandboxPool
 	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: p.SandboxPool}, &pool); err != nil {

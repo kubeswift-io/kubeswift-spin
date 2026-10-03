@@ -32,7 +32,10 @@ kubectl -n <namespace> get spinappexecutor <executor> -o yaml
 ```
 
 It needs the label `spin.kubeswift.io/managed-by: kubeswift-spin` and
-`spec.createDeployment: false`, in the same namespace as the SpinApp.
+`spec.createDeployment: false`, in the same namespace as the SpinApp. A
+labelled executor with `createDeployment: true` produces only an
+`ExecutorInvalid` Event: Spin Operator realizes such executors and owns
+their SpinApp status.
 
 ## Progressing=False
 
@@ -41,7 +44,7 @@ It needs the label `spin.kubeswift.io/managed-by: kubeswift-spin` and
 | `UnsupportedConfiguration` | The message names each field. Remove it or see [compatibility.md](compatibility.md). Secret-backed values, `imagePullSecrets`, `volumes`, `podLabels`, `serviceAccountName` and `enableAutoscaling` are not supported. |
 | `ExecutorInvalid` | The message lists every problem with the executor: `createDeployment: true`, `deploymentConfig` fields, unknown `spin.kubeswift.io/` annotations, network mode `none`, invalid values. |
 | `ExecutorNotFound` | The executor was deleted. Existing sandboxes keep running; recreate the executor. |
-| `WarmPoolIncompatible` | The pool is missing or its shape differs; the message names each mismatching field. Align the pool with the runtime image, CPU, memory and network mode the SpinApp gets. |
+| `WarmPoolIncompatible` | The pool is missing or its shape differs; the message names each mismatching field. Align the pool with the runtime image, CPU, memory and network mode the SpinApp gets. If the message says the SwiftSandboxPool API was not installed at startup, restart the controller. |
 | `SandboxConflict` | A SwiftSandbox with the needed name exists and is not owned by the SpinApp. Delete or rename it. |
 | `RuntimeImageUnavailable` | KubeSwift could not pull, verify or materialize the runtime image. Check the image reference, pull secret and cosign key. |
 | `SandboxFailed` | Spin exited or the guest failed. Read the guest console (below). The replica is replaced after a backoff of up to 5 minutes. |

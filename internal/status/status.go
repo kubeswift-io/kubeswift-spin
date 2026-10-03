@@ -3,10 +3,12 @@
 // readyReplicas.
 //
 // kubeswift-spin owns these fields only for SpinApps whose executor it
-// manages. Spin Operator writes no status at all when an executor has
-// createDeployment: false (verified against v0.6.1), so there is no second
-// writer to coordinate with. The controller still patches with an optimistic
-// lock and preserves conditions of any other type.
+// manages and that has createDeployment: false. Spin Operator writes no
+// status at all for such executors (verified against v0.6.1), so there is no
+// second writer to coordinate with. When a labelled executor wrongly sets
+// createDeployment: true, Spin Operator owns the status and kubeswift-spin
+// reports the problem through Events only. The controller still patches with
+// an optimistic lock and preserves conditions of any other type.
 package status
 
 import (

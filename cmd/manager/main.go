@@ -216,6 +216,10 @@ func checkPermissions(ctx context.Context, cs kubernetes.Interface, namespaces [
 		{"core.spinkube.dev", "spinapps", "", "list"},
 		{"core.spinkube.dev", "spinapps", "", "watch"},
 		{"core.spinkube.dev", "spinapps", "status", "patch"},
+		// blockOwnerDeletion on sandbox owner references needs this when
+		// the OwnerReferencesPermissionEnforcement admission plugin is on.
+		{"core.spinkube.dev", "spinapps", "finalizers", "update"},
+		{"events.k8s.io", "events", "", "create"},
 		{"core.spinkube.dev", "spinappexecutors", "", "list"},
 		{"core.spinkube.dev", "spinappexecutors", "", "watch"},
 		{"sandbox.kubeswift.io", "swiftsandboxes", "", "list"},

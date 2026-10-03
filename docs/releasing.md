@@ -16,7 +16,13 @@ repository settings.
    the rendered SwiftSandbox spec changed.
 4. `charts/kubeswift-spin/Chart.yaml` `appVersion` and the example manifest
    tags match the version.
-5. Tag and push:
+5. If Spin, the entrypoint, `internal/runtimecontract` or the runtime base
+   image changed since the last release, bump `runtime/VERSION` (for example
+   `spin-4.2.1-r2`) and `runtimeImage.tag` in the chart values, and add an
+   upgrade note: every replica using the default runtime image is replaced.
+   Otherwise leave both unchanged, so the release does not replace running
+   replicas.
+6. Tag and push:
 
    ```bash
    git tag -s v0.1.0 -m v0.1.0
@@ -31,7 +37,7 @@ repository settings.
 | Artifact | Location |
 |---|---|
 | controller image | `ghcr.io/kubeswift-io/kubeswift-spin:<tag>` (amd64, arm64) |
-| runtime image | `ghcr.io/kubeswift-io/kubeswift-spin-runtime:<tag>` (amd64, arm64) |
+| runtime image | `ghcr.io/kubeswift-io/kubeswift-spin-runtime:<runtime/VERSION>` (amd64, arm64), built only when that tag does not exist yet |
 | Helm chart | `oci://ghcr.io/kubeswift-io/charts/kubeswift-spin`, version without the `v` |
 | example artifacts | `ghcr.io/kubeswift-io/kubeswift-spin-examples/<app>:<tag>` |
 | GitHub release | draft, with image digests |
@@ -42,7 +48,7 @@ attestations. The packaged chart pins both images by digest.
 Verify an image signature:
 
 ```bash
-cosign verify ghcr.io/kubeswift-io/kubeswift-spin-runtime:v0.1.0 \
+cosign verify ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v'
 ```

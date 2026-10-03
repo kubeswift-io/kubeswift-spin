@@ -14,8 +14,10 @@ kubeswift-spin realizes a SpinApp when the SpinAppExecutor named in
 2. has `spec.createDeployment: false`.
 
 The executor name is never used to infer ownership. An executor with the
-label and `createDeployment: true` is reported as invalid instead of
-realized, because Spin Operator would also create a Deployment.
+label and `createDeployment: true` is not realized, because Spin Operator
+creates a Deployment for it and owns the SpinApp status. kubeswift-spin
+records an `ExecutorInvalid` Warning Event on each affected SpinApp and does
+not write their status, so the two controllers never overwrite each other.
 
 SpinApps whose executor lacks the label are ignored entirely: kubeswift-spin
 creates nothing and writes no status for them.
@@ -214,8 +216,10 @@ sandboxes; every transition below is covered by unit and envtest tests.
 - **Stale sandboxes**: an owned sandbox whose name does not match its
   ordinal label is deleted.
 - **Conflicts**: if a sandbox name is taken by an object the SpinApp does not
-  control, that ordinal is skipped and `Progressing` reports
-  `SandboxConflict`.
+  control (checked with a direct API read, not the cache), that ordinal is
+  not created and `Progressing` reports `SandboxConflict`. The SpinApp is
+  rechecked every 30 seconds, so the replica is created once the name is
+  free.
 
 While a SpinApp has unsupported configuration, an invalid executor or an
 incompatible warm pool, kubeswift-spin creates and deletes nothing for it;
@@ -232,16 +236,23 @@ these replaces the replicas (one at a time, as above):
 - the executor profile: runtime image, pull secret, verify key, network
   mode, rootfs mode, kernel profile, node selector, pool, default CPU or
   memory (when used), OpenTelemetry endpoints
-- a different executor that kubeswift-spin manages
+- a different executor that kubeswift-spin manages, when its profile renders
+  a different spec (the `spin.kubeswift.io/executor` label of existing
+  sandboxes is not updated when the spec is identical)
 
 These do not replace replicas:
 
 - `spec.replicas`, labels and annotations on the SpinApp,
   `spec.serviceAnnotations`
 - restarting or upgrading the kubeswift-spin controller, as long as the new
-  version renders the same sandbox spec. A release that changes the
-  rendered spec (for example the Spin command line or the entrypoint
-  contract) rolls every replica and says so in [CHANGELOG.md](../CHANGELOG.md).
+  version renders the same sandbox spec. The runtime image has its own
+  version (`runtime/VERSION`, chart value `runtimeImage.tag`) and changes
+  only when Spin, the entrypoint or the runtime contract changes, so a
+  controller release normally keeps it. A release that changes the rendered
+  spec (a new runtime image, a different Spin command line) rolls every
+  replica and says so in [CHANGELOG.md](../CHANGELOG.md). A golden test
+  (`internal/translate/golden_test.go`) fails when the rendered spec changes,
+  so this cannot happen by accident.
 
 ## Executor changes
 
@@ -251,6 +262,7 @@ These do not replace replicas:
 | The managed-by label is removed from the executor | Same as above, for every SpinApp using it. |
 | The executor is deleted or missing | Sandboxes are kept; `Progressing=False`, reason `ExecutorNotFound`. Spin Operator normally blocks executor deletion while SpinApps use it. |
 | The executor becomes invalid | Sandboxes are kept; `Progressing=False`, reason `ExecutorInvalid`. |
+| The executor is labelled but sets `createDeployment: true` | Sandboxes are kept; an `ExecutorInvalid` Event is recorded, and status is left to Spin Operator, which realizes such executors. |
 
 ## Warm pools
 
@@ -264,7 +276,10 @@ CPU, memory, rootfs mode, kernel profile or node selector, so a slot of a
 different shape could be claimed. kubeswift-spin therefore checks the full
 shape itself and refuses to create sandboxes for an incompatible or missing
 pool (`Progressing=False`, reason `WarmPoolIncompatible`, with the
-mismatching fields in the message). When the pool is compatible but has no
+mismatching fields in the message). An unset kernel profile is compared as
+`sandbox`, KubeSwift's default. Whether the SwiftSandboxPool API exists is
+discovered at controller startup; installing it later requires restarting
+the controller. When the pool is compatible but has no
 free slot, KubeSwift's own cold fallback applies and is recorded by KubeSwift
 as a `PoolColdFallback` Event on the SwiftSandbox. The pool is a capacity
 mechanism only: kubeswift-spin still creates one SwiftSandbox per replica.

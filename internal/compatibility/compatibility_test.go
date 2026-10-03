@@ -272,3 +272,49 @@ func TestFindingsAreDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// handledNested lists, per nested upstream type, every field that analysis
+// and translation handle. A field added upstream inside these types (for
+// example a new runtimeConfig table) fails this test until it is handled or
+// explicitly rejected, so it cannot be dropped silently.
+var handledNested = map[reflect.Type][]string{
+	reflect.TypeOf(spinv1alpha1.RuntimeConfig{}):          {"loadFromSecret", "sqliteDatabases", "keyValueStores", "llmCompute"},
+	reflect.TypeOf(spinv1alpha1.KeyValueStoreConfig{}):    {"name", "type", "options"},
+	reflect.TypeOf(spinv1alpha1.SqliteDatabaseConfig{}):   {"name", "type", "options"},
+	reflect.TypeOf(spinv1alpha1.LLMComputeConfig{}):       {"type", "options"},
+	reflect.TypeOf(spinv1alpha1.RuntimeConfigOption{}):    {"name", "value", "valueFrom"},
+	reflect.TypeOf(spinv1alpha1.RuntimeConfigVarSource{}): {"configMapKeyRef", "secretKeyRef"},
+	reflect.TypeOf(spinv1alpha1.SpinVar{}):                {"name", "value", "valueFrom"},
+	reflect.TypeOf(spinv1alpha1.Resources{}):              {"limits", "requests"},
+	reflect.TypeOf(spinv1alpha1.HealthChecks{}):           {"readiness", "liveness"},
+	reflect.TypeOf(spinv1alpha1.HealthProbe{}): {"httpGet", "initialDelaySeconds", "timeoutSeconds",
+		"periodSeconds", "successThreshold", "failureThreshold"},
+	reflect.TypeOf(spinv1alpha1.HTTPHealthProbe{}):     {"path", "httpHeaders"},
+	reflect.TypeOf(spinv1alpha1.SpinAppExecutorSpec{}): {"createDeployment", "deploymentConfig"},
+	reflect.TypeOf(spinv1alpha1.ExecutorDeploymentConfig{}): {"runtimeClassName", "spinImage", "caCertSecret",
+		"installDefaultCACerts", "otel"},
+	reflect.TypeOf(spinv1alpha1.OtelConfig{}): {"exporter_otlp_endpoint", "exporter_otlp_traces_endpoint",
+		"exporter_otlp_metrics_endpoint", "exporter_otlp_logs_endpoint"},
+}
+
+func TestNestedUpstreamFieldsAreHandled(t *testing.T) {
+	for typ, fields := range handledNested {
+		want := map[string]bool{}
+		for _, f := range fields {
+			want[f] = true
+		}
+		got := map[string]bool{}
+		for i := 0; i < typ.NumField(); i++ {
+			name := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
+			got[name] = true
+			if !want[name] {
+				t.Errorf("%s.%s is not handled by kubeswift-spin; classify it in internal/compatibility", typ.Name(), name)
+			}
+		}
+		for f := range want {
+			if !got[f] {
+				t.Errorf("%s has no field %q any more; update handledNested and the translation", typ.Name(), f)
+			}
+		}
+	}
+}

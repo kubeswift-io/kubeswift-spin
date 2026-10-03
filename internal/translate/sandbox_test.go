@@ -365,3 +365,15 @@ func TestPoolMismatches(t *testing.T) {
 		t.Fatalf("defaults treated as mismatches: %v", mm)
 	}
 }
+
+func TestPoolDefaultKernelIsNormalized(t *testing.T) {
+	tmpl, _ := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy())
+	pool := &sandboxv1alpha1.SwiftSandboxPool{Spec: sandboxv1alpha1.SwiftSandboxPoolSpec{
+		Image:            runtimeImage,
+		Memory:           resource.MustParse("512Mi"),
+		KernelProfileRef: &corev1.LocalObjectReference{Name: "sandbox"},
+	}}
+	if mm := PoolMismatches(&tmpl.Spec, pool); len(mm) != 0 {
+		t.Fatalf("explicit default kernel treated as a mismatch: %v", mm)
+	}
+}

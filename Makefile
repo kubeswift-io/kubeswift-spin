@@ -13,7 +13,11 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 REGISTRY ?= ghcr.io/kubeswift-io
 IMAGE ?= $(REGISTRY)/kubeswift-spin:$(VERSION)
-RUNTIME_IMAGE ?= $(REGISTRY)/kubeswift-spin-runtime:$(VERSION)
+# The runtime image is versioned independently of the controller (see
+# runtime/VERSION and docs/runtime-image.md), so a controller release does
+# not change the sandbox spec of running SpinApps.
+RUNTIME_VERSION := $(shell cat runtime/VERSION)
+RUNTIME_IMAGE ?= $(REGISTRY)/kubeswift-spin-runtime:$(RUNTIME_VERSION)
 CONTAINER_TOOL ?= docker
 
 # Pinned tool versions.

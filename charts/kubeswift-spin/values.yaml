@@ -13,10 +13,12 @@ image:
   pullPolicy: IfNotPresent
 
 # Runtime rootfs image booted by every SwiftSandbox. It is passed to the
-# controller as --runtime-image and can be overridden per executor.
+# controller as --runtime-image and can be overridden per executor. It has
+# its own version (runtime/VERSION), independent of the chart appVersion:
+# changing it replaces every replica that uses it.
 runtimeImage:
   repository: ghcr.io/kubeswift-io/kubeswift-spin-runtime
-  tag: ""
+  tag: spin-4.2.1-r1
   digest: ""
 
 imagePullSecrets: []

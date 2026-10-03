@@ -4,6 +4,17 @@
 kubeswift-spin SwiftSandbox boots as its root filesystem. One image serves
 every SpinApp: the application is not baked in, Spin pulls it at start.
 
+## Versioning
+
+The runtime image is versioned independently of the controller. Its tag is
+in `runtime/VERSION` (currently `spin-4.2.1-r1`: the Spin version and a
+revision for entrypoint or base image changes), and the chart's
+`runtimeImage.tag` must match it (`make helm-lint` checks this). The release
+workflow builds and pushes the runtime image only when that tag does not
+exist yet. Because the image is part of every sandbox spec, keeping its tag
+and digest stable across controller releases is what lets a controller
+upgrade leave running replicas alone.
+
 ## Contents
 
 | Path | Origin |
@@ -51,6 +62,9 @@ The paths and variable names are defined once in
 make runtime-image RUNTIME_IMAGE=kubeswift-spin-runtime:dev
 ```
 
+Without `RUNTIME_IMAGE`, the image is tagged
+`ghcr.io/kubeswift-io/kubeswift-spin-runtime:$(cat runtime/VERSION)`.
+
 The Dockerfile builds the entrypoint for `TARGETARCH` and selects the
 matching Spin archive and digest, so `docker buildx build --platform
 linux/amd64,linux/arm64` works; only amd64 has been built and tested so far.
@@ -90,7 +104,9 @@ KubeSwift: there is no microVM, materialization or sandbox networking.
 2. Update `SPIN_VERSION`, `SPIN_SHA256_AMD64` and `SPIN_SHA256_ARM64` in
    `runtime/Dockerfile` and the version and digests in
    `hack/install-spin.sh`.
-3. Verify the pins and signatures:
+3. Bump `runtime/VERSION` and `runtimeImage.tag` in
+   `charts/kubeswift-spin/values.yaml`.
+4. Verify the pins and signatures:
 
    ```bash
    hack/verify-spin-release.sh
@@ -100,8 +116,9 @@ KubeSwift: there is no microVM, materialization or sandbox networking.
    file and verifies the Sigstore signature (`spin.sig`, `crt.pem`) of the
    binary in each archive against the identity of Spin's release workflow
    for that tag. It needs `cosign`.
-4. Run `make runtime-test example-test` and update
-   [compatibility.md](compatibility.md).
+5. Run `make runtime-test example-test` and update
+   [compatibility.md](compatibility.md), and add an upgrade note to
+   `CHANGELOG.md`.
 
 Changing the runtime image changes the sandbox spec of every SpinApp that
 uses the default, so all replicas are replaced (one at a time) after the

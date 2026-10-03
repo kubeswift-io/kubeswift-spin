@@ -38,8 +38,8 @@ func PoolMismatches(spec *sandboxv1alpha1.SwiftSandboxSpec, pool *sandboxv1alpha
 	if orDefaultRootfs(ps.RootfsMode) != orDefaultRootfs(spec.RootfsMode) {
 		add("rootfsMode", string(orDefaultRootfs(spec.RootfsMode)), string(orDefaultRootfs(ps.RootfsMode)))
 	}
-	if refName(ps.KernelProfileRef) != refName(spec.KernelProfileRef) {
-		add("kernelProfileRef", refName(spec.KernelProfileRef), refName(ps.KernelProfileRef))
+	if kernelName(ps.KernelProfileRef) != kernelName(spec.KernelProfileRef) {
+		add("kernelProfileRef", kernelName(spec.KernelProfileRef), kernelName(ps.KernelProfileRef))
 	}
 	if secretName(ps.VerifyKeySecretRef) != secretName(spec.VerifyKeySecretRef) {
 		add("verifyKeySecretRef", secretName(spec.VerifyKeySecretRef), secretName(ps.VerifyKeySecretRef))
@@ -82,6 +82,17 @@ func secretName(r *sandboxv1alpha1.SecretObjectReference) string {
 		return ""
 	}
 	return r.Name
+}
+
+// defaultKernelProfile is the SwiftKernel KubeSwift boots when
+// kernelProfileRef is unset (KubeSwift v0.15.1).
+const defaultKernelProfile = "sandbox"
+
+func kernelName(r *corev1.LocalObjectReference) string {
+	if n := refName(r); n != "" {
+		return n
+	}
+	return defaultKernelProfile
 }
 
 func refName(r *corev1.LocalObjectReference) string {
