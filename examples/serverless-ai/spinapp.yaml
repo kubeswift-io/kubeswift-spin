@@ -1,0 +1,26 @@
+# The inference endpoint runs in the cluster, so this app uses the
+# kubeswift-open executor: the restricted profile blocks cluster egress.
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: serverless-ai
+spec:
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/serverless-ai:v0.1.0
+  executor: kubeswift-open
+  replicas: 1
+  variables:
+    - name: llm_model
+      value: default-model
+  runtimeConfig:
+    llmCompute:
+      type: remote_http
+      options:
+        - name: url
+          value: http://llm.inference.svc.cluster.local:8000
+        - name: api_type
+          value: open_ai
+        # Spin requires the key. Only an empty value is accepted: a
+        # non-empty literal would be stored in plain text in the sandbox
+        # spec, and secret-backed values need KubeSwift secret projection.
+        - name: auth_token
+          value: ""

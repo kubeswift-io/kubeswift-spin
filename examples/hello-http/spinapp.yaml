@@ -1,0 +1,12 @@
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: hello-http
+spec:
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0
+  executor: kubeswift
+  replicas: 1
+  resources:
+    limits:
+      cpu: 500m      # rounded up to 1 vCPU
+      memory: 256Mi

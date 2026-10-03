@@ -1,0 +1,11 @@
+# Default KubeSwift executor profile: restricted networking (DNS and public
+# internet egress only, no cluster access, no ingress). The Helm chart
+# creates this executor for the namespaces listed in values.executors.
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinAppExecutor
+metadata:
+  name: kubeswift
+  labels:
+    spin.kubeswift.io/managed-by: kubeswift-spin
+spec:
+  createDeployment: false

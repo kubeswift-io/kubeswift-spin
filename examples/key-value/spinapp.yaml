@@ -1,0 +1,18 @@
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: key-value
+spec:
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/key-value:v0.1.0
+  executor: kubeswift
+  replicas: 1
+  runtimeConfig:
+    keyValueStores:
+      # Rendered into the runtime-config file inside the sandbox. The file
+      # lives in guest memory: data is per replica and lost when the
+      # sandbox is replaced.
+      - name: default
+        type: spin
+        options:
+          - name: path
+            value: /var/lib/kubeswift-spin/state/kv.db

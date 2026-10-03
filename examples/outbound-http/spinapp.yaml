@@ -1,0 +1,16 @@
+# Restricted profile: the sandbox can resolve names and reach the public
+# internet, but not cluster-internal addresses. With the in-cluster target
+# below, /fetch is expected to fail with 502.
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: outbound-http
+spec:
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/outbound-http:v0.1.0
+  executor: kubeswift
+  replicas: 1
+  variables:
+    - name: target_url
+      value: http://upstream.kubeswift-spin-examples.svc.cluster.local:8090/
+    - name: target_origin
+      value: http://upstream.kubeswift-spin-examples.svc.cluster.local:8090

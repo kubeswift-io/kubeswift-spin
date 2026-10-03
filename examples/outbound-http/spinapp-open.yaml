@@ -1,0 +1,15 @@
+# Open profile: the same request is expected to succeed because "open"
+# allows cluster egress.
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: outbound-http-open
+spec:
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/outbound-http:v0.1.0
+  executor: kubeswift-open
+  replicas: 1
+  variables:
+    - name: target_url
+      value: http://upstream.kubeswift-spin-examples.svc.cluster.local:8090/
+    - name: target_origin
+      value: http://upstream.kubeswift-spin-examples.svc.cluster.local:8090

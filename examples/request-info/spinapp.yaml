@@ -1,0 +1,15 @@
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: request-info
+spec:
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/request-info:v0.1.0
+  executor: kubeswift
+  replicas: 2
+  variables:
+    # Literal values become SPIN_VARIABLE_* in the sandbox. Do not put
+    # secrets here: KubeSwift stores sandbox environment in plain text.
+    - name: app_version
+      value: "0.1.0"
+    - name: greeting
+      value: hello from KubeSwift

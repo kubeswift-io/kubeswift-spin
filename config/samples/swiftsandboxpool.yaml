@@ -1,0 +1,15 @@
+# Warm pool for the kubeswift-warm executor. Image, CPU, memory and network
+# mode must equal what kubeswift-spin puts in each SwiftSandbox; set image to
+# the runtime image the controller uses (Helm value runtimeImage).
+apiVersion: sandbox.kubeswift.io/v1alpha1
+kind: SwiftSandboxPool
+metadata:
+  name: spin-warm
+spec:
+  image: ghcr.io/kubeswift-io/kubeswift-spin-runtime:v0.1.0
+  cpu: 1
+  memory: 512Mi
+  network:
+    mode: restricted
+  minWarm: 2
+  maxWarm: 4

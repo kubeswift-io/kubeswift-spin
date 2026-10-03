@@ -1,0 +1,13 @@
+# Executor profile for trusted applications that must reach in-cluster
+# services, such as an inference endpoint. "open" removes the egress
+# restrictions of "restricted"; inbound traffic is still denied.
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinAppExecutor
+metadata:
+  name: kubeswift-open
+  labels:
+    spin.kubeswift.io/managed-by: kubeswift-spin
+  annotations:
+    spin.kubeswift.io/network-mode: open
+spec:
+  createDeployment: false

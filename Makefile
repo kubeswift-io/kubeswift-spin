@@ -35,6 +35,8 @@ EXAMPLE ?= hello-http
 EXAMPLE_REGISTRY ?= $(REGISTRY)/kubeswift-spin-examples
 EXAMPLE_TAG ?= $(VERSION)
 NAMESPACE ?= default
+# The OCI artifact is named after the Spin application ([application] name).
+EXAMPLE_NAME = $(shell awk -F'"' '/^name = /{print $$2; exit}' examples/$(EXAMPLE)/spin.toml)
 
 ##@ General
 
@@ -140,11 +142,11 @@ example-build: spin ## Build one example: make example-build EXAMPLE=hello-http
 
 .PHONY: example-push
 example-push: example-build ## Push one example as a Spin OCI artifact: make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/you EXAMPLE_TAG=v0.1.0
-	cd examples/$(EXAMPLE) && $(SPIN) registry push $(EXAMPLE_REGISTRY)/$(notdir $(EXAMPLE)):$(EXAMPLE_TAG)
+	cd examples/$(EXAMPLE) && $(SPIN) registry push $(EXAMPLE_REGISTRY)/$(EXAMPLE_NAME):$(EXAMPLE_TAG)
 
 .PHONY: example-deploy
 example-deploy: ## Apply one example SpinApp: make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/you EXAMPLE_TAG=v0.1.0
-	sed -e 's|image: .*|image: $(EXAMPLE_REGISTRY)/$(notdir $(EXAMPLE)):$(EXAMPLE_TAG)|' examples/$(EXAMPLE)/spinapp.yaml \
+	sed -e 's|^  image: .*|  image: $(EXAMPLE_REGISTRY)/$(EXAMPLE_NAME):$(EXAMPLE_TAG)|' examples/$(EXAMPLE)/spinapp.yaml \
 	  | kubectl apply -n $(NAMESPACE) -f -
 
 ##@ Quality gate

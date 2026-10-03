@@ -1,0 +1,8 @@
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: mcp-tools
+spec:
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/mcp-tools:v0.1.0
+  executor: kubeswift
+  replicas: 1
