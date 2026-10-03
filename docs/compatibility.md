@@ -11,7 +11,7 @@ that ran; nothing else is implied.
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`) |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) |
-| KubeSwift | v0.15.1 | Go API and sandbox CRDs in envtest and kind |
+| KubeSwift | v0.15.1 | contract test of `internal/sandboxapi` against the Go types and CRDs; sandbox CRDs in envtest and kind |
 | Kubernetes API server | 1.34.1, 1.37.0 | envtest controller suite |
 | Kubernetes (kind) | v1.34.0 | kind integration test |
 
@@ -92,6 +92,8 @@ The profile annotations are listed in
 - **Spin Operator**: bump the Go module, run `make test`. The matrix test
   fails on new `SpinAppSpec` fields until they are classified here and in
   `internal/compatibility`.
-- **KubeSwift**: bump the Go module, run `make test` and the KVM e2e test.
+- **KubeSwift**: bump the test-only Go module, run `make test` (the
+  `internal/sandboxapi` contract test checks the fields kubeswift-spin uses)
+  and the KVM e2e test.
   A new SwiftSandbox feature that closes a gap in [docs/upstream](upstream/)
   needs code changes before it is used.

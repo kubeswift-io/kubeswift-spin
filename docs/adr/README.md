@@ -12,3 +12,4 @@
 | [0008](0008-executor-profiles-without-crd.md) | Executor profiles as labels and annotations, no new CRD |
 | [0009](0009-replicas-status-and-deletion.md) | StatefulSet-like replicas, owned status fields, no finalizer |
 | [0010](0010-runtime-image-versioning.md) | Version the runtime image independently of the controller |
+| [0011](0011-apache-license-and-sandbox-api.md) | Apache-2.0 license; project-owned subset of the sandbox API |

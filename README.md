@@ -166,5 +166,5 @@ vulnerability scan, the example tests and the runtime image tests. See [CONTRIBU
 
 ## License
 
-GNU Affero General Public License v3.0, the license of KubeSwift. See
-[LICENSE](LICENSE) and [docs/third-party-licenses.md](docs/third-party-licenses.md).
+Apache License 2.0. See [LICENSE](LICENSE) and
+[docs/third-party-licenses.md](docs/third-party-licenses.md).

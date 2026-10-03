@@ -26,8 +26,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift/api/sandbox/v1alpha1"
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
+
+	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 
 	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/compatibility"

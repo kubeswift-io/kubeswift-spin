@@ -57,5 +57,5 @@ CMD ["--version"]
 LABEL org.opencontainers.image.title="kubeswift-spin-runtime" \
       org.opencontainers.image.description="Spin runtime rootfs for KubeSwift sandboxes" \
       org.opencontainers.image.source="https://github.com/kubeswift-io/kubeswift-spin" \
-      org.opencontainers.image.licenses="AGPL-3.0-only AND Apache-2.0 WITH LLVM-exception" \
+      org.opencontainers.image.licenses="Apache-2.0 AND Apache-2.0 WITH LLVM-exception" \
       io.kubeswift.spin.version="${SPIN_VERSION}"

@@ -9,7 +9,8 @@ running replicas on upgrade) say so under "Upgrade notes".
 
 ## Unreleased
 
-Initial implementation, targeting v0.1.0.
+Initial implementation, targeting v0.1.0. Licensed under the Apache License
+2.0.
 
 ### Added
 

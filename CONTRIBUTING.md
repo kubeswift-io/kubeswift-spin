@@ -13,6 +13,10 @@
 - Never put secret values in objects, logs, Events or status messages.
 - Never modify KubeSwift launcher pods, NetworkPolicies or other objects
   KubeSwift owns.
+- Never import `github.com/kubeswift-io/kubeswift` outside tests: it is
+  AGPL-3.0 and kubeswift-spin is Apache-2.0. Declare needed sandbox fields in
+  `internal/sandboxapi` ([ADR 0011](docs/adr/0011-apache-license-and-sandbox-api.md));
+  `make check-deps` enforces this.
 
 ## Development setup
 
@@ -71,10 +75,19 @@ Documentation, comments, commit messages and user-facing messages:
 - condition and Event messages name fields and objects, never values
 - every command in documentation must work as written
 
-## Commits
+## Commits and sign-off
 
-Small, focused commits with a summary line in the imperative mood. Sign off
-if your organization requires it.
+Small, focused commits with a summary line in the imperative mood.
+
+Every commit must carry a `Signed-off-by` trailer certifying the
+[Developer Certificate of Origin](https://developercertificate.org/):
+
+```bash
+git commit -s
+```
+
+CI rejects pull requests with unsigned-off commits. Contributions are
+licensed under the Apache License 2.0.
 
 ## Reporting security issues
 

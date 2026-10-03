@@ -1,17 +1,15 @@
 # Third-party licenses
 
-kubeswift-spin is licensed under the GNU Affero General Public License v3.0,
-matching KubeSwift, whose Go API it links. This page lists the third-party
-components it builds on and ships. The authoritative license texts are in
-each component's source.
+kubeswift-spin is licensed under the Apache License 2.0. This page lists the
+third-party components it builds on and ships. The authoritative license
+texts are in each component's source.
 
 ## Controller and entrypoint (Go)
 
-Direct dependencies, from `go.mod`:
+Direct dependencies linked into the binaries, from `go.mod`:
 
 | Module | License |
 |---|---|
-| github.com/kubeswift-io/kubeswift | AGPL-3.0 |
 | github.com/spinkube/spin-operator | Apache-2.0 |
 | sigs.k8s.io/controller-runtime | Apache-2.0 |
 | k8s.io/api, k8s.io/apimachinery, k8s.io/client-go, k8s.io/utils | Apache-2.0 |
@@ -24,13 +22,28 @@ Direct dependencies, from `go.mod`:
 The full dependency graph, including indirect modules, is in `go.sum`, and
 release SBOMs list every component with its license.
 
+### KubeSwift (test-only)
+
+`github.com/kubeswift-io/kubeswift` (AGPL-3.0) is required in `go.mod` for
+tests only: the contract test in `internal/sandboxapi` compares
+kubeswift-spin's declaration of the sandbox API with KubeSwift's Go types,
+and the envtest suite loads KubeSwift's CRDs. No KubeSwift package is linked
+into the controller or entrypoint binaries; this can be checked with:
+
+```bash
+go list -deps ./cmd/... | grep kubeswift-io/kubeswift/
+```
+
+which prints nothing. kubeswift-spin talks to KubeSwift only through the
+Kubernetes API.
+
 ## Container images
 
 | Image | Contains | License |
 |---|---|---|
-| kubeswift-spin | controller binary on `gcr.io/distroless/static-debian12:nonroot` | AGPL-3.0; distroless contents under their Debian package licenses |
+| kubeswift-spin | controller binary on `gcr.io/distroless/static-debian12:nonroot` | Apache-2.0; distroless contents under their Debian package licenses |
 | kubeswift-spin-runtime | Spin v4.2.1 static binary | Apache-2.0 WITH LLVM-exception (license file at `/usr/share/doc/spin/LICENSE`) |
-| | entrypoint binary | AGPL-3.0 |
+| | entrypoint binary | Apache-2.0 |
 | | `gcr.io/distroless/static-debian12:nonroot` base (CA certificates, tzdata, passwd) | Debian package licenses |
 
 ## Example applications (Rust)
@@ -44,5 +57,4 @@ Pinned in `examples/Cargo.lock`. Main dependencies:
 | serde, serde_json | MIT OR Apache-2.0 |
 | sha2 | MIT OR Apache-2.0 |
 
-The examples are part of this repository and licensed AGPL-3.0, like the
-rest of it.
+The examples are part of this repository and licensed Apache-2.0.

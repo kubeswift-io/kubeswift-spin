@@ -31,4 +31,4 @@ ENTRYPOINT ["/manager"]
 LABEL org.opencontainers.image.title="kubeswift-spin" \
       org.opencontainers.image.description="SpinKube executor that runs SpinApps in KubeSwift sandboxes" \
       org.opencontainers.image.source="https://github.com/kubeswift-io/kubeswift-spin" \
-      org.opencontainers.image.licenses="AGPL-3.0-only"
+      org.opencontainers.image.licenses="Apache-2.0"

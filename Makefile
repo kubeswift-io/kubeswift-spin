@@ -26,6 +26,7 @@ GOVULNCHECK_VERSION ?= v1.8.0
 SETUP_ENVTEST_VERSION ?= v0.25.2
 KUBECONFORM_VERSION ?= v0.8.0
 ACTIONLINT_VERSION ?= v1.7.12
+CONTROLLER_GEN_VERSION ?= v0.22.0
 ENVTEST_K8S_VERSION ?= 1.34.1
 KIND_K8S_IMAGE ?= kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a
 WITH_SPIN_OPERATOR ?=
@@ -35,6 +36,7 @@ GOVULNCHECK := $(BIN)/govulncheck
 SETUP_ENVTEST := $(BIN)/setup-envtest
 KUBECONFORM := $(BIN)/kubeconform
 ACTIONLINT := $(BIN)/actionlint
+CONTROLLER_GEN := $(BIN)/controller-gen
 SPIN := $(BIN)/spin
 
 EXAMPLES := hello-http request-info outbound-http key-value serverless-ai experimental/mcp
@@ -53,6 +55,14 @@ help: ## Show this help.
 
 ##@ Development
 
+.PHONY: generate
+generate: $(CONTROLLER_GEN) ## Regenerate deepcopy code for internal/sandboxapi.
+	$(CONTROLLER_GEN) object paths=./internal/sandboxapi/...
+
+.PHONY: verify-generated
+verify-generated: generate ## Fail if generated code is out of date.
+	@git diff --exit-code -- internal/sandboxapi || { echo "run make generate and commit the result"; exit 1; }
+
 .PHONY: fmt
 fmt: ## Format Go code.
 	gofmt -s -w cmd internal examples/tools test
@@ -68,6 +78,11 @@ vet: ## Run go vet.
 .PHONY: lint
 lint: $(GOLANGCI_LINT) ## Run golangci-lint.
 	$(GOLANGCI_LINT) run ./...
+
+.PHONY: check-deps
+check-deps: ## Fail if a shipped binary links KubeSwift (AGPL) code; see ADR 0011.
+	@if go list -deps ./cmd/... | grep -q '^github.com/kubeswift-io/kubeswift/'; then \
+	  echo "a binary imports github.com/kubeswift-io/kubeswift; use internal/sandboxapi"; exit 1; fi
 
 .PHONY: check-prose
 check-prose: ## Reject em dashes and section signs in project-authored text.
@@ -163,7 +178,7 @@ example-deploy: ## Apply one example SpinApp: make example-deploy EXAMPLE=hello-
 ##@ Quality gate
 
 .PHONY: verify
-verify: fmt-check vet lint lint-workflows check-prose test helm-lint ## Pre-commit gate: formatting, vet, lint, prose, tests, chart.
+verify: fmt-check vet lint lint-workflows verify-generated check-deps check-prose test helm-lint ## Pre-commit gate: formatting, vet, lint, prose, tests, chart.
 
 .PHONY: verify-all
 verify-all: verify vulncheck example-test runtime-test ## verify plus vulnerability scan, example tests and runtime image tests.
@@ -178,6 +193,9 @@ $(GOVULNCHECK):
 
 $(SETUP_ENVTEST):
 	GOBIN=$(BIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)
+
+$(CONTROLLER_GEN):
+	GOBIN=$(BIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
 
 $(ACTIONLINT):
 	GOBIN=$(BIN) go install github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)

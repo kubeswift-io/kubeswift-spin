@@ -8,8 +8,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift/api/sandbox/v1alpha1"
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
+
+	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 )
 
 const img = "ghcr.io/kubeswift-io/kubeswift-spin-runtime:v0.1.0"

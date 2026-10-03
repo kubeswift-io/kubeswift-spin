@@ -11,8 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift/api/sandbox/v1alpha1"
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
+
+	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
@@ -73,9 +74,8 @@ func TestBuildTemplateBasics(t *testing.T) {
 	if len(s.Env) != 0 {
 		t.Fatalf("unexpected env: %v", s.Env)
 	}
-	if s.Timeout != nil || s.TTL != nil {
-		t.Fatalf("a long-running server must not get a timeout or ttl")
-	}
+	// A long-running server must never get spec.timeout or spec.ttl; the
+	// sandboxapi subset does not declare them, so they cannot be set.
 	if len(tmpl.Revision) != revisionLen {
 		t.Fatalf("revision %q", tmpl.Revision)
 	}
