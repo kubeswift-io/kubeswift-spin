@@ -70,6 +70,7 @@ The chart's ClusterRole (see `charts/kubeswift-spin/templates/rbac.yaml`):
 | `swiftsandboxpools` | get, list, watch | warm-pool compatibility check |
 | `events.k8s.io` `events` | create, patch | Events |
 | `leases` (release namespace only) | get, create, update | leader election |
+| core `events` (release namespace only) | create, patch | the LeaderElection Event, which controller-runtime records through the core/v1 API |
 
 There are no wildcards, and no access to Secrets, ConfigMaps, Pods or
 Services. `make helm-lint` runs a policy check that fails the build if the

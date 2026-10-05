@@ -63,6 +63,31 @@ the example artifacts tagged `v0.1.0-dev.49ded6b`.
 
 See [test/e2e](../test/e2e/README.md) for the phases.
 
+### v0.1.0-rc2 from published artifacts (2026-10-05)
+
+On the same lab cluster, after removing the previous installation (Helm
+release, cluster role and binding, the `kubeswift-spin-system` and test
+namespaces, executors and SpinApps; the SwiftKernel was recreated), v0.1.0-rc2
+was installed with the README command from
+`oci://ghcr.io/kubeswift-io/charts/kubeswift-spin` version `0.1.0-rc2`. The
+controller ran the published digest, sandboxes booted the published runtime
+digest (`spin-4.2.1-r1`, never used on the cluster before), and Spin pulled
+the published example artifacts.
+
+- hello-http applied from the release tag became `Available` in 25 seconds
+  and answered through the Service. Scaled to 3 replicas on both kernel
+  nodes, each replica answered directly and 9 of 9 requests through the
+  Service succeeded; scaling back to 1 and deleting left no sandbox,
+  Service or policy.
+- `test/e2e/kvm-e2e.sh` from the tag, with all nine phases and the default
+  (published) example artifacts, passed all 75 checks: cold start 19
+  seconds, warm pool 6 seconds, rolling update with 0 failed requests out
+  of 504, private registry `Available` in 31 seconds, no Secret value found
+  outside Secrets, liveness replacement with the same timings as above.
+- The controller logged no error or warning during the run, except one
+  rejected LeaderElection Event at startup (the chart did not allow core
+  Events in its namespace; fixed after rc2).
+
 ### Not tested
 
 - arm64 (images are built and published but not validated), other CNIs
