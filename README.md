@@ -16,7 +16,8 @@ KubeSwift.
 
 ## Status
 
-v0.1.0-rc1 is the first release candidate. It validates the initial
+v0.1.0-rc2 is the first complete release candidate (the v0.1.0-rc1
+release run failed before it finished). It validates the initial
 architecture and the core execution path on real KVM hardware and is meant
 for evaluation and integration testing while the project builds broader
 compatibility and operational experience. It is not production-ready.
@@ -110,7 +111,7 @@ kubectl create namespace demo
 Install the chart with a `kubeswift` executor in `demo`:
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc1 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc2 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -125,7 +126,7 @@ Chart values are documented in
 ## Run hello-http
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc1/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc2/examples/hello-http/spinapp.yaml
 ```
 
 ```bash

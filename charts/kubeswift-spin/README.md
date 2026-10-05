@@ -8,7 +8,7 @@ The released chart is published as an OCI artifact and pins both images by
 digest:
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc1 --namespace kubeswift-spin-system --create-namespace
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc2 --namespace kubeswift-spin-system --create-namespace
 ```
 
 From a source checkout, at the repository root (the images must exist in

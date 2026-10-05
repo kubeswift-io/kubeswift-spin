@@ -5,7 +5,9 @@ workflow (`.github/workflows/release.yaml`) runs only for tags in
 `kubeswift-io/kubeswift-spin`. Every job that publishes or holds a write
 token uses the `release` environment and waits for its approval.
 
-The workflow had not run before v0.1.0-rc1; that tag is its first run.
+The first run, for v0.1.0-rc1, published the images and the chart but
+failed at the last example push (a path error in the workflow), so rc1 has
+no GitHub release; v0.1.0-rc2 is the first complete release.
 Check every artifact (see [Verifying a release](#verifying-a-release))
 before publishing the draft release.
 
@@ -52,15 +54,15 @@ Configure these before the first release:
    upgrade note: every replica using the default runtime image is replaced.
    Otherwise leave both unchanged, so the release does not replace running
    replicas.
-6. Tag and push. A tag with a pre-release suffix (`v0.1.0-rc1`) produces a
+6. Tag and push. A tag with a pre-release suffix (`v0.1.0-rc2`) produces a
    pre-release:
 
    ```bash
-   git tag -s v0.1.0-rc1 -m v0.1.0-rc1
+   git tag -s v0.1.0-rc2 -m v0.1.0-rc2
    ```
 
    ```bash
-   git push origin v0.1.0-rc1
+   git push origin v0.1.0-rc2
    ```
 
 7. Approve the `release` deployments, wait for every job, check the
@@ -90,25 +92,25 @@ Signatures. Check the exact workflow identity of the release tag, not a
 pattern:
 
 ```bash
-cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc1 \
+cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc2 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v0.1.0-rc1
+  --certificate-identity https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v0.1.0-rc2
 ```
 
 The same command verifies
 `ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r1` (signed by
 the release that first built it; v0.1.0-rc1 for `spin-4.2.1-r1`),
-`ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc1` and
-`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc1`.
+`ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc2` and
+`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc2`.
 
 Provenance attestations:
 
 ```bash
-gh attestation verify oci://ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc1 --repo kubeswift-io/kubeswift-spin
+gh attestation verify oci://ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc2 --repo kubeswift-io/kubeswift-spin
 ```
 
 The same command verifies the runtime image and the chart
-(`oci://ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc1`). The
+(`oci://ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc2`). The
 example artifacts are signed but have no attestation.
 
 Release files, after downloading them from the GitHub release:

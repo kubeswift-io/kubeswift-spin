@@ -7,7 +7,7 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.1.0-rc1 | all tests below; the KVM run below used a development build of the commit before the version change |
+| kubeswift-spin | v0.1.0-rc2 | all tests below; the KVM run below used a development build of the commit before the version change |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |

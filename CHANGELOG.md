@@ -7,9 +7,12 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## v0.1.0-rc1 (2026-10-05)
+## v0.1.0-rc2 (2026-10-05)
 
-First release candidate. It validates the initial architecture and the
+First complete release candidate. The v0.1.0-rc1 tag exists, but its
+release run failed at the last example push and produced no GitHub
+release; v0.1.0-rc2 fixes the workflow and is otherwise the same code.
+It validates the initial architecture and the
 core execution path on real KVM hardware and is meant for evaluation and
 integration testing. It is not production-ready. Licensed under the Apache
 License 2.0.

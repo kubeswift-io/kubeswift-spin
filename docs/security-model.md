@@ -238,8 +238,8 @@ application.
   they verify, not a pattern. The release jobs build multi-architecture
   images with BuildKit SBOM and provenance attestations, sign the images,
   the chart and the example artifacts with cosign keyless signing, and pin
-  the image digests into the published chart. v0.1.0-rc1 is the first run
-  of the release workflow. An existing
+  the image digests into the published chart. v0.1.0-rc2 is the first
+  complete run of the release workflow. An existing
   runtime image is reused only after `cosign verify` confirms it was signed
   by this release workflow. Jobs that run third-party build code (cargo)
   have read-only tokens; checkouts do not persist credentials.
