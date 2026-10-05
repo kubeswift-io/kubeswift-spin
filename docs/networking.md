@@ -84,6 +84,13 @@ a readiness probe and KubeSwift reports `WorkloadReady=True`. While running
 sandboxes do not pass the probe yet, `Available` is `False` with reason
 `ApplicationNotReady`. See [executor-contract.md](executor-contract.md#status).
 
+`readyReplicas` comes from the sandbox condition, while the Service routes
+once the EndpointSlice lists the launcher pod as ready. The two can differ
+for a moment after a replica becomes ready, as with a Deployment's ready
+count and its Service. Clients that start sending traffic as soon as the
+SpinApp is `Available` should wait for a ready endpoint, as
+`test/e2e/kvm-e2e.sh` does.
+
 ## Feature detection
 
 kubeswift-spin reads the published OpenAPI v3 schema of

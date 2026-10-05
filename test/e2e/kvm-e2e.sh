@@ -127,7 +127,11 @@ start=$SECONDS
 until_true "hello-e2e-0 Running and the SpinApp Available" has_reason hello-e2e Available ApplicationReady
 echo "   time to Available: $((SECONDS - start))s"
 ready_replicas hello-e2e 1 && ok "readyReplicas 1" || fail "readyReplicas"
-[[ "$(http http://hello-e2e/hello)" == "Hello from Spin on KubeSwift" ]] && ok "HTTP through the SpinApp Service" || fail "HTTP response"
+# Readiness is reported from the sandbox; the Service routes once the
+# EndpointSlice lists the launcher pod, which can lag by a moment.
+until_true "ready Service endpoint" has_endpoints hello-e2e 1
+body="$(http http://hello-e2e/hello || true)"
+[[ "$body" == "Hello from Spin on KubeSwift" ]] && ok "HTTP through the SpinApp Service" || fail "HTTP response: $body"
 [[ "$(http_code http://hello-e2e/nope)" == "404" ]] && ok "routing inside the guest" || fail "404 route"
 
 $K patch spinapp hello-e2e --type=merge -p '{"spec":{"replicas":2}}' >/dev/null
@@ -176,6 +180,7 @@ spec:
         secretKeyRef: {name: e2e-greeting, key: greeting}
 YAML
 until_true "info-e2e 2 replicas ready" ready_replicas info-e2e 2
+until_true "info-e2e endpoints ready" has_endpoints info-e2e 2
 body="$(http -H 'Authorization: Bearer do-not-echo' 'http://info-e2e/info?x=1')"
 [[ "$body" == *'"greeting":"hello from a Secret"'* ]] && ok "Secret value reached Spin" || fail "secret variable: $body"
 [[ "$body" == *'"app_version":"e2e"'* ]] && ok "literal variable" || fail "literal variable: $body"
@@ -252,6 +257,7 @@ YAML
 done
 until_true "ai-e2e ready" ready_replicas ai-e2e 1
 until_true "ai-blocked-e2e ready" ready_replicas ai-blocked-e2e 1
+until_true "ai endpoints ready" bash -c "[[ \$($K get endpointslices -l kubernetes.io/service-name=ai-e2e -o jsonpath='{.items[*].endpoints[?(@.conditions.ready==true)].addresses[0]}' | wc -w) -ge 1 && \$($K get endpointslices -l kubernetes.io/service-name=ai-blocked-e2e -o jsonpath='{.items[*].endpoints[?(@.conditions.ready==true)].addresses[0]}' | wc -w) -ge 1 ]]"
 body="$(http -X POST --data-binary 'hello from the e2e test' http://ai-e2e/ask)"
 [[ "$body" == *'mock completion from model \"default-model\"'* ]] \
   && ok "inference through the egress allowlist with a Secret-backed token" || fail "inference: $body"
@@ -308,6 +314,7 @@ YAML
   start=$SECONDS
   until_true "warm-e2e Available" has_reason warm-e2e Available ApplicationReady
   echo "   time to Available from a warm slot: $((SECONDS - start))s"
+  until_true "warm-e2e endpoint ready" has_endpoints warm-e2e 1
   if $K get events.events.k8s.io --field-selector regarding.name=warm-e2e-0,reason=CheckedOut -o name | grep -q .; then
     ok "checked out a warm slot"
   else
