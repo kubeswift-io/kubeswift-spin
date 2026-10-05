@@ -23,3 +23,10 @@ cold fallback applies.
 - Pools never silently change a replica's shape.
 - The full-shape check duplicates logic KubeSwift should own; proposed in
   [kubeswift-sandbox-pool-shape-enforcement.md](../upstream/kubeswift-sandbox-pool-shape-enforcement.md).
+
+## Update (KubeSwift v0.16.0, 2026-10-05)
+
+The decision stands. KubeSwift v0.16.0 compares the full slot shape at
+checkout and boots cold on a mismatch (kubeswift-io/kubeswift#733).
+kubeswift-spin keeps its own check, so an incompatible pool is reported as
+`WarmPoolIncompatible` instead of silently booting cold.

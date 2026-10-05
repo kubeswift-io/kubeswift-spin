@@ -17,7 +17,7 @@ The controller exits with an explicit message instead of running degraded.
 | Log message contains | Cause | Fix |
 |---|---|---|
 | `API group version core.spinkube.dev/v1alpha1 is not served` | Spin Operator CRDs missing | Install the Spin Operator v0.6.1 CRDs. |
-| `API group version sandbox.kubeswift.io/v1alpha1 is not served` | KubeSwift sandbox CRDs missing | Install KubeSwift v0.16.0 or later (v0.15.1 runs in a degraded mode, see [networking.md](networking.md#kubeswift-v0151)). The message may name v0.15.1 as the tested version; that hint predates the v0.16.0 integration. |
+| `API group version sandbox.kubeswift.io/v1alpha1 is not served` | KubeSwift sandbox CRDs missing | Install KubeSwift v0.16.0 or later (v0.15.1 runs in a degraded mode, see [networking.md](networking.md#kubeswift-v0151)). |
 | `detect SwiftSandbox features from the OpenAPI v3 schema of sandbox.kubeswift.io/v1alpha1` | the API server does not publish the OpenAPI v3 schema of the sandbox API, or it could not be read | Check that `kubectl get --raw /openapi/v3/apis/sandbox.kubeswift.io/v1alpha1` works with the controller's credentials. The controller does not reconcile until it knows the SwiftSandbox features. |
 | `the controller service account is missing permissions` | RBAC incomplete, for example a hand-written ClusterRole | Use the chart's RBAC; the message lists each missing verb and resource. |
 | `--runtime-image: ... must include a registry and an explicit tag or digest` | invalid runtime image flag | Set `runtimeImage` in the Helm values to a fully qualified reference. |
@@ -62,10 +62,10 @@ their SpinApp status.
 
 | Reason | What to do |
 |---|---|
-| `UnsupportedConfiguration` | The message names each field. Remove it or see [compatibility.md](compatibility.md). `configMapKeyRef`, literal credentials, `loadFromSecret` combined with other runtime-config fields, `volumes`, `serviceAccountName`, `enableAutoscaling` and SpinApp names over 52 characters are not supported. On KubeSwift before v0.16.0, Secret references, `imagePullSecrets` and `podLabels` are rejected too. |
+| `UnsupportedConfiguration` | The message names each field. Remove it or see [compatibility.md](compatibility.md). A `spec.image` without a registry host (`org/app:tag` instead of `docker.io/org/app:tag`), `configMapKeyRef`, literal credentials, `loadFromSecret` combined with other runtime-config fields, `volumes`, `serviceAccountName`, `enableAutoscaling` and SpinApp names over 52 characters are not supported. On KubeSwift before v0.16.0, Secret references, `imagePullSecrets` and `podLabels` are rejected too. |
 | `ExecutorInvalid` | The message lists every problem with the executor: `createDeployment: true`, `deploymentConfig` fields (including `caCertSecret`), unknown `spin.kubeswift.io/` annotations, network mode `none`, `egress-allow` with network mode `open`, `egress-allow` or `ingress-from` on KubeSwift before v0.16.0, invalid values. |
 | `ExecutorNotFound` | The executor was deleted. Existing sandboxes keep running; recreate the executor. |
-| `WarmPoolIncompatible` | The pool is missing or its shape differs; the message names each mismatching field. Align the pool with the runtime image, CPU, memory, network mode, `network.ports` (on KubeSwift v0.16.0, `http-app` port 3000) and egress allowlist the SpinApp gets (see [executor-contract.md](executor-contract.md#warm-pools)). If the message says the SwiftSandboxPool API was not installed at startup, restart the controller. |
+| `WarmPoolIncompatible` | The pool is missing or its shape differs; the message names each mismatching field. Align the pool with the runtime image, CPU, memory, network mode, `network.ports` (on KubeSwift v0.16.0, `http-app` port 3000), egress allowlist and ingress peers the SpinApp gets (see [executor-contract.md](executor-contract.md#warm-pools)). The image must be the exact reference in the controller's `--runtime-image` argument; the released chart passes it by digest, so a tag does not match. If the message says the SwiftSandboxPool API was not installed at startup, restart the controller. |
 | `SandboxConflict` | A SwiftSandbox with the needed name exists and is not owned by the SpinApp. Delete or rename it. |
 | `RuntimeImageUnavailable` | KubeSwift could not pull, verify or materialize the runtime image. Check the image reference, pull secret and cosign key. |
 | `SandboxFailed` | Spin exited or the guest failed. Read the guest console (below). The replica is replaced after a backoff of up to 5 minutes. |
@@ -100,7 +100,9 @@ Common causes:
   `spec.imagePullSecrets` naming Secrets of type
   `kubernetes.io/dockerconfigjson` in the SpinApp's namespace; the
   entrypoint fails with `is not a Docker config with an auths section` when
-  a Secret has another format.
+  a Secret has another format. Spin pulls only over HTTPS and trusts only
+  the runtime image's CA bundle, so a registry with a private CA does not
+  work.
 - **A secret file is missing.** `loadFromSecret` and `imagePullSecrets` use
   KubeSwift secret files, which need the sandbox SwiftKernel 6.6.14 or
   later. `loadFromSecret` needs the key `runtime-config.toml` in the Secret.

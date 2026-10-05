@@ -37,19 +37,21 @@ make help
 make verify
 ```
 
-This runs `gofmt`, `go vet`, golangci-lint, actionlint on the workflows, the
-prose check, unit tests, the envtest controller suite and the Helm chart
-checks. For changes to the
-runtime image, the entrypoint or the examples, also run:
+This runs the `gofmt` check, `go vet`, golangci-lint, actionlint on the
+workflows, the generated-code check, the dependency-license check
+(`make check-deps`), the prose check, unit tests, the envtest controller
+suite and the Helm chart checks. For changes to the runtime image, the
+entrypoint or the examples, also run:
 
 ```bash
 make verify-all
 ```
 
-For controller changes that affect cluster behavior:
+For controller changes that affect cluster behavior (needs kind and
+Docker; it creates and deletes its own kind cluster):
 
 ```bash
-make kind-test
+make kind-test WITH_SPIN_OPERATOR=1
 ```
 
 ## Tests

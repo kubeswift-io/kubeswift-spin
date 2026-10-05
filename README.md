@@ -23,8 +23,8 @@ compatibility and operational experience. It is not production-ready.
 
 Tested on linux/amd64 only, with KubeSwift v0.16.0, Spin Operator v0.6.1
 and Kubernetes 1.34 (one k0s lab cluster with Calico). arm64 images are
-published but not validated. [docs/compatibility.md](docs/compatibility.md)
-lists what was tested and the support status of every SpinApp field.
+built and published but not validated.
+[docs/compatibility.md](docs/compatibility.md) lists what was tested and the support status of every SpinApp field.
 
 What works on KubeSwift v0.16.0, exercised by the KVM end-to-end test
 ([test/e2e](test/e2e/README.md)):
@@ -74,17 +74,19 @@ Details: [docs/architecture.md](docs/architecture.md),
 
 ## Prerequisites
 
-- Kubernetes 1.31 or later
+- Kubernetes 1.31 or later (the chart's minimum; only 1.34 was tested on a
+  cluster)
 - KubeSwift v0.16.0 or later with the sandbox CRDs, for exposure, readiness,
-  Secrets and egress allowlists. KubeSwift v0.15.1 works in a degraded mode:
-  SpinApps run but cannot be reached, and Secret-backed configuration is
-  rejected.
+  Secrets and egress allowlists (only v0.16.0 was tested). KubeSwift
+  v0.15.1 works in a degraded mode: SpinApps run but cannot be reached, and
+  Secret-backed configuration is rejected.
 - a node labelled `kubeswift.io/kernel-node=true`
 - a Ready SwiftKernel named `sandbox` in every namespace that runs SpinApps,
   version 6.6.14 or later for SpinApps that use secret files
   (`runtimeConfig.loadFromSecret`, `imagePullSecrets`)
 - Spin Operator v0.6.1 (with cert-manager, as Spin Operator requires)
-- Helm 3
+- Helm 3.8 or later (OCI chart support)
+- optional: `swiftctl`, the KubeSwift CLI, to read a sandbox's guest console
 
 kubeswift-spin does not install KubeSwift or Spin Operator. It checks for
 their APIs at startup and exits with an actionable message if they are
@@ -185,8 +187,12 @@ helm install kubeswift-spin charts/kubeswift-spin \
 KubeSwift pulls the runtime image on the nodes; if the registry is private,
 create a docker-registry Secret in each SpinApp namespace and set the
 executor's `runtimeImagePullSecret` value. The controller image uses the
-chart's `imagePullSecrets` value instead. To publish an example to your own
-registry, see [examples](examples/README.md).
+chart's `imagePullSecrets` value instead. Application artifacts in a
+private registry are pulled by Spin inside the guest with the SpinApp's
+`spec.imagePullSecrets`; see
+[docs/executor-contract.md](docs/executor-contract.md#registry-credentials).
+To publish an example to your own registry, see
+[examples](examples/README.md).
 
 ## Documentation
 
@@ -210,9 +216,10 @@ registry, see [examples](examples/README.md).
 make verify
 ```
 
-runs formatting, vet, lint, the workflow lint, the prose check, unit and
-envtest tests, and the chart checks. `make verify-all` adds the
-vulnerability scan, the example tests and the runtime image tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
+runs the format check, vet, lint, the workflow lint, the generated-code and
+dependency-license checks, the prose check, unit and envtest tests, and the
+chart checks. `make verify-all` adds the vulnerability scan, the example
+tests and the runtime image tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

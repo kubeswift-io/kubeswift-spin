@@ -29,17 +29,27 @@ curl -i http://127.0.0.1:3000/hello
 
 ## Publish
 
-From the repository root:
+The release publishes this example as
+`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc1`, the
+image `spinapp.yaml` uses. To publish it to your own registry, from the
+repository root:
 
 ```bash
-make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0
+make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc1
 ```
 
 ## Deploy on Kubernetes
 
 Requires KubeSwift v0.16.0 or later, Spin Operator and kubeswift-spin (see
 the repository README), a `kubeswift` executor in the namespace, and a Ready
-SwiftKernel named `sandbox` in the namespace.
+SwiftKernel named `sandbox` in the namespace. From the repository root,
+deploy the published artifact:
+
+```bash
+kubectl -n <namespace> apply -f examples/hello-http/spinapp.yaml
+```
+
+or the artifact you pushed (same registry and tag as above):
 
 ```bash
 make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc1 NAMESPACE=<namespace>
@@ -50,8 +60,8 @@ kubectl -n <namespace> get spinapp,swiftsandbox
 ```
 
 `spinapp.yaml` sets a 500m CPU limit, which becomes 1 vCPU, and 256Mi of
-guest memory. It has no `spec.checks`, so a replica is ready once Spin
-accepts TCP connections on port 3000.
+guest memory. Its readiness check calls `/healthz` every 2 seconds, so a
+replica is ready once Spin answers that path (see [Validate](#validate)).
 
 ## Validate
 

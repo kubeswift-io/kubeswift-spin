@@ -77,6 +77,13 @@ kubectl -n <namespace> apply -f config/executor/kubeswift-egress.yaml
 ```
 
 ```bash
+kubectl -n <namespace> apply -f examples/serverless-ai/spinapp.yaml
+```
+
+To deploy a copy pushed to your own registry instead (see
+[examples](../README.md#publish-and-deploy)):
+
+```bash
 make example-deploy EXAMPLE=serverless-ai EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc1 NAMESPACE=<namespace>
 ```
 

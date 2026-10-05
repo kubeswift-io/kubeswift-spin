@@ -16,7 +16,7 @@ that ran; nothing else is implied.
 | cert-manager | v1.21.1 | KVM e2e cluster (the kind integration test pins v1.21.2) |
 | Kubernetes API server | 1.34.1, 1.37.0 | envtest controller suite |
 | Kubernetes (k0s) | v1.34.3, Calico CNI, linux/amd64 nodes | KVM e2e cluster |
-| Architecture | linux/amd64 | everything above; arm64 images are built and published but have never been run |
+| Architecture | linux/amd64 | everything above; arm64 images are built and published but not validated (never run) |
 | Kubernetes (kind) | v1.34.0 | kind integration test |
 
 ### KVM e2e lab run (2026-10-05)
@@ -65,8 +65,8 @@ See [test/e2e](../test/e2e/README.md) for the phases.
 
 ### Not tested
 
-- arm64, other CNIs than Calico, other Kubernetes distributions, and more
-  than one cluster.
+- arm64 (images are built and published but not validated), other CNIs
+  than Calico, other Kubernetes distributions, and more than one cluster.
 - A Wasm component actively trying to read guest files or credentials; the
   credential boundary rests on Spin's capability model.
 - Spin Operator `main` after v0.6.1. Its Go module path changed to

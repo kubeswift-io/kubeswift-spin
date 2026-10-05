@@ -47,19 +47,29 @@ external services with `tools/upstream`, and checks each response.
 
 Spin applications are published as Spin OCI artifacts with
 `spin registry push`. The release workflow publishes the examples to
-`ghcr.io/kubeswift-io/kubeswift-spin-examples/<name>:<version>`. To use your
-own registry:
+`ghcr.io/kubeswift-io/kubeswift-spin-examples/<name>:<version>`, where
+`<name>` is the application name in `spin.toml` (`mcp-tools` for
+experimental/mcp), and each `spinapp.yaml` references the v0.1.0-rc1
+artifact. To deploy a published example, from the repository root:
 
 ```bash
-make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0
+kubectl -n <namespace> apply -f examples/hello-http/spinapp.yaml
+```
+
+To use your own registry, push the example and deploy it with the same
+registry and tag (`make example-deploy` rewrites `spec.image`):
+
+```bash
+make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc1
 ```
 
 ```bash
 make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc1 NAMESPACE=<namespace>
 ```
 
-Spin pulls the artifact inside the sandbox. A private registry needs
-`spec.imagePullSecrets` (see
+`EXAMPLE_REGISTRY` must start with a registry host. Spin pulls the artifact
+inside the sandbox, so the registry must be reachable from the guest. A
+private registry needs `spec.imagePullSecrets` (see
 [docs/executor-contract.md](../docs/executor-contract.md#registry-credentials)).
 
 ## What works in a KubeSwift sandbox today
@@ -71,10 +81,10 @@ when its replicas pass the readiness check. The KVM e2e test
 
 | Example | In a KubeSwift v0.16.0 sandbox |
 |---|---|
-| hello-http | tested: readiness, Service, scaling, rolling update without failed requests, warm-pool checkout |
+| hello-http | tested: readiness, Service, scaling, rolling update without failed requests, warm-pool checkout, private registry with `imagePullSecrets`, `ingress-from` |
 | request-info | tested: two replicas behind the Service, literal and Secret-backed variables |
-| serverless-ai | tested against an in-cluster mock: egress allowlist and Secret-backed token |
-| outbound-http | not run; the restricted and allowlist behavior it would show was measured with serverless-ai |
+| serverless-ai | tested against an in-cluster mock: egress allowlist, Secret-backed token, `loadFromSecret` |
+| outbound-http | tested in the liveness phase: a restricted sandbox with an `egress-allow` entry fetched from an in-cluster Service, and the replica was replaced while its `/fetch` liveness check failed; `spinapp.yaml` and `spinapp-open.yaml` themselves were not run |
 | key-value | not run in a sandbox |
 | experimental/mcp | not run in a sandbox |
 

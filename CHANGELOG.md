@@ -16,7 +16,7 @@ License 2.0.
 
 Tested with KubeSwift v0.16.0, Spin Operator v0.6.1, Spin v4.2.1 and
 Kubernetes 1.34 on linux/amd64; see docs/compatibility.md. Images are also
-published for linux/arm64, which has not been tested.
+built and published for linux/arm64, which has not been validated.
 
 ### Added
 
@@ -77,7 +77,9 @@ published for linux/arm64, which has not been tested.
 - Rolling replacement has no surge: a SpinApp with one replica is
   unavailable while it is replaced. Use two or more replicas.
 - `spec.image` must start with a registry host (`docker.io/org/app`, not
-  `org/app`). Application artifacts are not signature-verified.
+  `org/app`). Application artifacts are not signature-verified. The
+  application registry must serve HTTPS with a certificate the runtime
+  image's CA bundle trusts; there is no option for a custom CA.
 - Registry credentials and Secret-backed configuration are readable by the
   Spin process inside the guest for the sandbox's lifetime.
 - Any SpinApp author in a namespace can expose that namespace's Secrets to
@@ -87,4 +89,7 @@ published for linux/arm64, which has not been tested.
   configuration is rejected.
 - Not supported: autoscaling, `serviceAccountName`, volumes,
   `configMapKeyRef`, `deploymentConfig.caCertSecret`.
-- Not tested: arm64, more than one cluster, CNIs other than Calico.
+- Not tested: arm64 (images are built and published but not validated),
+  more than one cluster, CNIs other than Calico, Kubernetes distributions
+  other than k0s, and KubeSwift v0.15.1 on a cluster since the v0.16.0
+  integration. The release workflow runs for the first time with this tag.

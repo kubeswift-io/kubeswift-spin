@@ -26,3 +26,16 @@ the image user.
   guest, which are not supported. Host-side artifact projection is proposed
   upstream.
 - Spin version upgrades are runtime image upgrades and roll replicas.
+
+## Update (KubeSwift v0.16.0, 2026-10-05)
+
+The decision stands. Private application registries are now supported:
+KubeSwift v0.16.0 delivers `imagePullSecrets` to the guest as secret files
+and the entrypoint writes them to Spin's Docker configuration
+([ADR 0006](0006-secrets.md),
+[executor-contract.md](../executor-contract.md#registry-credentials)). The
+credentials are therefore inside the guest. KubeSwift v0.16.0 also added
+read-only artifact projection (`spec.artifacts`), but Spin 4.2.1 cannot run
+an application from a local OCI layout, so Spin still pulls the application
+inside the guest
+([kubeswift-sandbox-artifact-projection.md](../upstream/kubeswift-sandbox-artifact-projection.md)).

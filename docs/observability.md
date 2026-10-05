@@ -46,9 +46,10 @@ endpoint is served over HTTPS and requires a bearer token authorized for
 `<fullname>-metrics-reader` ClusterRole to bind to the Prometheus service
 account. `<fullname>` is the release name when it contains
 `kubeswift-spin` (so `kubeswift-spin` for the install command in the
-README), otherwise `<release>-kubeswift-spin`. controller-runtime then serves a self-signed certificate, so the
-generated ServiceMonitor skips certificate verification and Prometheus sends
-its token without authenticating the server (see
+README), otherwise `<release>-kubeswift-spin`. controller-runtime then
+serves a self-signed certificate, so the generated ServiceMonitor skips
+certificate verification and Prometheus sends its token without
+authenticating the server (see
 [security-model.md](security-model.md#metrics-endpoint)).
 
 ## Logs

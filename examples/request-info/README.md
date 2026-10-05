@@ -9,6 +9,8 @@ Used to validate routing, variables and multiple replicas.
 
 ## Run locally
 
+From this directory, with the Spin CLI from `make spin`:
+
 ```bash
 ../../bin/spin build
 ```
@@ -30,6 +32,15 @@ become `SPIN_VARIABLE_APP_VERSION` and `SPIN_VARIABLE_GREETING` in the
 sandbox.
 
 ## Deploy
+
+From the repository root, deploy the published artifact:
+
+```bash
+kubectl -n <namespace> apply -f examples/request-info/spinapp.yaml
+```
+
+To deploy a copy pushed to your own registry instead (see
+[examples](../README.md#publish-and-deploy)):
 
 ```bash
 make example-deploy EXAMPLE=request-info EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc1 NAMESPACE=<namespace>

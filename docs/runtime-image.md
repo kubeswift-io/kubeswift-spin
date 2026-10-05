@@ -90,7 +90,7 @@ The Dockerfile builds the entrypoint for `TARGETARCH` and selects the
 matching Spin archive and digest, so `docker buildx build --platform
 linux/amd64,linux/arm64` builds both. The release workflow publishes both;
 only linux/amd64 has been tested (in Docker and on KVM). The arm64 image
-is built but has never been run.
+is built and published but not validated; it has never been run.
 
 ## Testing without Kubernetes
 

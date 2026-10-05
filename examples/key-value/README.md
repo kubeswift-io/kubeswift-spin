@@ -12,6 +12,8 @@ Exercises Spin's key-value API (`spin_sdk::key_value::Store`) on the
 
 ## Run locally
 
+From this directory, with the Spin CLI from `make spin`:
+
 ```bash
 ../../bin/spin build
 ```

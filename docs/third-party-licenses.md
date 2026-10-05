@@ -12,7 +12,8 @@ Direct dependencies linked into the binaries, from `go.mod`:
 |---|---|
 | github.com/spinkube/spin-operator | Apache-2.0 |
 | sigs.k8s.io/controller-runtime | Apache-2.0 |
-| k8s.io/api, k8s.io/apimachinery, k8s.io/client-go, k8s.io/utils | Apache-2.0 |
+| k8s.io/api, k8s.io/apiextensions-apiserver, k8s.io/apimachinery, k8s.io/client-go, k8s.io/utils | Apache-2.0 |
+| sigs.k8s.io/yaml | MIT and BSD-3-Clause; its forked go-yaml packages also Apache-2.0 |
 | github.com/google/go-containerregistry | Apache-2.0 |
 | github.com/prometheus/client_golang | Apache-2.0 |
 | github.com/pelletier/go-toml/v2 | MIT |

@@ -5,6 +5,10 @@ workflow (`.github/workflows/release.yaml`) runs only for tags in
 `kubeswift-io/kubeswift-spin`. Every job that publishes or holds a write
 token uses the `release` environment and waits for its approval.
 
+The workflow had not run before v0.1.0-rc1; that tag is its first run.
+Check every artifact (see [Verifying a release](#verifying-a-release))
+before publishing the draft release.
+
 ## Repository settings
 
 Configure these before the first release:
@@ -102,6 +106,10 @@ Provenance attestations:
 ```bash
 gh attestation verify oci://ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc1 --repo kubeswift-io/kubeswift-spin
 ```
+
+The same command verifies the runtime image and the chart
+(`oci://ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc1`). The
+example artifacts are signed but have no attestation.
 
 Release files, after downloading them from the GitHub release:
 

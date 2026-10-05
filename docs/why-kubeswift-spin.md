@@ -21,8 +21,9 @@ the Spin runtime in a container) when:
   is sufficient for your threat model;
 - startup time and density matter most: a standard executor starts Spin
   without booting a virtual machine, while a kubeswift-spin replica boots a
-  microVM first (about 20 seconds cold and 6 to 7 seconds from a warm pool
-  on the lab cluster, see [compatibility.md](compatibility.md#tested-versions));
+  microVM first (19 to 26 seconds cold and 6 to 7 seconds from a warm pool
+  to `Available` on the lab cluster, see
+  [compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05));
 - a microVM adds no meaningful protection for what you run.
 
 ## When kubeswift-spin is useful
@@ -44,7 +45,7 @@ policy says must not share a kernel with the node:
 The user API stays the standard `SpinApp`, so moving an application between
 a standard executor and a KubeSwift executor is a change of
 `spec.executor`, within the limits listed in
-[compatibility.md](compatibility.md). The switch is not seamless: Spin
+[compatibility.md](compatibility.md). The switch causes downtime: Spin
 Operator deletes the application's Deployment at once, and the application
 is unreachable until the first sandbox is ready.
 

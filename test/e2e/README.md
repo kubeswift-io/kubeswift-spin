@@ -2,8 +2,9 @@
 
 `kvm-e2e.sh` runs example applications in real KubeSwift microVMs and
 reaches them through the SpinApp Service from a client pod, as real clients
-do. It is the only test in this repository that exercises execution; the
-envtest and kind tests stand in for KubeSwift.
+do. It is the only test in this repository that runs SpinApps in KubeSwift
+sandboxes; the envtest and kind tests stand in for KubeSwift, and the
+runtime image test runs Spin in Docker.
 
 It passed on a lab cluster on 2026-10-05 with KubeSwift v0.16.0 and all
 nine phases; see [Lab result](#lab-result).
@@ -40,15 +41,18 @@ failure it prints the SpinApps, sandboxes, Services and conditions first.
 - KubeSwift v0.16.0 or later, including the sandbox and kernel CRDs. The
   script checks the published sandbox schema and stops on older versions.
 - cert-manager and Spin Operator v0.6.1
-- kubeswift-spin installed from `charts/kubeswift-spin` (the script looks
-  for an available Deployment labelled `app.kubernetes.io/name=kubeswift-spin`)
+- kubeswift-spin installed with its Helm chart, released or from
+  `charts/kubeswift-spin` (the script looks for an available Deployment
+  labelled `app.kubernetes.io/name=kubeswift-spin`)
   with an executor named `kubeswift` (or `$EXECUTOR`) in the test namespace.
   The executor must use network mode `restricted` without an egress
   allowlist, or the phase 3 blocking check fails.
 - a Ready SwiftKernel named `sandbox` in the test namespace
-- the hello-http, request-info and serverless-ai artifacts pushed under one
-  registry prefix the sandboxes can pull from without credentials, for
-  example:
+- the hello-http, request-info, serverless-ai and outbound-http artifacts
+  under one registry prefix the sandboxes can pull from without
+  credentials. The defaults (`EXAMPLES`, `EXAMPLES_TAG`) name the artifacts
+  published by the v0.1.0-rc1 release. To test other builds, push them to
+  your registry and set `EXAMPLES` and `EXAMPLES_TAG`, for example:
 
 ```bash
 make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=<registry>/kubeswift-spin-examples EXAMPLE_TAG=<tag>
@@ -62,7 +66,10 @@ make example-push EXAMPLE=request-info EXAMPLE_REGISTRY=<registry>/kubeswift-spi
 make example-push EXAMPLE=serverless-ai EXAMPLE_REGISTRY=<registry>/kubeswift-spin-examples EXAMPLE_TAG=<tag>
 ```
 
-- the outbound-http example artifact as well, for phase 8
+```bash
+make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-spin-examples EXAMPLE_TAG=<tag>
+```
+
 - nodes that can pull `curlimages/curl:8.16.0`, `golang:1.26.8-bookworm`,
   `registry:2`, `gcr.io/go-containerregistry/crane:v0.22.1` and
   `busybox:1.37.0` (all pinned by digest in the script)
@@ -108,7 +115,7 @@ v1.34.3 cluster with three linux/amd64 nodes (two kernel nodes with KVM)
 and Calico, KubeSwift v0.16.0, cert-manager v1.21.1 and Spin Operator
 v0.6.1, with a kubeswift-spin development build from `charts/kubeswift-spin`.
 The timings are in
-[compatibility.md](../docs/compatibility.md#kvm-e2e-lab-run-2026-10-05).
+[compatibility.md](../../docs/compatibility.md#kvm-e2e-lab-run-2026-10-05).
 Not covered: arm64.
 
 ## CI

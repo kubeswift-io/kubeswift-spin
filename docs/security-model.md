@@ -131,7 +131,7 @@ Secrets (SpinApps, SwiftSandboxes, Pods and their command lines, ConfigMaps,
 Events, NetworkPolicies), the Events of all namespaces, and the logs of the
 kubeswift-spin controller, the KubeSwift system pods and the launcher pods
 for the value and its base64 encodings. None was found; see
-[compatibility.md](compatibility.md#tested-versions).
+[compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05).
 
 Trust consequences:
 
@@ -235,9 +235,11 @@ application.
   identity. Tag creation is therefore restricted to maintainers by a
   repository ruleset (see [releasing.md](releasing.md#repository-settings)),
   and verifiers should check the exact certificate identity of the tag
-  they verify, not a pattern. They build multi-architecture images with BuildKit SBOM and
-  provenance attestations, sign images and the chart with cosign keyless
-  signing, and pin the image digests into the published chart. An existing
+  they verify, not a pattern. The release jobs build multi-architecture
+  images with BuildKit SBOM and provenance attestations, sign the images,
+  the chart and the example artifacts with cosign keyless signing, and pin
+  the image digests into the published chart. v0.1.0-rc1 is the first run
+  of the release workflow. An existing
   runtime image is reused only after `cosign verify` confirms it was signed
   by this release workflow. Jobs that run third-party build code (cargo)
   have read-only tokens; checkouts do not persist credentials.
@@ -277,8 +279,9 @@ executor names a cosign key Secret.
   the cluster's NetworkPolicy implementation. A `podSelector` peer is only
   as strong as the trust in everyone who can label pods in the selected
   namespaces, and that includes SpinApp authors through `spec.podLabels`;
-  prefer `namespaceSelector` peers for namespaces you control. A CNI that does not enforce
-  NetworkPolicy enforces neither the port restriction nor the annotation.
+  prefer `namespaceSelector` peers for namespaces you control. A CNI that
+  does not enforce NetworkPolicy enforces neither the port restriction nor
+  the annotation.
   KubeSwift's readiness and liveness probes run inside the launcher pod and
   are not affected. On KubeSwift v0.15.1 all inbound traffic is denied.
 - kubeswift-spin creates no NetworkPolicy, Service, EndpointSlice or proxy
@@ -395,7 +398,7 @@ They never contain values of variables or runtime-config options.
 - `deploymentConfig.caCertSecret` is not implemented.
 - The KVM path was validated on one lab cluster, on linux/amd64 only (see
   [compatibility.md](compatibility.md#tested-versions)). arm64 images are
-  published but untested.
+  built and published but not validated.
 
 ## Reporting vulnerabilities
 
