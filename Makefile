@@ -93,6 +93,11 @@ lint-workflows: $(ACTIONLINT) ## Lint GitHub Actions workflows (with shellcheck 
 	$(ACTIONLINT) .github/workflows/*.yaml
 	@command -v shellcheck >/dev/null || echo "note: shellcheck is not installed; CI also runs it on workflow scripts"
 
+.PHONY: lint-shell
+lint-shell: ## Run shellcheck (warnings and errors) on the repository's shell scripts.
+	@command -v shellcheck >/dev/null || { echo "shellcheck is not installed"; exit 1; }
+	shellcheck --severity=warning $$(git ls-files '*.sh')
+
 .PHONY: vulncheck
 vulncheck: $(GOVULNCHECK) ## Scan Go dependencies for known vulnerabilities.
 	$(GOVULNCHECK) ./...

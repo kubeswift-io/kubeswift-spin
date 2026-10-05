@@ -58,7 +58,7 @@ jobs:
       - name: Format, vet, generated code, dependencies, prose
         run: make fmt-check vet verify-generated check-deps check-prose
       - name: Lint
-        run: make lint lint-workflows
+        run: make lint lint-workflows lint-shell
       - name: Unit and envtest
         run: make test ENVTEST_K8S_VERSION=${{ matrix.k8s }}
       - name: Vulnerability scan

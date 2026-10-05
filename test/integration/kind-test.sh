@@ -83,8 +83,20 @@ set_ready() {
     '{"status":{"phase":"Running","conditions":[{"type":"WorkloadReady","status":"True","reason":"ProbeSucceeded","message":"","lastTransitionTime":"2026-01-01T00:00:00Z"}]}}' >/dev/null
 }
 
-spinkube_crds="$(go -C "$ROOT" list -m -f '{{.Dir}}' github.com/spinkube/spin-operator)/config/crd/bases"
-kubeswift_crds="$(go -C "$ROOT" list -m -f '{{.Dir}}' github.com/kubeswift-io/kubeswift)/config/crd/bases"
+# module_dir prints the module cache directory of a go.mod dependency,
+# downloading it first: "go list -m" prints an empty Dir for a module that is
+# not in the cache yet, which a fresh CI runner hits for test-only modules.
+module_dir() {
+  local dir
+  dir="$(go -C "$ROOT" mod download -json "$1" | sed -n 's/^[[:space:]]*"Dir": "\(.*\)",*$/\1/p')"
+  if [[ -z "$dir" || ! -d "$dir" ]]; then
+    printf 'FAIL: cannot locate module %s in the module cache\n' "$1" >&2
+    exit 1
+  fi
+  printf '%s\n' "$dir"
+}
+spinkube_crds="$(module_dir github.com/spinkube/spin-operator)/config/crd/bases"
+kubeswift_crds="$(module_dir github.com/kubeswift-io/kubeswift)/config/crd/bases"
 
 log "creating kind cluster $CLUSTER"
 kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
