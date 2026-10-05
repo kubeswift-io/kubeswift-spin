@@ -188,7 +188,7 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 			add("spec.deploymentConfig.spinImage is not applicable: use the %s annotation to select the runtime rootfs image", AnnRuntimeImage)
 		}
 		if dc.CACertSecret != "" {
-			add("spec.deploymentConfig.caCertSecret is not supported: KubeSwift SwiftSandbox has no secure file or secret projection (see docs/upstream/kubeswift-sandbox-secret-projection.md)")
+			add("spec.deploymentConfig.caCertSecret is not supported yet by kubeswift-spin; the runtime image uses its built-in CA bundle")
 		}
 		// installDefaultCACerts needs no action: the runtime image always
 		// ships a CA bundle. See docs/executor-contract.md.

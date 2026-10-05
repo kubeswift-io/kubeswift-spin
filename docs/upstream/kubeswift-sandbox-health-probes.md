@@ -1,6 +1,6 @@
 # KubeSwift requirement: workload readiness and liveness probes for SwiftSandbox
 
-Status: proposal for KubeSwift. Not implemented in KubeSwift v0.15.1. Tracked in [kubeswift-io/kubeswift#729](https://github.com/kubeswift-io/kubeswift/issues/729).
+Status: implemented in KubeSwift v0.16.0 (`spec.readinessProbe`, `spec.livenessProbe`, condition `WorkloadReady`), tracked in [kubeswift-io/kubeswift#729](https://github.com/kubeswift-io/kubeswift/issues/729). kubeswift-spin uses it for `spec.checks` and `readyReplicas` (see [executor-contract.md](../executor-contract.md#probes)). The text below is the original proposal; the shipped API may differ in detail.
 
 ## User problem
 

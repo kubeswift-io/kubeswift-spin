@@ -12,8 +12,9 @@ a Kubernetes controller that adapts one Kubernetes API to another.
 Write the controller and the runtime entrypoint in Go, using
 controller-runtime and the upstream Spin Operator Go API
 (`github.com/spinkube/spin-operator` v0.6.1). The KubeSwift sandbox API is
-declared in `internal/sandboxapi` and checked against the KubeSwift v0.15.1
-Go types and CRDs by a contract test (see
+declared in `internal/sandboxapi` and checked against the pinned KubeSwift
+Go types and CRDs (v0.15.1 when this was decided, v0.16.0 now) by a
+contract test (see
 [ADR 0011](0011-apache-license-and-sandbox-api.md)). Tests use envtest with
 the CRDs shipped in both upstream modules.
 

@@ -40,11 +40,11 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 |---|---|---|
 | kubeswift-spin controller | trusted control plane component | Unprivileged pod. Reads SpinApps and executors, creates and deletes SwiftSandboxes, patches SpinApp status. No Secret, ConfigMap or Pod access. |
 | Spin Operator | trusted | Creates the SpinApp Service. Has broad permissions of its own, including Secrets. |
-| KubeSwift controller and launcher | trusted, node trust boundary | Privileged on nodes; materializes rootfs images, boots microVMs. |
+| KubeSwift controller and launcher | trusted, node trust boundary | Privileged on nodes; materializes rootfs images, boots microVMs. With KubeSwift v0.16.0 the launcher reads the Secrets a sandbox references, with its own per-sandbox ServiceAccount, and delivers them to the guest. |
 | Runtime image | trusted supply chain artifact | Built and signed by this project; contains Spin and the entrypoint. |
-| Spin runtime in the guest | trusted to enforce Wasm isolation | Runs as UID 65532 inside the guest after the entrypoint drops root. |
+| Spin runtime in the guest | trusted to enforce Wasm isolation | Runs as UID 65532 inside the guest after the entrypoint drops root. Holds the registry credentials and Secret-backed runtime configuration of its SpinApp. |
 | Wasm components | untrusted | Application code, possibly third-party or generated. |
-| SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to. |
+| SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to, and can make any Secret in that namespace available to their application (see [Secrets](#secrets)). |
 | Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest. |
 
 ## Threat actors
@@ -92,42 +92,73 @@ these settings on the rendered chart.
 ## Secrets
 
 kubeswift-spin never reads a Kubernetes Secret and never places a secret
-value in any object, log or Event. This is a design decision driven by how
-KubeSwift v0.15.1 handles sandbox input: `spec.env`, `command` and `args` are
-written in plain text into the `<sandbox>-runtime-intent` ConfigMap, and
-`env[].valueFrom` is dropped. Copying a resolved Secret into those fields
-would expose it to anyone who can read ConfigMaps or SwiftSandboxes in the
-namespace.
+value in any object, log or Event. The controller has no Secret, ConfigMap
+or Pod permissions, and `make helm-lint` fails if the chart grants them.
 
-Consequently:
+KubeSwift writes a sandbox's literal `env`, `command` and `args` in plain
+text into the `<sandbox>-runtime-intent` ConfigMap, so a value copied into
+those fields would be readable by anyone who can read ConfigMaps or
+SwiftSandboxes in the namespace. kubeswift-spin therefore passes Secrets
+only as references, which KubeSwift v0.16.0 resolves:
 
-- `variables[].valueFrom.secretKeyRef`, `runtimeConfig.loadFromSecret`,
-  secret-backed runtime-config options and `imagePullSecrets` are rejected
-  with `UnsupportedConfiguration`. An executor that sets
-  `deploymentConfig.caCertSecret` is invalid (`ExecutorInvalid`).
-- Runtime-config options whose names denote credentials must be empty, and
-  URLs with embedded credentials are rejected, so a user cannot paste a
-  token into the SpinApp and have it copied into a ConfigMap.
-- Literal variable values are copied into the sandbox spec. They are
-  visible to anyone who can read the SpinApp, and additionally to anyone who
-  can read SwiftSandboxes or ConfigMaps in the namespace. Do not use
-  variables for secrets.
-- Condition messages, Events and logs name fields and variables, never
-  values. Unit tests assert that findings never contain the values they
-  describe. Controller logs record names, namespaces, revisions and reasons,
-  not objects.
-- The runtime-config file inside the guest is mode 0600, owned by the Spin
-  user, and its environment variable is removed before Spin starts.
+| SpinApp field | In the SwiftSandbox | In the guest |
+|---|---|---|
+| `variables[].valueFrom.secretKeyRef` | `env` entry `SPIN_VARIABLE_<NAME>` with `valueFrom.secretKeyRef` | environment variable read by Spin |
+| runtime-config option `valueFrom.secretKeyRef` | placeholder `kubeswift-spin-secret:KUBESWIFT_SPIN_SECRET_<n>` in the rendered TOML, and `env` entry `KUBESWIFT_SPIN_SECRET_<n>` with `valueFrom.secretKeyRef` | substituted into the runtime-config file by the entrypoint as root; the variables are removed before Spin starts |
+| `runtimeConfig.loadFromSecret` | `secretFiles` entry for key `runtime-config.toml` | `/run/kubeswift-spin/runtime-config.toml` (root, 0400), copied to `/var/lib/kubeswift-spin/runtime-config.toml` (UID 65532, 0600) |
+| `imagePullSecrets` | `secretFiles` entry for key `.dockerconfigjson` per Secret | `/run/kubeswift-spin/registry-auth/<i>.json` (root, 0400), merged into `/var/lib/kubeswift-spin/home/.docker/config.json` (UID 65532, 0600) |
 
-The KubeSwift feature that would allow secure delivery is specified in
-[upstream/kubeswift-sandbox-secret-projection.md](upstream/kubeswift-sandbox-secret-projection.md).
+The KubeSwift launcher reads the Secrets with its own per-sandbox
+ServiceAccount and hands the values to the guest without writing them to
+any object, log or node disk. The KVM e2e lab run checked that a
+Secret-backed variable reached Spin and that its value was in no
+SwiftSandbox and no ConfigMap in the namespace. Secret files need the
+sandbox kernel 6.6.14 or later.
+
+Trust consequences:
+
+- **SpinApp authors can use any Secret in their namespace.** The KubeSwift
+  webhook does not check that the author of a SpinApp may read the Secrets
+  it references. Anyone who can create a SpinApp in a namespace can expose
+  that namespace's Secrets to their application, which can return them in a
+  response. This is the same trust as a Pod's `secretKeyRef`: keep Secrets
+  that a namespace's SpinApp authors must not see out of that namespace.
+- **Credentials are inside the guest.** Registry credentials and
+  Secret-backed runtime configuration are readable by the Spin process
+  (UID 65532), not by Wasm components, which see only what Spin's APIs give
+  them. A Secret-backed variable is visible to the components that declare
+  it. An attacker who escapes the Wasm sandbox can read the credentials of
+  that SpinApp.
+- **Rotation.** Values are delivered when a sandbox starts. The sandbox
+  revision hashes Secret names and keys, not values, so rotating a Secret
+  does not replace replicas; they keep the old value until replaced.
+
+Still rejected:
+
+- `configMapKeyRef` (variables and runtime-config options), because
+  KubeSwift refuses every `valueFrom` source other than `secretKeyRef`;
+  `fieldRef` and `resourceFieldRef` have no meaning in a guest.
+- Non-empty literal values of credential-named runtime-config options and
+  URLs with embedded credentials. The message asks for
+  `valueFrom.secretKeyRef` instead.
+- `deploymentConfig.caCertSecret` on an executor (`ExecutorInvalid`): not
+  implemented.
+- Every Secret reference on KubeSwift before v0.16.0
+  (`UnsupportedConfiguration`).
+
+Literal variable values are copied into the sandbox spec and the
+runtime-intent ConfigMap. Do not use literal variables for secrets.
+Condition messages, Events and logs name fields and variables, never
+values; unit tests assert that findings and entrypoint errors never contain
+the values they describe. Controller logs record names, namespaces,
+revisions and reasons, not objects.
 
 Two Secret names may appear in an executor profile
 (`runtime-image-pull-secret`, `runtime-image-verify-key-secret`). They are
 names only; KubeSwift reads them on the host side to pull and verify the
 runtime image, and their contents never reach the guest. They are distinct
-from credentials Spin would need inside the guest to pull a private
-application artifact, which are not supported.
+from `imagePullSecrets`, which Spin uses inside the guest to pull the
+application.
 
 ## Runtime image and guest
 
@@ -140,7 +171,9 @@ application artifact, which are not supported.
   sets `PR_SET_NO_NEW_PRIVS`, and execs Spin. Spin and its trigger processes
   run unprivileged in the guest (verified by `make runtime-test`).
 - The entrypoint accepts only `up` and `--version` and requires the
-  runtime-config flag and variable to match exactly.
+  runtime-config flag and variable to match exactly. It reads secret files
+  only from `/run/kubeswift-spin`, at most 64 KiB each, before it drops
+  root, and never prints their contents.
 - Spin listens on port 3000, so it needs no capability.
 - The guest root filesystem is a read-only image with a memory-backed
   overlay; nothing persists across a replacement.
@@ -181,22 +214,36 @@ against the runtime image's CA bundle. kubeswift-spin does not pass
 `--insecure`. It does not verify application artifact signatures and does
 not resolve tags to digests, so a mutable tag can change the code that runs
 on the next replacement. Use digest references
-(`registry/app@sha256:...`) for production SpinApps. Digest pinning at
-reconcile time and host-side verification depend on
-[upstream/kubeswift-sandbox-artifact-projection.md](upstream/kubeswift-sandbox-artifact-projection.md).
+(`registry/app@sha256:...`). KubeSwift v0.16.0 can mount OCI artifacts
+read-only (`spec.artifacts`), but kubeswift-spin does not use it: Spin 4.2.1
+runs an application only from a manifest, a `.wasm` file or a registry
+reference, not from a local OCI layout
+([upstream/kubeswift-sandbox-artifact-projection.md](upstream/kubeswift-sandbox-artifact-projection.md)).
 
 The runtime image itself can be verified by KubeSwift before boot when the
 executor names a cosign key Secret.
 
 ## Network isolation
 
-- Inbound: denied by KubeSwift for every sandbox. kubeswift-spin creates no
-  NetworkPolicy, Service, EndpointSlice or proxy and never modifies launcher
-  pods.
-- Outbound: the executor's network mode (`restricted` by default) plus the
-  component's `allowed_outbound_hosts`. `open` removes all egress
-  restriction, including the cloud metadata block, and should only be used
-  for trusted applications. See [networking.md](networking.md).
+- Inbound (KubeSwift v0.16.0): KubeSwift's sandbox NetworkPolicy admits
+  traffic to the Spin HTTP port (3000, named `http-app`) and nothing else.
+  Without the executor annotation `spin.kubeswift.io/ingress-from`, any
+  source in the cluster may connect to that port, directly or through the
+  SpinApp Service; set the annotation to restrict it to NetworkPolicy peers.
+  On KubeSwift v0.15.1 all inbound traffic is denied.
+- kubeswift-spin creates no NetworkPolicy, Service, EndpointSlice or proxy
+  and never patches, labels or execs into launcher pods. Launcher pod labels
+  come only from `spec.podMetadata`, which KubeSwift applies and which
+  refuses keys under `kubeswift.io` domains; kubeswift-spin also rejects
+  `spec.podLabels` keys under `core.spinkube.dev`, so a SpinApp cannot add
+  itself to another SpinApp's Service selector through `podLabels`.
+- Outbound: the executor's network mode (`restricted` by default), its
+  egress allowlist (`spin.kubeswift.io/egress-allow`, only with
+  `restricted`), plus the component's `allowed_outbound_hosts`.
+  `169.254.0.0/16` stays blocked under `restricted` even with an allowlist.
+  `open` removes all egress restriction, including the cloud metadata
+  block, and should only be used for trusted applications. See
+  [networking.md](networking.md).
 
 ## Namespace tenancy
 
@@ -206,8 +253,8 @@ executor names a cosign key Secret.
   not SpinApp authors. However, any SpinApp author in a namespace can select
   any executor in that namespace: nothing ties an executor to particular
   applications. Put executors with weaker isolation, in particular
-  `network-mode: open`, only in namespaces whose SpinApp authors are
-  trusted with them.
+  `network-mode: open` or a broad `egress-allow`, only in namespaces whose
+  SpinApp authors are trusted with them.
 - Sandboxes are created in the SpinApp's namespace, and KubeSwift resolves
   kernels and Secrets in that namespace.
 - Ownership is by controller owner reference UID, so a user cannot make
@@ -279,13 +326,23 @@ They never contain values of variables or runtime-config options.
 
 ## Known limitations
 
-- No secret delivery to sandboxes; no private application registries.
+- Any SpinApp author in a namespace can expose that namespace's Secrets to
+  their application; KubeSwift does not check the author's access.
+- Registry credentials and Secret-backed configuration are readable by the
+  Spin process in the guest. Rotated Secret values take effect only when a
+  replica is replaced.
+- Without `spin.kubeswift.io/ingress-from`, any cluster source can reach the
+  Spin HTTP port. The annotation has not been exercised on a cluster.
 - Application artifacts are not signature-verified and tags are not
   pinned to digests.
 - Literal variable values are stored in plain text in SwiftSandbox specs and
   KubeSwift runtime-intent ConfigMaps.
 - `open` network mode grants unrestricted egress.
-- The KVM execution path has not been end-to-end tested for this release.
+- `deploymentConfig.caCertSecret` is not implemented.
+- The KVM path was validated on one lab cluster (see
+  [compatibility.md](compatibility.md#tested-versions)); secret files
+  (`imagePullSecrets`, `loadFromSecret`) in a microVM, liveness-failure
+  replacement and arm64 were not tested.
 - The CI and release workflows have not run on GitHub yet.
 
 ## Reporting vulnerabilities

@@ -9,6 +9,8 @@
 {{- with $e.runtimeImage }}{{ $_ := set $ann "spin.kubeswift.io/runtime-image" . }}{{ end }}
 {{- with $e.runtimeImagePullSecret }}{{ $_ := set $ann "spin.kubeswift.io/runtime-image-pull-secret" . }}{{ end }}
 {{- with $e.runtimeImageVerifyKeySecret }}{{ $_ := set $ann "spin.kubeswift.io/runtime-image-verify-key-secret" . }}{{ end }}
+{{- with $e.egressAllow }}{{ $_ := set $ann "spin.kubeswift.io/egress-allow" (toJson .) }}{{ end }}
+{{- with $e.ingressFrom }}{{ $_ := set $ann "spin.kubeswift.io/ingress-from" (toJson .) }}{{ end }}
 {{- with $e.nodeSelector }}
 {{- $pairs := list }}
 {{- range $k, $v := . }}{{ $pairs = append $pairs (printf "%s=%s" $k $v) }}{{ end }}

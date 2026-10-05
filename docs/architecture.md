@@ -43,8 +43,10 @@ proposals in [docs/upstream](upstream/).
 
 ## Verified upstream contracts
 
-These facts were read from upstream source at the pinned versions before
-the controller was written. They constrain the design.
+These facts were read from upstream source at the pinned versions; the
+KubeSwift v0.16.0 facts were also exercised by the KVM e2e lab run (see
+[compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05)). They
+constrain the design.
 
 **Spin Operator v0.6.1, `createDeployment: false`** (`internal/controller/spinapp_controller.go`):
 
@@ -59,7 +61,11 @@ the controller was written. They constrain the design.
   for such executors and requires `replicas >= 1` unless autoscaling is
   enabled.
 
-**KubeSwift v0.15.1 SwiftSandbox** (`api/sandbox/v1alpha1`, `internal/controller/swiftsandbox`):
+**KubeSwift v0.15.1 SwiftSandbox** (`api/sandbox/v1alpha1`, `internal/controller/swiftsandbox`).
+These describe the degraded mode kubeswift-spin uses when the v0.16.0
+features are not detected. KubeSwift v0.16.0 changes the items on `env`,
+networking, launcher pod labels and warm-pool checkout (next list); the
+others still hold.
 
 - CPU (integer vCPUs), memory, command, args, environment, working
   directory, network mode (`restricted`, `open`, `none`), rootfs mode, kernel
@@ -80,6 +86,32 @@ the controller was written. They constrain the design.
 - Warm-pool checkout compares image, network mode and verify key, and falls
   back to a cold boot on a mismatch or when no slot is free.
 - The guest console is available through `swiftctl sandbox logs`.
+
+**KubeSwift v0.16.0 SwiftSandbox** (closes kubeswift-io/kubeswift issues
+#729 to #733):
+
+- `spec.network.ports` exposes named guest ports on the launcher pod, and
+  the sandbox NetworkPolicy admits ingress to those ports only, from any
+  source unless `spec.network.ingress.from` lists NetworkPolicy peers.
+- `spec.readinessProbe` and `spec.livenessProbe` are run by the launcher
+  against the guest; readiness is reported as the `WorkloadReady` condition.
+- `spec.podMetadata` puts labels and annotations on the launcher pod; keys
+  under `kubeswift.io` domains are refused.
+- `env[].valueFrom.secretKeyRef` is honored: the launcher reads the Secret
+  with its own per-sandbox ServiceAccount and hands the value to the guest
+  without writing it to any object, log or node disk. Other `valueFrom`
+  sources are refused.
+- `spec.secretFiles` writes Secret keys as files in the guest; it needs the
+  sandbox kernel 6.6.14 or later.
+- `spec.network.egress.allow` (restricted mode only) admits a Service
+  ClusterIP or an IPv4 CIDR, optionally narrowed to ports;
+  `169.254.0.0/16` stays blocked.
+- `spec.artifacts` mounts OCI artifacts read-only. kubeswift-spin does not
+  use it: Spin 4.2.1 cannot run an application from a local OCI layout.
+- Warm-pool checkout compares the full slot shape (image, network mode,
+  egress, ports, verify key, rootfs mode, kernel, CPU, memory, node
+  selector) and boots cold on a mismatch; sandboxes with artifacts always
+  boot cold.
 
 **Spin v4.2.1**:
 
@@ -106,9 +138,11 @@ the controller was written. They constrain the design.
 - There is no Spin-maintained MCP SDK; the third-party wasmcp project builds
   MCP servers from components.
 
-The consequences: the controller can run Spin in sandboxes and manage
-replicas, but it cannot expose them, verify their readiness, or give them
-secrets without new, generic KubeSwift features.
+The consequences: with KubeSwift v0.16.0, the controller runs Spin in
+sandboxes, exposes them through Spin Operator's unchanged Service, verifies
+readiness with KubeSwift probes and delivers Secrets by reference, using
+only public SwiftSandbox fields. With v0.15.1 it can run and manage replicas
+but not expose them, verify their readiness or give them secrets.
 
 ## Control flow
 
@@ -121,14 +155,15 @@ sequenceDiagram
     participant KS as KubeSwift
     participant VM as microVM (Spin)
     Dev->>API: apply SpinApp (executor: kubeswift)
-    SO->>API: apply Service <app> (no endpoints)
+    SO->>API: apply Service <app> (selects the status=ready label)
     KSS->>API: read SpinApp and SpinAppExecutor
-    KSS->>KSS: check ownership, profile, compatibility
-    KSS->>API: create SwiftSandbox <app>-0..N-1
-    KS->>API: launcher pod, intent ConfigMap, NetworkPolicy
-    KS->>VM: boot runtime rootfs, run entrypoint
-    VM->>VM: drop root, spin up --from <artifact>
-    KS->>API: SwiftSandbox status (Running)
+    KSS->>KSS: check ownership, profile, features, compatibility
+    KSS->>API: create SwiftSandbox <app>-0..N-1 (ports, labels, probes)
+    KS->>API: launcher pod with labels and port, intent ConfigMap, NetworkPolicy
+    KS->>VM: boot runtime rootfs, deliver Secrets, run entrypoint
+    VM->>VM: write config, drop root, spin up --from <artifact>
+    KS->>VM: readiness probe from the launcher
+    KS->>API: SwiftSandbox status (Running, WorkloadReady)
     KSS->>API: patch SpinApp status (Available, Progressing, readyReplicas)
 ```
 
@@ -201,9 +236,14 @@ flowchart LR
   It is not converted into a container image.
 
 Consequences: the guest needs network egress to the application registry,
-which rules out network mode `none`; and registry credentials would have to
-be inside the guest, which KubeSwift cannot do securely today. Both are
-addressed by [kubeswift-sandbox-artifact-projection.md](upstream/kubeswift-sandbox-artifact-projection.md).
+which rules out network mode `none`, and registry credentials for a private
+registry must be inside the guest. kubeswift-spin delivers them from
+`imagePullSecrets` as KubeSwift secret files (KubeSwift v0.16.0; see
+[executor-contract.md](executor-contract.md#registry-credentials)).
+KubeSwift v0.16.0 can also mount OCI artifacts read-only, which would keep
+credentials on the host, but Spin 4.2.1 cannot run an application from a
+local OCI layout, so kubeswift-spin does not use it
+([kubeswift-sandbox-artifact-projection.md](upstream/kubeswift-sandbox-artifact-projection.md)).
 
 ## Runtime image
 
@@ -211,8 +251,9 @@ The runtime image contains the static Spin v4.2.1 binary (checksum-pinned),
 the kubeswift-spin entrypoint and the distroless `static` base (CA bundle,
 passwd entries, no shell, no package manager). The entrypoint prepares
 writable directories on the guest's memory-backed overlay, writes the
-runtime-config file, switches from root to UID 65532, sets
-`no_new_privs` and execs Spin. See [runtime-image.md](runtime-image.md).
+runtime-config file (substituting Secret values) and the registry
+credentials, switches from root to UID 65532, sets `no_new_privs` and execs
+Spin. See [runtime-image.md](runtime-image.md).
 
 ## Replica lifecycle
 
@@ -231,27 +272,37 @@ stateDiagram-v2
 
 Replicas follow a StatefulSet-like model: ordinal `i` is always the sandbox
 named `<app>-i`. Immutable sandbox specs mean replacement is delete then
-recreate, gated so at most one running replica is replaced at a time.
+recreate, gated so at most one available replica (ready on KubeSwift
+v0.16.0) is replaced at a time.
 
 ## Networking
 
-Networked SwiftSandboxes deny all ingress and sit behind the launcher's NAT,
-and KubeSwift offers no way to expose a guest port. kubeswift-spin does not
-work around this: it does not create NetworkPolicies, modify launcher pods,
-add sidecars or program iptables. HTTP SpinApps therefore run but are not
-reachable, and their status says so (`Available=False`,
-`NetworkUnavailable`). The generic KubeSwift feature that would fix this,
-and how Spin Operator's existing Service would then work unchanged, is
-specified in
-[kubeswift-sandbox-service-exposure.md](upstream/kubeswift-sandbox-service-exposure.md).
-kubeswift-spin detects that feature through the published OpenAPI schema
-(see [networking.md](networking.md)).
+On KubeSwift v0.16.0, kubeswift-spin sets `spec.network.ports` (`http-app`,
+guest port 3000), `spec.podMetadata` with the label
+`core.spinkube.dev/app.<name>.status=ready`, and readiness and liveness
+probes on every SwiftSandbox. KubeSwift exposes the port on the launcher
+pod and admits ingress to it; Spin Operator's unchanged SpinApp Service
+selects the launcher pods, and its endpoints follow readiness. Egress stays
+under KubeSwift's network mode, optionally widened by an allowlist of
+Services or CIDRs.
+
+kubeswift-spin still creates no NetworkPolicy, Service or EndpointSlice,
+and never modifies launcher pods, adds sidecars or programs iptables
+([ADR 0005](adr/0005-sandbox-networking-boundary.md)). It uses each
+KubeSwift feature only when the published OpenAPI schema shows it
+([ADR 0012](adr/0012-feature-detection.md)). On KubeSwift v0.15.1 HTTP
+SpinApps run but are not reachable, and their status says so
+(`Available=False`, `NetworkUnavailable`). Details:
+[networking.md](networking.md).
 
 ## Status
 
 SpinApp status is computed from the observed sandboxes, the compatibility
-findings and the detected capabilities, and written onto the standard
-SpinKube fields. `Running` is never treated as ready. See
+findings and the detected features, and written onto the standard SpinKube
+fields. `Running` is never treated as ready: a replica is ready only when its
+sandbox has a readiness probe and KubeSwift reports `WorkloadReady=True`.
+Running replicas that do not pass the probe yet give `Available=False` with
+reason `ApplicationNotReady`. See
 [executor-contract.md](executor-contract.md#status).
 
 ## Warm pools
@@ -260,8 +311,10 @@ A profile can name a SwiftSandboxPool. Pools hold pre-booted runtime rootfs
 microVMs; a SwiftSandbox with `poolRef` claims one and receives its
 command and environment over vsock, skipping the cold boot. The pool is
 capacity, not the replica set: kubeswift-spin still creates one SwiftSandbox
-per replica. kubeswift-spin verifies the full slot shape because KubeSwift's
-checkout does not (see
+per replica. kubeswift-spin verifies the full slot shape, including exposed
+ports and the egress allowlist, before it sets `poolRef`, and refuses an
+incompatible pool with `WarmPoolIncompatible`. KubeSwift v0.16.0 also
+compares the full shape at checkout; v0.15.1 did not (see
 [kubeswift-sandbox-pool-shape-enforcement.md](upstream/kubeswift-sandbox-pool-shape-enforcement.md)).
 
 ## AI inference path
@@ -276,7 +329,10 @@ flowchart LR
 
 The application plane (Spin, small artifacts, fast lifecycle) and the
 inference plane (KubeSwift GPU lifecycle, model preload, warm GPU pools)
-stay separate; no Spin sandbox needs a GPU. See
+stay separate; no Spin sandbox needs a GPU. A restricted Spin sandbox
+reaches the inference Service through an egress allowlist entry, with its
+token delivered from a Secret; that path was validated on the lab cluster
+against a mock server, not against a GPU. See
 [serverless-ai.md](serverless-ai.md).
 
 ## MCP tool servers
@@ -290,9 +346,10 @@ boundaries: WebAssembly capability isolation enforced by Spin (only the
 hosts, variables and stores the manifest allows) and a hardware-virtualized
 microVM. This narrows what a malicious tool can reach; it does not remove
 trust in the hypervisor, the guest kernel, the KubeSwift launcher or the
-host. Reaching an MCP server in a sandbox also depends on sandbox port
-exposure. The example in
-[examples/experimental/mcp](../examples/experimental/mcp/) is experimental.
+host. On KubeSwift v0.16.0 an agent reaches an MCP server in a sandbox
+through the SpinApp Service, like any HTTP SpinApp. The example in
+[examples/experimental/mcp](../examples/experimental/mcp/) is experimental
+and has not been run in a sandbox.
 
 ## Trust boundaries
 

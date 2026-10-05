@@ -13,6 +13,7 @@ Each namespace that runs SpinApps also needs a Ready SwiftKernel named
 Check the controller:
   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "kubeswift-spin.fullname" . }}
 
-With KubeSwift v0.15.1, SwiftSandboxes cannot be exposed or probed, so
-SpinApps run but report Available=False (NetworkUnavailable). See
+With KubeSwift v0.16.0 or later, each SpinApp is served through the Service
+Spin Operator creates for it. On older KubeSwift, sandboxes cannot be
+exposed and SpinApps report Available=False (NetworkUnavailable). See
 docs/networking.md.

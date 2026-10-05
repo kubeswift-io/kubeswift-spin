@@ -5,7 +5,7 @@
 type = "remote_http"
 url = "http://127.0.0.1:8090"
 api_type = "open_ai"
-# Spin requires the key. The mock server ignores it; a real endpoint that
-# needs a token cannot be configured through kubeswift-spin yet (see
-# docs/upstream/kubeswift-sandbox-secret-projection.md).
+# Spin requires the key. The mock server ignores it unless started with
+# --require-token. In Kubernetes, reference a Secret with
+# valueFrom.secretKeyRef (see spinapp.yaml).
 auth_token = ""

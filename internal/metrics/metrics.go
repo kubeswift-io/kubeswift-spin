@@ -24,7 +24,7 @@ const (
 var (
 	Reconciliations = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "kubeswift_spin_reconciliations_total",
-		Help: "SpinApp reconciliations by result (success, error).",
+		Help: "SpinApp reconciliations by result (success, conflict, error).",
 	}, []string{"result"})
 
 	ReconcileErrors = prometheus.NewCounter(prometheus.CounterOpts{

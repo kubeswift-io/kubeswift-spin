@@ -8,7 +8,7 @@ the standard `controller_runtime_*`, `workqueue_*` and Go runtime metrics.
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `kubeswift_spin_reconciliations_total` | counter | `result` (`success`, `error`) | SpinApp reconciliations |
+| `kubeswift_spin_reconciliations_total` | counter | `result` (`success`, `conflict`, `error`) | SpinApp reconciliations; `conflict` is a stale write retried on fresh data, not a failure |
 | `kubeswift_spin_reconcile_errors_total` | counter | none | reconciliations that returned an error |
 | `kubeswift_spin_apps` | gauge | `state` (`available`, `progressing`, `blocked`, `unavailable`) | SpinApps realized by kubeswift-spin |
 | `kubeswift_spin_ready_replicas` | gauge | none | sum of `readyReplicas` |
@@ -22,14 +22,18 @@ Labels are limited to the fixed sets above. Namespaces, application names,
 UIDs, images and error strings are never label values; per-app detail is in
 SpinApp status and Events. `state=blocked` means unsupported configuration,
 an invalid or missing executor, a warm-pool mismatch or a name conflict;
-`state=unavailable` includes every app that runs but cannot be exposed
-(`NetworkUnavailable`), which with KubeSwift v0.15.1 is every running app.
+`state=unavailable` covers apps whose `Progressing` is `False` for another
+reason (for example `SandboxFailed`) and, on KubeSwift before v0.16.0, every
+running app (`NetworkUnavailable`). An app whose replicas run but do not
+pass the readiness probe yet (`ApplicationNotReady`) counts as
+`progressing`.
 
 Useful queries:
 
 ```promql
 sum by (state) (kubeswift_spin_apps)
 rate(kubeswift_spin_sandbox_failures_total[10m])
+sum by (result) (rate(kubeswift_spin_reconciliations_total[5m]))
 sum by (field) (increase(kubeswift_spin_unsupported_configuration_total[1h]))
 ```
 
@@ -99,6 +103,9 @@ spec:
 ```
 
 An in-cluster collector is a cluster address, so it is unreachable from the
-default `restricted` network mode; use an `open` executor or a collector
-with a public address. This path has been verified only at the level of the
-generated sandbox environment, not by exporting data from a sandbox.
+default `restricted` network mode. Allow it with the executor annotation
+`spin.kubeswift.io/egress-allow` (KubeSwift v0.16.0), for example
+`[{"service":{"name":"otel-collector","namespace":"observability"},"ports":[{"port":4318}]}]`,
+or use an `open` executor or a collector with a public address. This path
+has been verified only at the level of the generated sandbox environment,
+not by exporting data from a sandbox.

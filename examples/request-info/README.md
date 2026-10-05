@@ -25,9 +25,9 @@ The response includes `"app_version":"1.2.3"` and the `x-request-id`
 header, and does not include the authorization header.
 
 Spin reads variables from `SPIN_VARIABLE_<NAME>` environment variables.
-kubeswift-spin uses the same mechanism: `spec.variables` literal values in
-`spinapp.yaml` become `SPIN_VARIABLE_APP_VERSION` and `SPIN_VARIABLE_GREETING`
-in the sandbox.
+kubeswift-spin uses the same mechanism: `spec.variables` in `spinapp.yaml`
+become `SPIN_VARIABLE_APP_VERSION` and `SPIN_VARIABLE_GREETING` in the
+sandbox.
 
 ## Deploy
 
@@ -36,8 +36,21 @@ make example-deploy EXAMPLE=request-info EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_
 ```
 
 The SpinApp requests two replicas, so kubeswift-spin creates
-`request-info-0` and `request-info-1`.
+`request-info-0` and `request-info-1`, both behind the Service
+`request-info`.
 
-Variables with `valueFrom` (Secret or ConfigMap references) are rejected
-with `UnsupportedConfiguration`; see
+On KubeSwift v0.16.0 a variable can come from a Secret. The value is passed
+to the guest by KubeSwift and is stored in no SwiftSandbox or ConfigMap:
+
+```yaml
+variables:
+  - name: greeting
+    valueFrom:
+      secretKeyRef:
+        name: greeting
+        key: greeting
+```
+
+The KVM e2e test runs request-info this way and checks both. Variables with
+`configMapKeyRef` are rejected with `UnsupportedConfiguration`; see
 [docs/compatibility.md](../../docs/compatibility.md).

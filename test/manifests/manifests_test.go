@@ -22,6 +22,8 @@ import (
 
 const root = "../.."
 
+var v16 = capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true}
+
 func defaults() executor.Defaults {
 	return executor.Defaults{
 		RuntimeImage:  "ghcr.io/kubeswift-io/kubeswift-spin-runtime:v0.1.0",
@@ -55,6 +57,9 @@ func executors(t *testing.T) map[string]*executor.Profile {
 			t.Fatalf("%s: executor is not labelled as managed by kubeswift-spin", f)
 		}
 		p, err := executor.Parse(&e, defaults())
+		if err == nil {
+			err = p.CheckFeatures(v16)
+		}
 		if err != nil {
 			t.Fatalf("%s: %v", f, err)
 		}
@@ -68,7 +73,7 @@ func executors(t *testing.T) map[string]*executor.Profile {
 
 func TestExecutorManifests(t *testing.T) {
 	ex := executors(t)
-	for _, name := range []string{"kubeswift", "kubeswift-open", "kubeswift-warm"} {
+	for _, name := range []string{"kubeswift", "kubeswift-open", "kubeswift-warm", "kubeswift-egress"} {
 		if ex[name] == nil {
 			t.Errorf("config/executor lacks %s", name)
 		}
@@ -82,8 +87,7 @@ func TestExampleSpinApps(t *testing.T) {
 		t.Fatalf("expected a SpinApp manifest per example, found %d", len(files))
 	}
 	// Examples target KubeSwift v0.16.0 or later.
-	opts := compatibility.Options{MaxReplicas: 20, Resources: translate.DefaultResourcePolicy(),
-		Features: capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true}}
+	opts := compatibility.Options{MaxReplicas: 20, Resources: translate.DefaultResourcePolicy(), Features: v16}
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {

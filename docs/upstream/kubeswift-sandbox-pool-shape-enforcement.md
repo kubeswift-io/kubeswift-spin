@@ -1,6 +1,6 @@
 # KubeSwift requirement: enforce the full slot shape on warm-pool checkout
 
-Status: proposal for KubeSwift. Observed in KubeSwift v0.15.1. Tracked in [kubeswift-io/kubeswift#733](https://github.com/kubeswift-io/kubeswift/issues/733).
+Status: implemented in KubeSwift v0.16.0 (checkout compares the full slot shape and boots cold on a mismatch), tracked in [kubeswift-io/kubeswift#733](https://github.com/kubeswift-io/kubeswift/issues/733). kubeswift-spin still compares the shape itself, including ports and the egress allowlist, and refuses an incompatible pool with `WarmPoolIncompatible` instead of booting cold. The text below is the original proposal and describes v0.15.1.
 
 ## User problem
 

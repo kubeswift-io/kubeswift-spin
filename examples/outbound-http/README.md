@@ -13,7 +13,8 @@ Two independent controls decide whether the request can leave:
 
 1. Spin's `allowed_outbound_hosts`, set from the `target_origin` variable.
    Spin refuses any other host before a packet is sent.
-2. The KubeSwift sandbox network mode of the executor.
+2. The KubeSwift sandbox network mode of the executor and, under
+   `restricted`, its egress allowlist (`spin.kubeswift.io/egress-allow`).
 
 ## Run locally
 
@@ -46,19 +47,35 @@ different allowed origin:
 SPIN_VARIABLE_TARGET_ORIGIN=http://127.0.0.1:9999 ../../bin/spin up --listen 127.0.0.1:3000
 ```
 
-## Expected results by network mode
+## Expected results by executor profile
 
-`spinapp.yaml` targets an in-cluster Service and uses the `kubeswift`
-executor; `spinapp-open.yaml` uses `kubeswift-open`.
+`spinapp.yaml` targets the in-cluster Service
+`upstream.kubeswift-spin-examples.svc.cluster.local:8090` and uses the
+`kubeswift` executor; `spinapp-open.yaml` uses `kubeswift-open`. Both read
+`/fetch` through the SpinApp Service on KubeSwift v0.16.0, for example:
 
-| Executor network mode | In-cluster target | Public internet target |
+```bash
+kubectl -n <namespace> run curl --rm -i --restart=Never --image=curlimages/curl:8.16.0 --command -- curl -sS --max-time 30 http://outbound-http.<namespace>.svc/fetch
+```
+
+| Executor profile | In-cluster target | Public internet target |
 |---|---|---|
-| `restricted` (default) | fails (cluster addresses blocked) | succeeds |
+| `restricted` (default) | fails: packets are dropped, so the request times out and `/fetch` returns 502 or the client gives up first | succeeds |
+| `restricted` with an `egress-allow` entry for the target Service | succeeds | succeeds |
 | `open` | succeeds | succeeds |
 | `none` | not available: kubeswift-spin rejects the executor, because Spin downloads the application over the network at start | |
 
-Observing these results in a sandbox requires calling `/fetch`, which is
-not possible until KubeSwift exposes sandbox ports (see
-[docs/networking.md](../../docs/networking.md)). The table records the
-KubeSwift network modes as documented in KubeSwift v0.15.1; it has not been
-measured through this example.
+For the allowlist case, an executor like
+`config/executor/kubeswift-egress.yaml` with this annotation:
+
+```yaml
+spin.kubeswift.io/egress-allow: '[{"service":{"name":"upstream","namespace":"kubeswift-spin-examples"},"ports":[{"port":8090}]}]'
+```
+
+This example has not been run in a sandbox. Only the first two rows were
+measured, with the serverless-ai application in the KVM e2e test: a
+restricted sandbox without the allowlist could not reach an in-cluster
+Service (the request timed out), and one with an allowlist entry could. The
+`open` and public internet rows follow the KubeSwift documentation and were
+not measured, except that Spin pulled the example applications from
+`ghcr.io` under `restricted`.

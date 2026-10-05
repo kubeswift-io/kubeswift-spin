@@ -1,6 +1,7 @@
 # Default KubeSwift executor profile: restricted networking (DNS and public
-# internet egress only, no cluster access, no ingress). The Helm chart
-# creates this executor for the namespaces listed in values.executors.
+# internet egress only, no cluster access). With KubeSwift v0.16.0 or later
+# only the Spin HTTP port is reachable, through the SpinApp Service. The Helm
+# chart creates this executor for the namespaces listed in values.executors.
 apiVersion: core.spinkube.dev/v1alpha1
 kind: SpinAppExecutor
 metadata:

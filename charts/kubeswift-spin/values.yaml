@@ -58,6 +58,12 @@ executors:
     # runtimeImage: ""            # overrides runtimeImage for this executor
     # runtimeImagePullSecret: ""
     # runtimeImageVerifyKeySecret: ""
+    # KubeSwift v0.16.0 or later:
+    # egressAllow:                # destinations restricted sandboxes may reach
+    #   - service: {name: llm, namespace: inference}
+    #     ports: [{port: 8000}]
+    # ingressFrom:                # NetworkPolicy peers allowed to reach the Spin port
+    #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: frontend}}
     # otel:
     #   exporter_otlp_endpoint: http://otel-collector.observability:4318
 

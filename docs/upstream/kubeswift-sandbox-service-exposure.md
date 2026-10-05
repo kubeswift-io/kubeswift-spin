@@ -1,6 +1,6 @@
 # KubeSwift requirement: inbound port exposure for SwiftSandbox
 
-Status: proposal for KubeSwift. Not implemented in KubeSwift v0.15.1. Tracked in [kubeswift-io/kubeswift#729](https://github.com/kubeswift-io/kubeswift/issues/729).
+Status: implemented in KubeSwift v0.16.0 (`spec.network.ports`, `spec.network.ingress`, `spec.podMetadata`), tracked in [kubeswift-io/kubeswift#729](https://github.com/kubeswift-io/kubeswift/issues/729). kubeswift-spin uses it to put replicas behind the SpinApp Service (see [networking.md](../networking.md)). The text below is the original proposal; the shipped API may differ in detail.
 
 ## User problem
 

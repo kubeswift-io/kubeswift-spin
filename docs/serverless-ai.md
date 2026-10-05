@@ -2,8 +2,9 @@
 
 This document describes how Spin applications on KubeSwift are meant to use
 GPU inference. The application side is implemented and tested (the
-[serverless-ai](../examples/serverless-ai/) example); the GPU side is a
-design that this project has not validated.
+[serverless-ai](../examples/serverless-ai/) example), including on a KVM lab
+cluster against a mock inference server; the GPU side is a design that this
+project has not validated.
 
 ## Separation of planes
 
@@ -36,10 +37,12 @@ two planes scale and fail independently and are owned by different teams.
 ## Application side (implemented)
 
 A component calls `spin_sdk::llm::infer_with_options` with a model name.
-The SpinApp's runtime configuration tells Spin where to send it:
+The SpinApp's runtime configuration tells Spin where to send it, and the
+token comes from a Secret:
 
 ```yaml
 spec:
+  executor: kubeswift-egress
   runtimeConfig:
     llmCompute:
       type: remote_http
@@ -49,56 +52,76 @@ spec:
         - name: api_type
           value: open_ai
         - name: auth_token
-          value: ""
+          valueFrom:
+            secretKeyRef:
+              name: llm-token
+              key: token
 ```
 
-kubeswift-spin renders this into the sandbox runtime-config file. With
+kubeswift-spin renders this into the sandbox runtime-config file. The token
+is not in the SwiftSandbox: the rendered file holds a placeholder, KubeSwift
+v0.16.0 delivers the Secret value to the guest as an environment variable,
+and the entrypoint substitutes it before Spin starts (see
+[executor-contract.md](executor-contract.md#runtime-configuration)). With
 `api_type = "open_ai"`, Spin 4.2.1 posts an OpenAI chat-completion request
 (`model`, `messages`, `max_completion_tokens`) to `<url>/v1/chat/completions`
-and reads `choices[0].message.content` and `usage`. The model name must be
-listed in the component's `ai_models` and served under that name by the
-inference server.
+with the token as a bearer token, and reads `choices[0].message.content`
+and `usage`. The model name must be listed in the component's `ai_models`
+and served under that name by the inference server.
+
+The inference Service is a cluster address, which the `restricted` network
+mode blocks. The `kubeswift-egress` executor
+(`config/executor/kubeswift-egress.yaml`) keeps `restricted` and allows that
+one Service and port:
+
+```yaml
+metadata:
+  annotations:
+    spin.kubeswift.io/egress-allow: '[{"service":{"name":"llm","namespace":"inference"},"ports":[{"port":8000}]}]'
+```
+
+An `open` executor also works but removes every egress restriction.
 
 Constraints in this release:
 
-- The inference Service is a cluster address, so the SpinApp needs an
-  `open` executor; `restricted` blocks cluster egress
-  ([upstream/kubeswift-sandbox-egress-allowlist.md](upstream/kubeswift-sandbox-egress-allowlist.md)
-  proposes a narrower option).
-- `auth_token` must be empty: tokens cannot be delivered to a sandbox
-  securely yet
-  ([upstream/kubeswift-sandbox-secret-projection.md](upstream/kubeswift-sandbox-secret-projection.md)).
-  Protect the endpoint with network policy instead.
+- Secret references and the egress allowlist need KubeSwift v0.16.0.
+  Secret files (`loadFromSecret`, `imagePullSecrets`) also need the sandbox
+  kernel 6.6.14 or later; this example uses neither.
+- The token is readable by the Spin process in the guest, not by the Wasm
+  component.
 - `llmCompute.type: spin` (local inference inside the Spin process) is
   rejected; inference belongs in the inference plane.
 
-The example is tested against a mock OpenAI-compatible server
-(`examples/tools/upstream`) both under `spin up` and in the runtime image.
+Tests: `make example-test` and `make runtime-test` run the example against
+the mock OpenAI-compatible server in `examples/tools/upstream`; the runtime
+test also checks that a Secret-backed token is substituted and that a wrong
+token is refused by the server. On the KVM lab cluster the e2e test ran the
+mock as an in-cluster Service, reached it through the egress allowlist with a
+Secret-backed token, and confirmed that the same application on a restricted
+executor without the allowlist could not reach it.
 
 ## Inference side (design)
 
-The inference server must be reachable through a Kubernetes Service.
-
-**With KubeSwift v0.15.1**, that rules out SwiftSandbox for the server
-itself (sandboxes cannot expose ports). A KubeSwift SwiftGuest or
-SwiftGuestPool with GPU passthrough can expose ports through a Service
-(`SwiftGuest.spec.network.ports`, `SwiftGuestPool` service ports), so the
-inference server would run there, for example:
+The inference server must be reachable through a Kubernetes Service and
+serve an OpenAI-compatible API, for example:
 
 - vLLM with `--served-model-name default-model`,
 - llama.cpp server with `--alias default-model`,
 - LocalAI with a model configuration named `default-model`.
 
-Refer to the KubeSwift documentation for GPU passthrough and guest port
-exposure; this project does not ship manifests for them.
-
-**Once sandbox port exposure exists**
-([upstream/kubeswift-sandbox-service-exposure.md](upstream/kubeswift-sandbox-service-exposure.md)),
-SwiftSandbox becomes the better fit for the inference plane as well:
-KubeSwift already supports GPU sandboxes (`gpuProfileRef` or
-`gpuResourceClaim`), read-only model artifacts shared per node
+With KubeSwift v0.16.0, a SwiftSandbox can run the inference server and
+expose its port (`spec.network.ports`) behind a Service of your own that
+selects the launcher pod through `spec.podMetadata`, with a readiness probe
+gating its endpoints. KubeSwift also supports GPU sandboxes (`gpuProfileRef`
+or `gpuResourceClaim`), read-only model artifacts shared per node
 (`spec.model`), and warm GPU pools that hold the model resident
-(`SwiftSandboxPool` with `gpuProfileRef` and `model`).
+(`SwiftSandboxPool` with `gpuProfileRef` and `model`). A SwiftGuest or
+SwiftGuestPool with GPU passthrough and `spec.network.ports` is an
+alternative.
+
+This is a design. This project ships no inference manifests and has not run
+an inference server in a GPU sandbox; refer to the KubeSwift documentation
+for GPU passthrough.
 
 ## Why this split
 
@@ -107,5 +130,5 @@ KubeSwift already supports GPU sandboxes (`gpuProfileRef` or
 - Spin applications stay small and can be replaced and scaled without
   touching GPUs.
 - A compromised application sandbox holds no GPU and no model weights; it
-  can only call the inference endpoint its network mode and Spin manifest
-  allow.
+  can only call the inference endpoint its network mode, egress allowlist
+  and Spin manifest allow, with the token of its own SpinApp.

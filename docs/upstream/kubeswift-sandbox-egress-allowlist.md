@@ -1,6 +1,6 @@
 # KubeSwift requirement: egress allowlist for restricted sandboxes
 
-Status: proposal for KubeSwift. Not implemented in KubeSwift v0.15.1. Tracked in [kubeswift-io/kubeswift#732](https://github.com/kubeswift-io/kubeswift/issues/732).
+Status: implemented in KubeSwift v0.16.0 (`spec.network.egress.allow`, restricted mode only), tracked in [kubeswift-io/kubeswift#732](https://github.com/kubeswift-io/kubeswift/issues/732). kubeswift-spin uses it through the executor annotation `spin.kubeswift.io/egress-allow` (see [networking.md](../networking.md#egress-allowlist)). The text below is the original proposal; the shipped API may differ in detail.
 
 ## User problem
 

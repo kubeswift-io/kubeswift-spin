@@ -155,16 +155,31 @@ func requestsFor(apps []spinv1alpha1.SpinApp) []reconcile.Request {
 	return out
 }
 
+// conflictRequeue is the short delay before retrying after a write conflict.
+const conflictRequeue = 200 * time.Millisecond
+
 // Reconcile realizes one SpinApp.
-func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
-	defer func() {
-		if err != nil {
-			metrics.Reconciliations.WithLabelValues("error").Inc()
-			metrics.ReconcileErrors.Inc()
-		} else {
-			metrics.Reconciliations.WithLabelValues("success").Inc()
-		}
-	}()
+func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	res, err := r.reconcile(ctx, req)
+	if apierrors.IsConflict(err) {
+		// The object changed since the cache read it, usually because of
+		// this controller's own previous write. The status patch carries the
+		// resource version precisely to detect this; retry on fresh data
+		// without reporting an error.
+		log.FromContext(ctx).V(1).Info("conflict, retrying", "error", err.Error())
+		metrics.Reconciliations.WithLabelValues("conflict").Inc()
+		return ctrl.Result{RequeueAfter: conflictRequeue}, nil
+	}
+	if err != nil {
+		metrics.Reconciliations.WithLabelValues("error").Inc()
+		metrics.ReconcileErrors.Inc()
+	} else {
+		metrics.Reconciliations.WithLabelValues("success").Inc()
+	}
+	return res, err
+}
+
+func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	key := req.String()
 
 	var app spinv1alpha1.SpinApp

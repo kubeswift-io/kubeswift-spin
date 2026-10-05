@@ -51,5 +51,8 @@ has its own store, and data is lost when a sandbox is replaced (scale down,
 rollout, failure). KubeSwift scratch disks are raw block devices that the
 workload must format and mount itself, which kubeswift-spin does not do. Use
 an external store (for example a Redis key-value store type) for shared or
-durable data, keeping in mind that credentials cannot yet be delivered to the
-sandbox securely.
+durable data. Its credentials can come from a Secret with
+`valueFrom.secretKeyRef` on the option (KubeSwift v0.16.0; see
+[docs/executor-contract.md](../../docs/executor-contract.md#runtime-configuration)),
+and an in-cluster store needs an egress allowlist entry in the executor.
+This has not been tested with an external store.

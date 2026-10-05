@@ -77,6 +77,12 @@ set_running() {
     -p '{"status":{"phase":"Running"}}' >/dev/null
 }
 
+# set_ready stands in for KubeSwift reporting the readiness probe passing.
+set_ready() {
+  $K -n "$NS" patch swiftsandbox "$1" --subresource=status --type=merge -p \
+    '{"status":{"phase":"Running","conditions":[{"type":"WorkloadReady","status":"True","reason":"ProbeSucceeded","message":"","lastTransitionTime":"2026-01-01T00:00:00Z"}]}}' >/dev/null
+}
+
 spinkube_crds="$(go -C "$ROOT" list -m -f '{{.Dir}}' github.com/spinkube/spin-operator)/config/crd/bases"
 kubeswift_crds="$(go -C "$ROOT" list -m -f '{{.Dir}}' github.com/kubeswift-io/kubeswift)/config/crd/bases"
 
@@ -156,12 +162,20 @@ args="$(jp swiftsandbox/hello-0 '{.spec.args}')"
 [[ "$args" == *'--from=ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0'* ]] && ok "spin up arguments" || fail "args: $args"
 [[ "$(jp swiftsandbox/hello-0 '{.spec.image}')" == "ghcr.io/kubeswift-io/kubeswift-spin-runtime:v0.0.0-it" ]] && ok "runtime image from Helm values" || fail "runtime image"
 until_true 30 "Progressing=SandboxCreating" has_reason hello Progressing SandboxCreating
+expose="$(jp swiftsandbox/hello-0 '{.spec.network.ports[0].name}:{.spec.network.ports[0].port} {.spec.readinessProbe.tcpSocket.port}')"
+[[ "$expose" == "http-app:3000 http-app" ]] && ok "KubeSwift v0.16.0 features detected: port and readiness probe set" || fail "exposure: $expose"
+[[ "$(jp swiftsandbox/hello-0 '{.spec.podMetadata.labels.core\.spinkube\.dev/app\.hello\.status}')" == "ready" ]] \
+  && ok "launcher pod label for the SpinApp Service" || fail "pod metadata"
 
-log "status: running sandboxes are not reported ready"
+log "status: readiness, not a running guest, makes a replica ready"
 set_running hello-0
 set_running hello-1
-until_true 30 "Available=NetworkUnavailable" has_reason hello Available NetworkUnavailable
+until_true 30 "Available=ApplicationNotReady while the probe has not passed" has_reason hello Available ApplicationNotReady
 [[ "$(jp spinapp/hello '{.status.readyReplicas}')" == "0" ]] && ok "readyReplicas is 0" || fail "readyReplicas"
+set_ready hello-0
+set_ready hello-1
+until_true 30 "Available=ApplicationReady" has_reason hello Available ApplicationReady
+until_true 30 "readyReplicas is 2" bash -c "[[ \$($K -n $NS get spinapp hello -o jsonpath='{.status.readyReplicas}') == 2 ]]"
 [[ "$(jp spinapp/hello '{.status.activeScheduler}')" == "kubeswift" ]] && ok "activeScheduler" || fail "activeScheduler"
 
 if [[ "${WITH_SPIN_OPERATOR:-}" == "1" ]]; then
@@ -171,7 +185,7 @@ if [[ "${WITH_SPIN_OPERATOR:-}" == "1" ]]; then
   [[ "$sel" == *'core.spinkube.dev/app.hello.status'* ]] && ok "Service selector is Spin Operator's ($sel)" || fail "selector $sel"
   ! $K -n "$NS" get deploy hello >/dev/null 2>&1 && ok "no Deployment created" || fail "a Deployment exists"
   sleep 5
-  has_reason hello Available NetworkUnavailable && ok "status still owned by kubeswift-spin" || fail "status overwritten"
+  has_reason hello Available ApplicationReady && ok "status still owned by kubeswift-spin" || fail "status overwritten"
 fi
 
 log "scale up to 3, then down to 1"
@@ -200,11 +214,11 @@ spec:
   variables:
     - name: database_url
       valueFrom:
-        secretKeyRef: {name: db, key: url}
+        configMapKeyRef: {name: db, key: url}
 YAML
 until_true 30 "Progressing=UnsupportedConfiguration" has_reason needs-secret Progressing UnsupportedConfiguration
 msg="$(jp spinapp/needs-secret '{.status.conditions[?(@.type=="Progressing")].message}')"
-[[ "$msg" == *'variable "database_url" uses secretKeyRef'* ]] && ok "actionable message" || fail "message: $msg"
+[[ "$msg" == *'variable "database_url" uses configMapKeyRef'* ]] && ok "actionable message" || fail "message: $msg"
 [[ -z "$(sandboxes needs-secret)" ]] && ok "no sandbox created" || fail "sandbox created for unsupported config"
 $K -n "$NS" get events.events.k8s.io --field-selector reason=UnsupportedConfiguration -o name | grep -q . \
   && ok "UnsupportedConfiguration event" || fail "no event"

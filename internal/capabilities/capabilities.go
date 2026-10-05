@@ -33,7 +33,7 @@ func installHint(group string) string {
 	case "core.spinkube.dev":
 		return "install the Spin Operator CRDs (tested: spin-operator v0.6.1, see docs/compatibility.md)"
 	case "sandbox.kubeswift.io":
-		return "install KubeSwift with the sandbox CRDs (tested: KubeSwift v0.15.1, see docs/compatibility.md)"
+		return "install KubeSwift with the sandbox CRDs (tested: KubeSwift v0.16.0; v0.15.1 runs without exposure and secrets; see docs/compatibility.md)"
 	}
 	return "see docs/compatibility.md"
 }

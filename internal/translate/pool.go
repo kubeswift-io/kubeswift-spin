@@ -14,11 +14,11 @@ import (
 // PoolMismatches lists every way a SwiftSandboxPool's slot shape differs from
 // the sandbox spec that would claim a slot.
 //
-// KubeSwift v0.15.1 checkout only compares image, network mode and the
-// verification key, and falls back to a cold boot on a mismatch. It does not
-// compare CPU, memory, rootfs mode, kernel or node selector, so a claimed
-// slot could silently run with a different shape. kubeswift-spin therefore
-// checks the full shape itself and refuses to use an incompatible pool.
+// KubeSwift v0.16.0 compares the full shape at checkout and boots cold on a
+// mismatch; v0.15.1 compared only image, network mode and verification key
+// and could hand out a slot of a different shape. kubeswift-spin checks the
+// shape itself on every version and refuses an incompatible pool instead of
+// falling back silently (ADR 0007).
 func PoolMismatches(spec *sandboxv1alpha1.SwiftSandboxSpec, namespace string, pool *sandboxv1alpha1.SwiftSandboxPool) []string {
 	ps := &pool.Spec
 	var out []string

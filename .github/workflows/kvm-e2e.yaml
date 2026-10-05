@@ -7,8 +7,11 @@ name: KVM e2e
 on:
   workflow_dispatch:
     inputs:
-      app_image:
-        description: hello-http Spin OCI artifact reachable from the sandbox
+      examples:
+        description: registry prefix of the example Spin artifacts
+        default: ghcr.io/kubeswift-io/kubeswift-spin-examples
+      examples_tag:
+        description: tag of the example Spin artifacts
         required: true
       namespace:
         description: namespace with the kubeswift executor and SwiftKernel
@@ -26,6 +29,8 @@ jobs:
           persist-credentials: false
       - name: Run
         env:
-          APP_IMAGE: ${{ inputs.app_image }}
+          EXAMPLES: ${{ inputs.examples }}
+          EXAMPLES_TAG: ${{ inputs.examples_tag }}
           E2E_NAMESPACE: ${{ inputs.namespace }}
-        run: make e2e
+          E2E_WARM_POOL: "1"
+        run: test/e2e/kvm-e2e.sh

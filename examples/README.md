@@ -2,8 +2,10 @@
 
 Each directory is a complete Spin application with a `spin.toml`, Rust
 source, a `spinapp.yaml`, and a README. The SpinApps use the `kubeswift`
-executor, except serverless-ai (and `outbound-http/spinapp-open.yaml`),
-which use `kubeswift-open` because they call in-cluster services.
+executor (`config/executor/kubeswift.yaml`), except serverless-ai, which
+uses `kubeswift-egress` (`config/executor/kubeswift-egress.yaml`) to call
+one in-cluster Service, and `outbound-http/spinapp-open.yaml`, which uses
+`kubeswift-open`.
 
 | Example | Demonstrates |
 |---|---|
@@ -56,16 +58,28 @@ make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=
 make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0 NAMESPACE=<namespace>
 ```
 
-The artifact must be pullable without credentials from inside the sandbox
-(see [docs/executor-contract.md](../docs/executor-contract.md)).
+Spin pulls the artifact inside the sandbox. A private registry needs
+`spec.imagePullSecrets` (see
+[docs/executor-contract.md](../docs/executor-contract.md#registry-credentials)).
 
 ## What works in a KubeSwift sandbox today
 
-With KubeSwift v0.15.1 each example is expected to deploy, reach `Running`
-and start Spin inside the guest; this has not been verified on KVM yet (see
-[test/e2e](../test/e2e/README.md)). The HTTP listener cannot be reached
-from outside the sandbox, because SwiftSandbox has no inbound port
-exposure; each SpinApp therefore reports `Available=False` with reason
-`NetworkUnavailable`. The HTTP behavior of each example is tested locally
-with `spin up` and in the runtime image with Docker
-(`make runtime-test`). See [docs/networking.md](../docs/networking.md).
+With KubeSwift v0.16.0 each SpinApp is reachable through the Service Spin
+Operator creates (`http://<app>.<namespace>.svc`), and becomes `Available`
+when its replicas pass the readiness check. The KVM e2e test
+([test/e2e](../test/e2e/README.md)) ran on a lab cluster:
+
+| Example | In a KubeSwift v0.16.0 sandbox |
+|---|---|
+| hello-http | tested: readiness, Service, scaling, rolling update without failed requests, warm-pool checkout |
+| request-info | tested: two replicas behind the Service, literal and Secret-backed variables |
+| serverless-ai | tested against an in-cluster mock: egress allowlist and Secret-backed token |
+| outbound-http | not run; the restricted and allowlist behavior it would show was measured with serverless-ai |
+| key-value | not run in a sandbox |
+| experimental/mcp | not run in a sandbox |
+
+The HTTP behavior of every example is tested locally with `spin up`
+(`make example-test`) and, for hello-http, key-value and serverless-ai, in
+the runtime image with Docker (`make runtime-test`). On KubeSwift v0.15.1
+the examples run but cannot be reached and report `Available=False` with
+reason `NetworkUnavailable`. See [docs/networking.md](../docs/networking.md).

@@ -54,18 +54,47 @@ curl -s -X POST --data-binary 'What is a microVM?' http://127.0.0.1:3000/ask
 
 ## Deploy on Kubernetes
 
-`spinapp.yaml` sets `spec.runtimeConfig.llmCompute`, which kubeswift-spin
-renders into the sandbox runtime-config file, and uses the
-`kubeswift-open` executor because the inference Service is inside the
-cluster and the `restricted` profile blocks cluster egress.
+Requires KubeSwift v0.16.0 or later. `spinapp.yaml` sets
+`spec.runtimeConfig.llmCompute`, which kubeswift-spin renders into the
+sandbox runtime-config file, and uses the `kubeswift-egress` executor: the
+inference Service `llm` in namespace `inference` is a cluster address, which
+the `restricted` network mode blocks, and that executor allows exactly that
+Service on port 8000. Adjust the URL and the executor's
+`spin.kubeswift.io/egress-allow` annotation to your inference Service.
 
-Credentials: Spin requires an `auth_token` option. kubeswift-spin accepts
-only an empty value. A non-empty literal would be stored in plain text in the
-SwiftSandbox spec, and secret-backed values need a KubeSwift secret
-projection feature that does not exist yet
-([docs/upstream/kubeswift-sandbox-secret-projection.md](../../docs/upstream/kubeswift-sandbox-secret-projection.md)).
-Use an inference endpoint that does not require a token, reachable only
-from the cluster.
+Spin requires an `auth_token` option. `spinapp.yaml` reads it from key
+`token` of the Secret `llm-token`. Create the Secret in the SpinApp's
+namespace:
+
+```bash
+kubectl -n <namespace> create secret generic llm-token --from-literal=token=<token>
+```
+
+From the repository root, create the executor and deploy:
+
+```bash
+kubectl -n <namespace> apply -f config/executor/kubeswift-egress.yaml
+```
+
+```bash
+make example-deploy EXAMPLE=serverless-ai EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0 NAMESPACE=<namespace>
+```
+
+The token never appears in the SwiftSandbox: the rendered runtime
+configuration holds a placeholder, KubeSwift delivers the value to the
+guest, and the runtime entrypoint substitutes it before Spin starts. It is
+readable by the Spin process in the guest, not by the Wasm component. If the
+endpoint needs no token, replace `valueFrom` with `value: ""`.
+
+Call the application through the SpinApp Service:
+
+```bash
+kubectl -n <namespace> run curl --rm -i --restart=Never --image=curlimages/curl:8.16.0 --command -- curl -sS -X POST --data-binary 'What is a microVM?' http://serverless-ai.<namespace>.svc/ask
+```
+
+The KVM e2e test ran this setup on a lab cluster against the mock server
+as an in-cluster Service, and checked that a restricted executor without
+the allowlist entry cannot reach it.
 
 ## Pointing at a KubeSwift GPU workload
 

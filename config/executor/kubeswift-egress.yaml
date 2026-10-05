@@ -1,0 +1,14 @@
+# Executor profile for applications that must call one in-cluster service
+# while keeping the restricted posture for everything else (KubeSwift
+# v0.16.0 or later). Each rule is a KubeSwift sandbox egress rule: a Service
+# (resolved to its ClusterIP) or an IPv4 CIDR, optionally narrowed to ports.
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinAppExecutor
+metadata:
+  name: kubeswift-egress
+  labels:
+    spin.kubeswift.io/managed-by: kubeswift-spin
+  annotations:
+    spin.kubeswift.io/egress-allow: '[{"service":{"name":"llm","namespace":"inference"},"ports":[{"port":8000}]}]'
+spec:
+  createDeployment: false

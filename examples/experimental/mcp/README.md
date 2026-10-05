@@ -48,6 +48,15 @@ curl -s http://127.0.0.1:3000/mcp -d '{"jsonrpc":"2.0","id":1,"method":"tools/li
 curl -s http://127.0.0.1:3000/mcp -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sha256","arguments":{"text":"abc"}}}'
 ```
 
+## Run on Kubernetes
+
+On KubeSwift v0.16.0 the server is reachable through the SpinApp Service
+like any HTTP SpinApp, at `http://<app>.<namespace>.svc/mcp`. This example
+ships no `spinapp.yaml` and has not been run in a sandbox; a SpinApp for it
+looks like the hello-http one with the image changed. Restrict who may call
+the tools with the executor annotation `spin.kubeswift.io/ingress-from`
+(see [docs/networking.md](../../../docs/networking.md#who-may-connect)).
+
 ## Why run tool servers in KubeSwift
 
 Agent tool servers are often third-party or generated code. Running one as

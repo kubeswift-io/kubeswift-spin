@@ -39,7 +39,7 @@ ACTIONLINT := $(BIN)/actionlint
 CONTROLLER_GEN := $(BIN)/controller-gen
 SPIN := $(BIN)/spin
 
-EXAMPLES := hello-http request-info outbound-http key-value serverless-ai experimental/mcp
+EXAMPLE_DIRS := hello-http request-info outbound-http key-value serverless-ai experimental/mcp
 EXAMPLE ?= hello-http
 EXAMPLE_REGISTRY ?= $(REGISTRY)/kubeswift-spin-examples
 EXAMPLE_TAG ?= $(VERSION)
@@ -156,7 +156,7 @@ spin: ## Install the pinned Spin CLI into bin/.
 
 .PHONY: examples
 examples: spin ## Build every example Spin application.
-	@for e in $(EXAMPLES); do echo "==> $$e"; $(SPIN) build -f examples/$$e/spin.toml; done
+	@for e in $(EXAMPLE_DIRS); do echo "==> $$e"; $(SPIN) build -f examples/$$e/spin.toml; done
 
 .PHONY: example-test
 example-test: spin ## Run every example locally under spin up and check its behavior.

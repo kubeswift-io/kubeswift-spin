@@ -37,16 +37,37 @@ unprivileged:
 
 1. Accept only `up ...` (the controller's arguments) or `--version`.
 2. Create `/var/lib/kubeswift-spin/{state,home,tmp}` with mode 0700.
-3. If `KUBESWIFT_SPIN_RUNTIME_CONFIG_B64` is set, decode it (at most 64 KiB)
-   and write `/var/lib/kubeswift-spin/runtime-config.toml` with mode 0600.
-   The variable and the `--runtime-config-file=<that path>` argument must
-   either both be present or both be absent.
-4. When running as root: chown those paths to 65532, clear supplementary
+3. Runtime configuration, at most 64 KiB, written to
+   `/var/lib/kubeswift-spin/runtime-config.toml` with mode 0600. It comes
+   from exactly one of:
+   - `KUBESWIFT_SPIN_RUNTIME_CONFIG_B64` (base64). Option values of the form
+     `kubeswift-spin-secret:KUBESWIFT_SPIN_SECRET_<n>` are replaced with the
+     value of that environment variable, which KubeSwift filled from a
+     Secret; the document is parsed and re-encoded so any value is quoted
+     correctly. A missing variable is an error that names the variable,
+     not a value.
+   - `KUBESWIFT_SPIN_RUNTIME_CONFIG_FILE`, which must be
+     `/run/kubeswift-spin/runtime-config.toml`, the secret file KubeSwift
+     writes for `loadFromSecret` (root-owned, mode 0400). It is read before
+     root is dropped.
+
+   A runtime config and the `--runtime-config-file=<that path>` argument
+   must either both be present or both be absent.
+4. Registry credentials: when `KUBESWIFT_SPIN_REGISTRY_AUTH_FILES` is set,
+   read each listed file (only `/run/kubeswift-spin/registry-auth/*.json`,
+   at most 64 KiB each, each a Docker config with an `auths` section),
+   merge the `auths` (a later file wins for the same registry), and write
+   `/var/lib/kubeswift-spin/home/.docker/config.json` with mode 0600.
+5. When running as root: chown those paths to 65532, clear supplementary
    groups, `setgid(65532)`, `setuid(65532)`, and verify the result.
-5. Set `PR_SET_NO_NEW_PRIVS`.
-6. Set `HOME`, `TMPDIR`, `XDG_*` under `/var/lib/kubeswift-spin` and
-   `PATH=/usr/local/bin`, remove the runtime-config variable, and `exec`
-   `/usr/local/bin/spin` with the given arguments.
+6. Set `PR_SET_NO_NEW_PRIVS`.
+7. Set `HOME`, `TMPDIR`, `XDG_*` under `/var/lib/kubeswift-spin` and
+   `PATH=/usr/local/bin`, remove every `KUBESWIFT_SPIN_*` contract variable
+   (including the Secret values), and `exec` `/usr/local/bin/spin` with the
+   given arguments.
+
+Error messages name variables and paths, never file contents or Secret
+values.
 
 Because the entrypoint execs Spin, Spin receives termination signals
 directly. `spin up` handles SIGINT, SIGTERM and SIGHUP by stopping its
@@ -77,7 +98,8 @@ make runtime-test RUNTIME_IMAGE=kubeswift-spin-runtime:dev
 
 `hack/test-runtime-image.sh` starts a local registry, pushes three example
 applications with `spin registry push`, and runs the image as root with the
-same entrypoint arguments the controller generates. It checks:
+same entrypoint arguments and environment the controller generates. It
+checks:
 
 - the expected files exist and no shell, package manager, `curl` or `wget`
   is present; the image user is 65532; image metadata and history contain
@@ -90,10 +112,19 @@ same entrypoint arguments the controller generates. It checks:
 - a key-value store and an `llm_compute` endpoint configured through
   `KUBESWIFT_SPIN_RUNTIME_CONFIG_B64` work
 - the default key-value store works without runtime configuration
+- a Secret-backed runtime-config option: the placeholder is replaced with
+  the value of `KUBESWIFT_SPIN_SECRET_0`, and an endpoint that requires a
+  token accepts it and rejects a wrong one
+- a runtime config delivered as a root-owned 0400 file through
+  `KUBESWIFT_SPIN_RUNTIME_CONFIG_FILE` works
+- an application pulled from an htpasswd-protected registry with
+  credentials merged from Docker config files, and refused without them
+- a runtime config without the `--runtime-config-file` flag is rejected
 
-The test uses `--insecure` only because its local registry speaks plain
+The test uses `--insecure` only because its local registries speak plain
 HTTP; the controller never passes `--insecure`. It does not exercise
-KubeSwift: there is no microVM, materialization or sandbox networking.
+KubeSwift: there is no microVM, materialization, Secret delivery or sandbox
+networking. The KVM path is covered by [test/e2e](../test/e2e/README.md).
 
 ## Updating Spin
 

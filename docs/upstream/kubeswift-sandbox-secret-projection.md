@@ -1,6 +1,6 @@
 # KubeSwift requirement: secure Secret projection into SwiftSandbox
 
-Status: proposal for KubeSwift. Not implemented in KubeSwift v0.15.1. Tracked in [kubeswift-io/kubeswift#730](https://github.com/kubeswift-io/kubeswift/issues/730).
+Status: implemented in KubeSwift v0.16.0 (`env[].valueFrom.secretKeyRef`, `spec.secretFiles`), tracked in [kubeswift-io/kubeswift#730](https://github.com/kubeswift-io/kubeswift/issues/730). kubeswift-spin uses it for Secret-backed variables and runtime-config options, `loadFromSecret` and `imagePullSecrets`, but not yet for `caCertSecret` (see [security-model.md](../security-model.md#secrets)). The text below is the original proposal; the shipped API may differ in detail.
 
 ## User problem
 

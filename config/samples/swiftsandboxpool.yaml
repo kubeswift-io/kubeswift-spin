@@ -11,5 +11,10 @@ spec:
   memory: 512Mi
   network:
     mode: restricted
+    # KubeSwift v0.16.0 or later: kubeswift-spin exposes the Spin HTTP port,
+    # so warm slots must declare it too.
+    ports:
+      - name: http-app
+        port: 3000
   minWarm: 2
   maxWarm: 4

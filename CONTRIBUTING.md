@@ -21,7 +21,8 @@
 ## Development setup
 
 You need Go (version in `go.mod`), Docker, Helm 3, kubectl, kind, Rust via
-rustup, and Python 3 with PyYAML (for the chart policy check). Pinned
+rustup, and Python 3 with PyYAML (for the chart policy check) and bcrypt
+(for the private registry in `make runtime-test`). Pinned
 developer tools (golangci-lint, govulncheck, setup-envtest, kubeconform,
 actionlint and the Spin CLI) are installed into `bin/` by the Makefile on
 first use.
