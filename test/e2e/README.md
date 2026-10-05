@@ -119,8 +119,21 @@ arm64.
 
 ## CI
 
-`.github/workflows/kvm-e2e.yaml` is meant to run this script on a
-self-hosted runner labelled `kvm`, on manual dispatch only. Public GitHub
-runners do not provide KubeSwift-capable KVM nodes, so pull requests do not
-depend on it. Its inputs are `examples`, `examples_tag` and `namespace`, and
-it runs all four phases. The workflow has not been run.
+`.github/workflows/kvm-e2e.yaml` runs this script on a self-hosted runner
+labelled `kvm`, on manual dispatch only. Public GitHub runners do not
+provide KubeSwift-capable KVM nodes, so pull requests do not depend on it.
+Its inputs are `examples`, `examples_tag`, `namespace`, `phases` and
+`scratch_registry`. The workflow has not been run; no such runner is
+registered.
+
+The runner holds credentials for a cluster, and in a public repository any
+pull request can edit a workflow to request the runner's labels. Before
+registering one:
+
+- put it in a runner group restricted to the workflow
+  `kubeswift-io/kubeswift-spin/.github/workflows/kvm-e2e.yaml@refs/heads/main`;
+- require approval of workflows from all outside collaborators;
+- prefer ephemeral (just-in-time) runners;
+- give it a kubeconfig limited to the test namespace plus the cluster-wide
+  reads the script needs (CRDs, nodes, the OpenAPI schema, Events, the
+  logs of the kubeswift-spin and KubeSwift pods).

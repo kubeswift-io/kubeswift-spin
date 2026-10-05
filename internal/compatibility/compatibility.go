@@ -409,9 +409,12 @@ func urlHasCredentials(v string) bool {
 	return false
 }
 
-// validateAppImage accepts any registry reference the OCI client can parse,
-// but rejects values that are not references at all. Spin also accepts local
-// paths and manifest files for --from; none of those exist inside the guest.
+// validateAppImage accepts registry references the OCI client can parse and
+// that name a registry host. spin up --from loads an existing local path as
+// an application before trying a registry, and the guest has files (such as
+// the runtime configuration) whose relative paths also parse as references
+// on the default registry, so a reference must start with a host: a first
+// component containing "." or ":", or "localhost".
 func validateAppImage(ref string) error {
 	if ref == "" {
 		return fmt.Errorf("must be set")
@@ -421,6 +424,10 @@ func validateAppImage(ref string) error {
 	}
 	if _, err := name.ParseReference(ref, name.WeakValidation); err != nil {
 		return fmt.Errorf("is not a valid OCI reference: %w", err)
+	}
+	host, _, found := strings.Cut(ref, "/")
+	if !found || (host != "localhost" && !strings.ContainsAny(host, ".:")) {
+		return fmt.Errorf("must start with a registry host, for example ghcr.io/org/app:tag or docker.io/org/app:tag")
 	}
 	return nil
 }

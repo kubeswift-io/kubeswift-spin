@@ -131,6 +131,8 @@ func TestUnsupportedConfigurationBlocks(t *testing.T) {
 		"empty image":       {func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "" }, "image", "must be set"},
 		"flag-like image":   {func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "--insecure" }, "image", "not a valid OCI reference"},
 		"whitespace image":  {func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/x y:1" }, "image", "not a valid OCI reference"},
+		"guest path image":  {func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "var/lib/kubeswift-spin/runtime-config.toml" }, "image", "registry host"},
+		"short image":       {func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "app:1" }, "image", "registry host"},
 		"zero replicas":     {func(a *spinv1alpha1.SpinApp) { a.Spec.Replicas = 0 }, "replicas", "at least 1"},
 		"too many replicas": {func(a *spinv1alpha1.SpinApp) { a.Spec.Replicas = 21 }, "replicas", "above the limit of 20"},
 		"autoscaling":       {func(a *spinv1alpha1.SpinApp) { a.Spec.EnableAutoscaling = true; a.Spec.Replicas = 0 }, "enableAutoscaling", "no scale subresource"},

@@ -75,7 +75,18 @@ spec:
   createDeployment: false
 ```
 
-The annotation is unit-tested but has not been exercised on a cluster.
+KubeSwift puts these peers in the `from` list of the NetworkPolicy it
+creates for each sandbox, so the cluster's NetworkPolicy implementation
+decides who matches; a CNI that does not enforce NetworkPolicy enforces
+nothing. KubeSwift's readiness and liveness probes run inside the launcher
+pod and are not affected. A `podSelector` peer matches any pod with the
+labels, including launcher pods of SpinApps whose `spec.podLabels` set
+them, so prefer `namespaceSelector` peers for namespaces you control.
+
+The KVM e2e test (phase 7) checks this with Calico: a client pod with the
+allowed label gets a response through the SpinApp Service, a client without
+it gets no connection, and adding or removing the label on the same pod
+flips the result.
 
 ### Readiness and status
 

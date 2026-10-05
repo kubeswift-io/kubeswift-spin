@@ -119,12 +119,21 @@ runtime_image() {
   printf '%s\n' "$img"
 }
 
+# secret_from_value creates a generic Secret with one key from a value,
+# through a 0600 file, so the value never appears in a command line.
+secret_from_value() {
+  local f="$WORK/secret-value"
+  (umask 077 && printf '%s' "$3" >"$f")
+  $K create secret generic "$1" --from-file="$2=$f" --dry-run=client -o yaml | $K apply -f - >/dev/null
+  rm -f "$f"
+}
+
 # The OpenAI-compatible mock reads its token from the Secret e2e-llm-token,
 # so the value appears in no Pod spec.
 ensure_upstream() {
   $K get pod upstream >/dev/null 2>&1 && return 0
   $K create configmap upstream-src --from-file=main.go="$ROOT/examples/tools/upstream/main.go" --dry-run=client -o yaml | $K apply -f - >/dev/null
-  $K create secret generic e2e-llm-token --from-literal=token="$LLM_TOKEN" --dry-run=client -o yaml | $K apply -f - >/dev/null
+  secret_from_value e2e-llm-token token "$LLM_TOKEN"
   cat <<YAML | $K apply -f - >/dev/null
 apiVersion: v1
 kind: Pod
@@ -135,11 +144,11 @@ spec:
   containers:
     - name: upstream
       image: $GO_IMAGE
-      command: [sh, -c, 'exec go run /src/main.go --listen 0.0.0.0:8090 --require-token "\$TOKEN"']
+      command: [go, run, /src/main.go, --listen, "0.0.0.0:8090"]
       env:
         - {name: GOCACHE, value: /tmp/gocache}
         - {name: GOFLAGS, value: -mod=mod}
-        - name: TOKEN
+        - name: UPSTREAM_REQUIRE_TOKEN
           valueFrom: {secretKeyRef: {name: e2e-llm-token, key: token}}
       ports: [{containerPort: 8090}]
       readinessProbe: {httpGet: {path: /, port: 8090}, periodSeconds: 2}
@@ -330,7 +339,7 @@ fi
 if want 2; then
 log "phase 2: request-info with a Secret-backed variable"
 greeting="hello from a Secret $RUN_ID"
-$K create secret generic e2e-greeting --from-literal=greeting="$greeting" --dry-run=client -o yaml | $K apply -f - >/dev/null
+secret_from_value e2e-greeting greeting "$greeting"
 apply_app <<YAML
 apiVersion: core.spinkube.dev/v1alpha1
 kind: SpinApp
@@ -351,7 +360,7 @@ until_true "info-e2e 2 replicas ready" ready_replicas info-e2e 2
 until_true "info-e2e endpoints ready" has_endpoints info-e2e 2
 body="$(http -H 'Authorization: Bearer do-not-echo' 'http://info-e2e/info?x=1')"
 [[ "$body" == *"\"greeting\":\"$greeting\""* ]] && ok "Secret value reached Spin" || fail "secret variable not delivered"
-[[ "$body" == *'"app_version":"e2e"'* ]] && ok "literal variable" || fail "literal variable: $body"
+[[ "$body" == *'"app_version":"e2e"'* ]] && ok "literal variable" || fail "literal variable missing from the response"
 [[ "$body" != *"do-not-echo"* ]] && ok "authorization header not echoed" || fail "authorization echoed"
 leak_scan "Secret-backed variable" "$greeting"
 $K delete spinapp info-e2e --wait=false >/dev/null
@@ -506,8 +515,10 @@ openssl x509 -req -in "$WORK/tls.csr" -CA "$WORK/ca.crt" -CAkey "$WORK/ca.key" -
 REG_PASS="$REG_PASS" python3 -c 'import bcrypt, os; print("e2e:" + bcrypt.hashpw(os.environ["REG_PASS"].encode(), bcrypt.gensalt()).decode())' >"$WORK/htpasswd"
 $K create secret generic e2e-registry-files --from-file="$WORK/tls.crt" --from-file="$WORK/tls.key" \
   --from-file="$WORK/ca.crt" --from-file="$WORK/htpasswd" --dry-run=client -o yaml | $K apply -f - >/dev/null
-$K create secret docker-registry e2e-registry-auth --docker-server="$reg_host" --docker-username="$REG_USER" \
-  --docker-password="$REG_PASS" --dry-run=client -o yaml | $K apply -f - >/dev/null
+(umask 077 && printf '{"auths":{"%s":{"auth":"%s"}}}' "$reg_host" "$(printf '%s:%s' "$REG_USER" "$REG_PASS" | base64 -w0)" >"$WORK/config.json")
+$K create secret generic e2e-registry-auth --type=kubernetes.io/dockerconfigjson \
+  --from-file=.dockerconfigjson="$WORK/config.json" --dry-run=client -o yaml | $K apply -f - >/dev/null
+rm -f "$WORK/config.json"
 rm -f "$WORK/tls.key" "$WORK/htpasswd" "$WORK/ca.key"
 cat <<YAML | $K apply -f - >/dev/null
 apiVersion: v1

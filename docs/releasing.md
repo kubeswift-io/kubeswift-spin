@@ -11,6 +11,15 @@ Configure these before the first release:
 
 - Environment `release`: required reviewers (the maintainers), and a
   deployment tag rule `v*` so that only version tags can deploy to it.
+- A tag ruleset for `refs/tags/v*` that lets only maintainers create,
+  update or delete version tags. The environment approval protects only
+  jobs that declare the environment, and a tag pushed on a commit whose
+  workflow omits it would publish and sign without approval.
+- Workflows from fork pull requests need approval for all outside
+  collaborators.
+- No self-hosted runner outside a runner group restricted to
+  `.github/workflows/kvm-e2e.yaml` on `main` (see
+  [test/e2e](../test/e2e/README.md#ci)).
 - Private vulnerability reporting enabled (Settings, Code security), which
   [SECURITY.md](../SECURITY.md) relies on.
 - Artifact attestations need a public repository (or GitHub Enterprise
@@ -73,16 +82,18 @@ provenance attestations.
 
 ## Verifying a release
 
-Signatures (the same identity for every artifact):
+Signatures. Check the exact workflow identity of the release tag, not a
+pattern:
 
 ```bash
 cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v'
+  --certificate-identity https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v0.1.0-rc1
 ```
 
 The same command verifies
-`ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r1`,
+`ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r1` (signed by
+the release that first built it; v0.1.0-rc1 for `spin-4.2.1-r1`),
 `ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc1` and
 `ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc1`.
 

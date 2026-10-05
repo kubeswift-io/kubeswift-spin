@@ -38,13 +38,14 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 
 | Component | Trust | Notes |
 |---|---|---|
-| kubeswift-spin controller | trusted control plane component | Unprivileged pod. Reads SpinApps and executors, creates and deletes SwiftSandboxes, patches SpinApp status. No Secret, ConfigMap or Pod access. |
+| kubeswift-spin controller | trusted control plane component | Unprivileged pod. Reads SpinApps and executors, creates and deletes SwiftSandboxes, patches SpinApp status. No Secret, ConfigMap or Pod permission, but creating SwiftSandboxes in any namespace is equivalent to reading that namespace's Secrets (see [Kubernetes API access](#kubernetes-api-access)). |
 | Spin Operator | trusted | Creates the SpinApp Service. Has broad permissions of its own, including Secrets. |
 | KubeSwift controller and launcher | trusted, node trust boundary | Privileged on nodes; materializes rootfs images, boots microVMs. With KubeSwift v0.16.0 the launcher reads the Secrets a sandbox references, with its own per-sandbox ServiceAccount, and delivers them to the guest. |
 | Runtime image | trusted supply chain artifact | Built and signed by this project; contains Spin and the entrypoint. |
 | Spin runtime in the guest | trusted to enforce Wasm isolation | Runs as UID 65532 inside the guest after the entrypoint drops root. Holds the registry credentials and Secret-backed runtime configuration of its SpinApp. |
 | Wasm components | untrusted | Application code, possibly third-party or generated. |
-| SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to, and can make any Secret in that namespace available to their application (see [Secrets](#secrets)). |
+| Executor authors | trusted like SwiftSandbox creators | Whoever can create or update a SpinAppExecutor in a namespace decides, through the controller, the runtime image, node selector, kernel profile, network mode (`open` removes the cloud metadata block), egress allowlist and warm pool of every sandbox for that namespace. That is the power of creating SwiftSandboxes there. kubeswift-spin has no administrator policy that limits executor profiles; grant executor write access only to platform operators. |
+| SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to, and can make any Secret in that namespace available to their application (see [Secrets](#secrets)). Their `spec.podLabels` become launcher pod labels, so they can match pod-label based NetworkPolicy peers and Services in their namespace (see [Network isolation](#network-isolation)). |
 | Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest. |
 
 ## Threat actors
@@ -80,6 +81,15 @@ running with forbidden informers. With `metrics.secure=true` it also needs
 
 RBAC is cluster-scoped even with `--watch-namespaces`; the flag limits what
 the controller watches, not what it is allowed to do.
+
+Creating SwiftSandboxes is more powerful than the verb suggests. KubeSwift
+gives each sandbox's launcher read access to the Secrets the sandbox
+references and delivers them into the guest. Whoever holds the controller's
+ServiceAccount token (after a compromise of the controller pod or its node)
+can therefore create a sandbox in any namespace, with any image and open
+egress, that reads any Secret in that namespace. Treat the controller's
+credentials like a cluster-wide Secret reader. A chart mode with per-namespace
+Roles is not implemented.
 
 ## Controller container
 
@@ -163,8 +173,13 @@ Still rejected:
 - Every Secret reference on KubeSwift before v0.16.0
   (`UnsupportedConfiguration`).
 
-Literal variable values are copied into the sandbox spec and the
-runtime-intent ConfigMap. Do not use literal variables for secrets.
+Literal variable values and health-check `httpHeaders` values are copied
+into the sandbox spec and the runtime-intent ConfigMap. Do not put secrets
+in them.
+
+KubeSwift's guest init exports the sandbox environment, including
+Secret-backed variables, before it starts the workload. Treat any way of
+running commands in a guest as access to that SpinApp's Secrets.
 Condition messages, Events and logs name fields and variables, never
 values; unit tests assert that findings and entrypoint errors never contain
 the values they describe. Controller logs record names, namespaces,
@@ -214,15 +229,24 @@ application.
   images.
 - **Releases** (`.github/workflows/release.yaml`) run only for validated
   semver tags in the canonical repository after approval of the `release`
-  environment. They build multi-architecture images with BuildKit SBOM and
+  environment. The approval protects only jobs that declare the
+  environment: anyone who can push a `v*` tag can push one on a commit
+  whose workflow omits it, and that run signs with the same workflow
+  identity. Tag creation is therefore restricted to maintainers by a
+  repository ruleset (see [releasing.md](releasing.md#repository-settings)),
+  and verifiers should check the exact certificate identity of the tag
+  they verify, not a pattern. They build multi-architecture images with BuildKit SBOM and
   provenance attestations, sign images and the chart with cosign keyless
   signing, and pin the image digests into the published chart. An existing
   runtime image is reused only after `cosign verify` confirms it was signed
   by this release workflow. Jobs that run third-party build code (cargo)
   have read-only tokens; checkouts do not persist credentials.
 
-None of these workflows has run yet, because the repository has not been
-published. Locally, the equivalent `make` targets have been run.
+The KVM e2e workflow runs on a self-hosted runner with cluster
+credentials. No such runner is registered. Whoever registers one must put
+it in a runner group restricted to that workflow on `main`, because any
+pull request can otherwise request its labels (see
+[test/e2e](../test/e2e/README.md#ci)).
 
 ## Application artifacts
 
@@ -250,7 +274,10 @@ executor names a cosign key Secret.
   SpinApp Service. The annotation's NetworkPolicy peers (pod selector,
   namespace selector or `ipBlock`) become the `from` list of that policy,
   so the identity of a client is whatever those peers match, evaluated by
-  the cluster's NetworkPolicy implementation. A CNI that does not enforce
+  the cluster's NetworkPolicy implementation. A `podSelector` peer is only
+  as strong as the trust in everyone who can label pods in the selected
+  namespaces, and that includes SpinApp authors through `spec.podLabels`;
+  prefer `namespaceSelector` peers for namespaces you control. A CNI that does not enforce
   NetworkPolicy enforces neither the port restriction nor the annotation.
   KubeSwift's readiness and liveness probes run inside the launcher pod and
   are not affected. On KubeSwift v0.15.1 all inbound traffic is denied.
@@ -290,8 +317,11 @@ executor names a cosign key Secret.
 
 - Every SpinApp field is classified; unsupported fields block
   reconciliation instead of being dropped.
-- The application reference must parse as an OCI reference and may not start
-  with `-` or contain whitespace; all user-derived arguments are passed in
+- The application reference must parse as an OCI reference, start with a
+  registry host (`ghcr.io/...`, `docker.io/...`, `localhost:5000/...`) and
+  may not start with `-` or contain whitespace. `spin up --from` loads an
+  existing local path before trying a registry, and the host requirement
+  keeps guest paths such as `var/lib/...` out; all user-derived arguments are passed in
   `--flag=value` form, so they cannot inject Spin flags. Arguments are passed
   as an argv list, never through a shell.
 - Component IDs, variable names and runtime-config keys are validated

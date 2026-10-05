@@ -111,7 +111,7 @@ Existing sandboxes keep running.
 | Field | Support | Notes |
 |---|---|---|
 | `executor` | supported | Only executors labelled `spin.kubeswift.io/managed-by=kubeswift-spin` are realized. |
-| `image` | supported | Passed to `spin up --from`. Must be a registry reference reachable from the sandbox; a private registry needs `imagePullSecrets`. |
+| `image` | supported | Passed to `spin up --from`. Must be a registry reference that starts with a registry host (write `docker.io/org/app:tag`, not `org/app:tag`) and is reachable from the sandbox; a private registry needs `imagePullSecrets`. |
 | `replicas` | supported | One SwiftSandbox per replica, named `<app>-<ordinal>`. Bounded by `--max-replicas` (default 20). |
 | `resources` | partially supported | `cpu` and `memory` size the microVM (see [executor-contract.md](executor-contract.md#cpu-and-memory)). Any other resource name is rejected. |
 | `components` | supported | Passed as `spin up --component-id`, which Spin 4.2.1 marks experimental. |

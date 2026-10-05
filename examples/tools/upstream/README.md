@@ -14,7 +14,8 @@ From the repository root:
 go run ./examples/tools/upstream --listen 127.0.0.1:8090
 ```
 
-With `--require-token <token>`, chat completions require the header
+With `--require-token <token>` (or the environment variable
+`UPSTREAM_REQUIRE_TOKEN`), chat completions require the header
 `Authorization: Bearer <token>`; the runtime image test and the KVM e2e
 test use this to check that a Secret-backed token arrives.
 

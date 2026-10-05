@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -32,6 +33,10 @@ func main() {
 	addr := flag.String("listen", "127.0.0.1:8090", "listen address")
 	token := flag.String("require-token", "", "if set, /v1/chat/completions requires the header Authorization: bearer <token>")
 	flag.Parse()
+	if *token == "" {
+		// Keeps the token off the command line, for example from a Secret.
+		*token = os.Getenv("UPSTREAM_REQUIRE_TOKEN")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {

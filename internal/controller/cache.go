@@ -12,10 +12,12 @@ import (
 
 // CacheOptions returns the informer cache configuration. Only SwiftSandboxes
 // created by kubeswift-spin are cached, which bounds memory use on clusters
-// with many unrelated sandboxes. An empty namespaces list watches all
-// namespaces.
+// with many unrelated sandboxes, and managedFields, which the controller
+// never reads (it does not use server-side apply), are dropped from every
+// cached object. An empty namespaces list watches all namespaces.
 func CacheOptions(namespaces []string) cache.Options {
 	opts := cache.Options{
+		DefaultTransform: cache.TransformStripManagedFields(),
 		ByObject: map[client.Object]cache.ByObject{
 			&sandboxv1alpha1.SwiftSandbox{}: {Label: labels.SelectorFromSet(labels.Set{translate.LabelManagedBy: translate.ManagedByValue})},
 		},

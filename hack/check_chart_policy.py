@@ -49,6 +49,11 @@ EXPECTED = {
 
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
 errors = []
+# Bindings may only grant the chart's own roles to the chart's own
+# ServiceAccount, the one the Deployment runs as.
+roles = {(d["kind"], d["metadata"]["name"]) for d in docs if d.get("kind") in ("ClusterRole", "Role")}
+accounts = {(d["metadata"]["name"], d["metadata"].get("namespace")) for d in docs if d.get("kind") == "ServiceAccount"}
+pod_accounts = {d["spec"]["template"]["spec"].get("serviceAccountName") for d in docs if d.get("kind") == "Deployment"}
 for d in docs:
     kind, name = d.get("kind"), d.get("metadata", {}).get("name")
     if kind in ("ClusterRole", "Role"):
@@ -59,8 +64,15 @@ for d in docs:
         if d.get("aggregationRule"):
             errors.append(f"{kind}/{name}: aggregationRule is not allowed")
     if kind in ("ClusterRoleBinding", "RoleBinding"):
-        if d["roleRef"]["name"] in ("cluster-admin", "admin", "edit"):
-            errors.append(f"{kind}/{name}: binds built-in role {d['roleRef']['name']}")
+        ref = (d["roleRef"].get("kind"), d["roleRef"].get("name"))
+        if ref not in roles:
+            errors.append(f"{kind}/{name}: roleRef {ref[0]}/{ref[1]} is not a role rendered by the chart")
+        for sub in d.get("subjects") or []:
+            if sub.get("kind") != "ServiceAccount" or (sub.get("name"), sub.get("namespace")) not in accounts \
+                    or sub.get("name") not in pod_accounts:
+                errors.append(f"{kind}/{name}: subject {sub.get('kind')}/{sub.get('name')} is not the controller ServiceAccount")
+        if not d.get("subjects"):
+            errors.append(f"{kind}/{name}: has no subjects")
     if kind == "Deployment":
         pod = d["spec"]["template"]["spec"]
         psc = pod.get("securityContext", {})
