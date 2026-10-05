@@ -153,7 +153,9 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
 - **Spin Operator v0.6.1 rejects an `httpGet` check without `httpHeaders`.**
   Its defaulting webhook writes `httpHeaders: null`, and its own validation
   then refuses the SpinApp with a message saying that `httpHeaders` must be
-  of type array. Set `httpHeaders: []` explicitly:
+  of type array. The API server rejects the SpinApp at admission, before
+  any controller sees it, so kubeswift-spin cannot detect or correct it.
+  Set `httpHeaders: []` explicitly:
 
   ```yaml
   spec:

@@ -110,10 +110,18 @@ only as references, which KubeSwift v0.16.0 resolves:
 
 The KubeSwift launcher reads the Secrets with its own per-sandbox
 ServiceAccount and hands the values to the guest without writing them to
-any object, log or node disk. The KVM e2e lab run checked that a
-Secret-backed variable reached Spin and that its value was in no
-SwiftSandbox and no ConfigMap in the namespace. Secret files need the
-sandbox kernel 6.6.14 or later.
+any object, log or node disk. Secret files need the sandbox kernel 6.6.14
+or later.
+
+The KVM e2e test exercises all four paths with values unique to the run
+(Secret-backed variable, Secret-backed runtime-config option,
+`loadFromSecret`, `imagePullSecrets` for an htpasswd registry). After each
+one it searches every namespaced object in the test namespace except
+Secrets (SpinApps, SwiftSandboxes, Pods and their command lines, ConfigMaps,
+Events, NetworkPolicies), the Events of all namespaces, and the logs of the
+kubeswift-spin controller, the KubeSwift system pods and the launcher pods
+for the value and its base64 encodings. None was found; see
+[compatibility.md](compatibility.md#tested-versions).
 
 Trust consequences:
 
@@ -123,12 +131,21 @@ Trust consequences:
   that namespace's Secrets to their application, which can return them in a
   response. This is the same trust as a Pod's `secretKeyRef`: keep Secrets
   that a namespace's SpinApp authors must not see out of that namespace.
-- **Credentials are inside the guest.** Registry credentials and
-  Secret-backed runtime configuration are readable by the Spin process
-  (UID 65532), not by Wasm components, which see only what Spin's APIs give
-  them. A Secret-backed variable is visible to the components that declare
-  it. An attacker who escapes the Wasm sandbox can read the credentials of
-  that SpinApp.
+- **Credentials are inside the guest.** Registry credentials are delivered
+  into the KubeSwift guest so that Spin can authenticate to the application
+  registry. They are not exposed through Kubernetes objects, and they are
+  not exposed to Wasm components under Spin's capability model: a component
+  gets no host filesystem access other than the files its application
+  declares from its own package, and no environment other than the
+  variables its manifest declares. That rests on Spin's semantics; the e2e
+  test does not run an adversarial component. The credentials stay in the
+  guest for the lifetime of the sandbox, although Spin uses them only to
+  pull the application at startup. A process that compromises the Spin
+  runtime inside the guest (UID 65532) can read them, and the same holds
+  for Secret-backed runtime configuration. A Secret-backed variable is
+  visible to the components that declare it. Pulling the application on
+  the host side, outside the guest, would need Spin to run an application
+  from a local OCI layout, which Spin 4.2.1 cannot do.
 - **Rotation.** Values are delivered when a sandbox starts. The sandbox
   revision hashes Secret names and keys, not values, so rotating a Secret
   does not replace replicas; they keep the old value until replaced.
@@ -225,12 +242,18 @@ executor names a cosign key Secret.
 
 ## Network isolation
 
-- Inbound (KubeSwift v0.16.0): KubeSwift's sandbox NetworkPolicy admits
+- Inbound (KubeSwift v0.16.0): KubeSwift's sandbox NetworkPolicy
+  (`<sandbox>-restricted`, in both `restricted` and `open` modes) admits
   traffic to the Spin HTTP port (3000, named `http-app`) and nothing else.
   Without the executor annotation `spin.kubeswift.io/ingress-from`, any
   source in the cluster may connect to that port, directly or through the
-  SpinApp Service; set the annotation to restrict it to NetworkPolicy peers.
-  On KubeSwift v0.15.1 all inbound traffic is denied.
+  SpinApp Service. The annotation's NetworkPolicy peers (pod selector,
+  namespace selector or `ipBlock`) become the `from` list of that policy,
+  so the identity of a client is whatever those peers match, evaluated by
+  the cluster's NetworkPolicy implementation. A CNI that does not enforce
+  NetworkPolicy enforces neither the port restriction nor the annotation.
+  KubeSwift's readiness and liveness probes run inside the launcher pod and
+  are not affected. On KubeSwift v0.15.1 all inbound traffic is denied.
 - kubeswift-spin creates no NetworkPolicy, Service, EndpointSlice or proxy
   and never patches, labels or execs into launcher pods. Launcher pod labels
   come only from `spec.podMetadata`, which KubeSwift applies and which
@@ -329,21 +352,20 @@ They never contain values of variables or runtime-config options.
 - Any SpinApp author in a namespace can expose that namespace's Secrets to
   their application; KubeSwift does not check the author's access.
 - Registry credentials and Secret-backed configuration are readable by the
-  Spin process in the guest. Rotated Secret values take effect only when a
-  replica is replaced.
+  Spin process in the guest for the lifetime of the sandbox. Rotated Secret
+  values take effect only when a replica is replaced.
 - Without `spin.kubeswift.io/ingress-from`, any cluster source can reach the
-  Spin HTTP port. The annotation has not been exercised on a cluster.
+  Spin HTTP port. Ingress restriction depends on the CNI enforcing
+  NetworkPolicy; it was tested with Calico.
 - Application artifacts are not signature-verified and tags are not
   pinned to digests.
 - Literal variable values are stored in plain text in SwiftSandbox specs and
   KubeSwift runtime-intent ConfigMaps.
 - `open` network mode grants unrestricted egress.
 - `deploymentConfig.caCertSecret` is not implemented.
-- The KVM path was validated on one lab cluster (see
-  [compatibility.md](compatibility.md#tested-versions)); secret files
-  (`imagePullSecrets`, `loadFromSecret`) in a microVM, liveness-failure
-  replacement and arm64 were not tested.
-- The CI and release workflows have not run on GitHub yet.
+- The KVM path was validated on one lab cluster, on linux/amd64 only (see
+  [compatibility.md](compatibility.md#tested-versions)). arm64 images are
+  published but untested.
 
 ## Reporting vulnerabilities
 
