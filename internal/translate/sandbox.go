@@ -17,13 +17,16 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
 
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 )
@@ -53,8 +56,11 @@ type Template struct {
 	Revision string
 }
 
-// BuildTemplate builds the replica template for app under profile.
-func BuildTemplate(app *spinv1alpha1.SpinApp, p *executor.Profile, policy ResourcePolicy) (*Template, error) {
+// BuildTemplate builds the replica template for app under profile, using the
+// SwiftSandbox features f detected on the cluster. Features absent on the
+// cluster (KubeSwift before v0.16.0) are never used: the API server would
+// silently prune fields its schema does not know.
+func BuildTemplate(app *spinv1alpha1.SpinApp, p *executor.Profile, policy ResourcePolicy, f capabilities.Sandbox) (*Template, error) {
 	cpu, err := VCPUs(app.Spec.Resources, p.DefaultCPU, policy)
 	if err != nil {
 		return nil, err
@@ -63,19 +69,20 @@ func BuildTemplate(app *spinv1alpha1.SpinApp, p *executor.Profile, policy Resour
 	if err != nil {
 		return nil, err
 	}
-	env, err := Env(app, p)
+	env, files, err := Env(app, p, f)
 	if err != nil {
 		return nil, err
 	}
 
 	spec := sandboxv1alpha1.SwiftSandboxSpec{
-		Image:   p.RuntimeImage,
-		CPU:     cpu,
-		Memory:  mem,
-		Command: []string{runtimecontract.EntrypointPath},
-		Args:    Args(app),
-		Env:     env,
-		Network: sandboxv1alpha1.SandboxNetwork{Mode: p.NetworkMode},
+		Image:       p.RuntimeImage,
+		CPU:         cpu,
+		Memory:      mem,
+		Command:     []string{runtimecontract.EntrypointPath},
+		Args:        Args(app),
+		Env:         env,
+		SecretFiles: files,
+		Network:     sandboxv1alpha1.SandboxNetwork{Mode: p.NetworkMode},
 	}
 	spec.ImagePullSecret = p.RuntimeImagePullSecret
 	if p.RuntimeImageVerifyKey != "" {
@@ -94,6 +101,15 @@ func BuildTemplate(app *spinv1alpha1.SpinApp, p *executor.Profile, policy Resour
 	if p.SandboxPool != "" {
 		spec.PoolRef = &corev1.LocalObjectReference{Name: p.SandboxPool}
 	}
+	if len(p.EgressAllow) > 0 {
+		if !f.Egress {
+			return nil, fmt.Errorf("executor %q sets %s, but the installed KubeSwift has no sandbox egress allowlist", p.ExecutorName, executor.AnnEgressAllow)
+		}
+		spec.Network.Egress = &sandboxv1alpha1.SandboxEgress{Allow: append([]sandboxv1alpha1.SandboxEgressRule(nil), p.EgressAllow...)}
+	}
+	if f.Exposure() {
+		expose(&spec, app, p)
+	}
 
 	rev, err := Fingerprint(&spec)
 	if err != nil {
@@ -102,9 +118,74 @@ func BuildTemplate(app *spinv1alpha1.SpinApp, p *executor.Profile, policy Resour
 	return &Template{Spec: spec, Revision: rev}, nil
 }
 
+// StatusLabelKey is the pod label Spin Operator's SpinApp Service selects
+// (core.spinkube.dev/app.<name>.status=ready).
+func StatusLabelKey(app string) string {
+	return "core.spinkube.dev/app." + app + ".status"
+}
+
+// expose makes the replica reachable through the SpinApp Service that Spin
+// Operator creates: the Spin listener becomes the named port the Service
+// targets, the launcher pod gets the label the Service selects, and the
+// readiness probe decides when the replica is an endpoint.
+func expose(spec *sandboxv1alpha1.SwiftSandboxSpec, app *spinv1alpha1.SpinApp, p *executor.Profile) {
+	spec.Network.Ports = []sandboxv1alpha1.SandboxPort{{
+		Name: runtimecontract.HTTPPortName, Port: runtimecontract.ListenPort, Protocol: corev1.ProtocolTCP,
+	}}
+	if len(p.IngressFrom) > 0 {
+		spec.Network.Ingress = &sandboxv1alpha1.SandboxIngress{From: append([]networkingv1.NetworkPolicyPeer(nil), p.IngressFrom...)}
+	}
+	labels := map[string]string{}
+	for k, v := range app.Spec.PodLabels {
+		labels[k] = v
+	}
+	labels[LabelSpinKubeAppName] = app.Name
+	labels[StatusLabelKey(app.Name)] = "ready"
+	spec.PodMetadata = &sandboxv1alpha1.SandboxPodMetadata{Labels: labels}
+
+	port := intstr.FromString(runtimecontract.HTTPPortName)
+	spec.ReadinessProbe = probe(app.Spec.Checks.Readiness, port)
+	if spec.ReadinessProbe == nil {
+		// Without a check, the replica is ready once Spin accepts TCP
+		// connections on its listener.
+		spec.ReadinessProbe = &corev1.Probe{
+			ProbeHandler:     corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: port}},
+			PeriodSeconds:    2,
+			TimeoutSeconds:   1,
+			SuccessThreshold: 1,
+			FailureThreshold: 3,
+		}
+	}
+	spec.LivenessProbe = probe(app.Spec.Checks.Liveness, port)
+}
+
+// probe maps a SpinKube HTTP health check onto a probe against the guest.
+func probe(h *spinv1alpha1.HealthProbe, port intstr.IntOrString) *corev1.Probe {
+	if h == nil || h.HTTPGet == nil {
+		return nil
+	}
+	pr := &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+			Path:   h.HTTPGet.Path,
+			Port:   port,
+			Scheme: corev1.URISchemeHTTP,
+		}},
+		InitialDelaySeconds: h.InitialDelaySeconds,
+		TimeoutSeconds:      h.TimeoutSeconds,
+		PeriodSeconds:       h.PeriodSeconds,
+		SuccessThreshold:    h.SuccessThreshold,
+		FailureThreshold:    h.FailureThreshold,
+	}
+	for _, hdr := range h.HTTPGet.HTTPHeaders {
+		pr.HTTPGet.HTTPHeaders = append(pr.HTTPGet.HTTPHeaders, corev1.HTTPHeader{Name: hdr.Name, Value: hdr.Value})
+	}
+	return pr
+}
+
 // Fingerprint returns a short hash of every field that affects a running
-// sandbox. The spec never contains secret values (see compatibility), so the
-// hash cannot leak one; it is also not reversible.
+// sandbox. Secret values never appear in the spec, only references to them,
+// so the hash cannot leak one; it is also not reversible. Rotating a Secret
+// therefore does not replace replicas.
 func Fingerprint(spec *sandboxv1alpha1.SwiftSandboxSpec) (string, error) {
 	b, err := json.Marshal(spec)
 	if err != nil {
@@ -140,15 +221,38 @@ func Args(app *spinv1alpha1.SpinApp) []string {
 	return args
 }
 
-// Env builds the sandbox environment. Only literal, non-secret values reach
-// this point; compatibility.Analyze rejects every secret-backed source.
-func Env(app *spinv1alpha1.SpinApp, p *executor.Profile) ([]corev1.EnvVar, error) {
+// secretEnv is an environment variable whose value KubeSwift reads from a
+// Secret on the host side and hands to the guest; the value is never written
+// to the SwiftSandbox or any other object.
+func secretEnv(name string, ref *corev1.SecretKeySelector) corev1.EnvVar {
+	return corev1.EnvVar{Name: name, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: ref.DeepCopy()}}
+}
+
+// Env builds the sandbox environment and secret files. Literal values are
+// stored in plain text by KubeSwift; Secret-backed values are passed as
+// references only, which requires f.Secrets() (KubeSwift v0.16.0).
+func Env(app *spinv1alpha1.SpinApp, p *executor.Profile, f capabilities.Sandbox) ([]corev1.EnvVar, []sandboxv1alpha1.SandboxSecretFile, error) {
 	var env []corev1.EnvVar
-	for _, v := range app.Spec.Variables {
-		if v.ValueFrom != nil {
-			return nil, fmt.Errorf("variable %q uses valueFrom, which cannot be translated", v.Name)
+	var files []sandboxv1alpha1.SandboxSecretFile
+	needSecrets := func(what string) error {
+		if f.Secrets() {
+			return nil
 		}
-		env = append(env, corev1.EnvVar{Name: VariableEnvName(v.Name), Value: v.Value})
+		return fmt.Errorf("%s needs Secret projection, which the installed KubeSwift does not provide", what)
+	}
+
+	for _, v := range app.Spec.Variables {
+		switch {
+		case v.ValueFrom == nil:
+			env = append(env, corev1.EnvVar{Name: VariableEnvName(v.Name), Value: v.Value})
+		case v.ValueFrom.SecretKeyRef != nil:
+			if err := needSecrets(fmt.Sprintf("variable %q", v.Name)); err != nil {
+				return nil, nil, err
+			}
+			env = append(env, secretEnv(VariableEnvName(v.Name), v.ValueFrom.SecretKeyRef))
+		default:
+			return nil, nil, fmt.Errorf("variable %q uses a valueFrom source that cannot be translated", v.Name)
+		}
 	}
 	if o := p.Otel; o != nil {
 		for _, kv := range []struct{ name, value string }{
@@ -165,19 +269,55 @@ func Env(app *spinv1alpha1.SpinApp, p *executor.Profile) ([]corev1.EnvVar, error
 	if limit, ok := app.Spec.InvocationLimits["memory"]; ok {
 		q, err := resource.ParseQuantity(limit)
 		if err != nil {
-			return nil, fmt.Errorf("invocationLimits.memory: %w", err)
+			return nil, nil, fmt.Errorf("invocationLimits.memory: %w", err)
 		}
 		// Same variable and unit (bytes) as Spin Operator's executors.
 		env = append(env, corev1.EnvVar{Name: "SPIN_MAX_INSTANCE_MEMORY", Value: strconv.FormatInt(q.Value(), 10)})
 	}
-	if hasRuntimeConfig(app) {
-		doc, err := RuntimeConfigTOML(app.Spec.RuntimeConfig)
+
+	rc := app.Spec.RuntimeConfig
+	switch {
+	case rc.LoadFromSecret != "":
+		if err := needSecrets("spec.runtimeConfig.loadFromSecret"); err != nil {
+			return nil, nil, err
+		}
+		files = append(files, sandboxv1alpha1.SandboxSecretFile{
+			SecretName: rc.LoadFromSecret,
+			Items:      []sandboxv1alpha1.SandboxSecretFileItem{{Key: "runtime-config.toml", Path: runtimecontract.SecretRuntimeConfigPath}},
+		})
+		env = append(env, corev1.EnvVar{Name: runtimecontract.RuntimeConfigFileEnv, Value: runtimecontract.SecretRuntimeConfigPath})
+	case hasRuntimeConfig(app):
+		doc, refs, err := RuntimeConfigTOML(rc)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		if len(refs) > 0 {
+			if err := needSecrets("a Secret-backed runtime-config option"); err != nil {
+				return nil, nil, err
+			}
 		}
 		env = append(env, corev1.EnvVar{Name: runtimecontract.RuntimeConfigEnv, Value: base64.StdEncoding.EncodeToString(doc)})
+		for _, r := range refs {
+			env = append(env, secretEnv(r.env, r.ref))
+		}
 	}
-	return env, nil
+
+	if len(app.Spec.ImagePullSecrets) > 0 {
+		if err := needSecrets("spec.imagePullSecrets"); err != nil {
+			return nil, nil, err
+		}
+		var paths []string
+		for i, ps := range app.Spec.ImagePullSecrets {
+			path := fmt.Sprintf("%s/%d.json", runtimecontract.RegistryAuthDir, i)
+			paths = append(paths, path)
+			files = append(files, sandboxv1alpha1.SandboxSecretFile{
+				SecretName: ps.Name,
+				Items:      []sandboxv1alpha1.SandboxSecretFileItem{{Key: corev1.DockerConfigJsonKey, Path: path}},
+			})
+		}
+		env = append(env, corev1.EnvVar{Name: runtimecontract.RegistryAuthFilesEnv, Value: strings.Join(paths, ",")})
+	}
+	return env, files, nil
 }
 
 // VariableEnvName maps a Spin variable name to the environment variable read
@@ -188,25 +328,41 @@ func VariableEnvName(name string) string {
 
 func hasRuntimeConfig(app *spinv1alpha1.SpinApp) bool {
 	rc := app.Spec.RuntimeConfig
-	return len(rc.KeyValueStores) > 0 || len(rc.SqliteDatabases) > 0 || rc.LLMCompute != nil
+	return rc.LoadFromSecret != "" || len(rc.KeyValueStores) > 0 || len(rc.SqliteDatabases) > 0 || rc.LLMCompute != nil
+}
+
+// secretRef is a runtime-config option value delivered through a Secret.
+type secretRef struct {
+	env string
+	ref *corev1.SecretKeySelector
 }
 
 // RuntimeConfigTOML renders the Spin runtime configuration file from the
 // SpinApp runtimeConfig. The layout matches what Spin Operator renders for
 // its own executors: one table per store, a "type" key, then the options as
-// string values.
-func RuntimeConfigTOML(rc spinv1alpha1.RuntimeConfig) ([]byte, error) {
+// string values. An option backed by a Secret is rendered as a placeholder
+// (runtimecontract.SecretPlaceholderPrefix + environment variable name) and
+// returned as a reference; the entrypoint substitutes the value in the
+// guest, so it never appears in the sandbox spec.
+func RuntimeConfigTOML(rc spinv1alpha1.RuntimeConfig) ([]byte, []secretRef, error) {
 	doc := map[string]any{}
+	var refs []secretRef
 	render := func(kind, typ string, opts []spinv1alpha1.RuntimeConfigOption) (map[string]string, error) {
 		out := map[string]string{"type": typ}
 		for _, o := range opts {
-			if o.ValueFrom != nil {
-				return nil, fmt.Errorf("%s option %q uses valueFrom, which cannot be translated", kind, o.Name)
-			}
 			if o.Name == "type" {
 				return nil, fmt.Errorf("%s option name \"type\" is reserved", kind)
 			}
-			out[o.Name] = o.Value
+			switch {
+			case o.ValueFrom == nil:
+				out[o.Name] = o.Value
+			case o.ValueFrom.SecretKeyRef != nil:
+				name := fmt.Sprintf("%s%d", runtimecontract.SecretValueEnvPrefix, len(refs))
+				refs = append(refs, secretRef{env: name, ref: o.ValueFrom.SecretKeyRef})
+				out[o.Name] = runtimecontract.SecretPlaceholderPrefix + name
+			default:
+				return nil, fmt.Errorf("%s option %q uses a valueFrom source that cannot be translated", kind, o.Name)
+			}
 		}
 		return out, nil
 	}
@@ -214,11 +370,11 @@ func RuntimeConfigTOML(rc spinv1alpha1.RuntimeConfig) ([]byte, error) {
 		stores := map[string]any{}
 		for _, s := range rc.KeyValueStores {
 			if _, dup := stores[s.Name]; dup {
-				return nil, fmt.Errorf("duplicate key-value store %q", s.Name)
+				return nil, nil, fmt.Errorf("duplicate key-value store %q", s.Name)
 			}
 			t, err := render("key-value store", s.Type, s.Options)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			stores[s.Name] = t
 		}
@@ -228,11 +384,11 @@ func RuntimeConfigTOML(rc spinv1alpha1.RuntimeConfig) ([]byte, error) {
 		dbs := map[string]any{}
 		for _, s := range rc.SqliteDatabases {
 			if _, dup := dbs[s.Name]; dup {
-				return nil, fmt.Errorf("duplicate SQLite database %q", s.Name)
+				return nil, nil, fmt.Errorf("duplicate SQLite database %q", s.Name)
 			}
 			t, err := render("SQLite database", s.Type, s.Options)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			dbs[s.Name] = t
 		}
@@ -241,11 +397,12 @@ func RuntimeConfigTOML(rc spinv1alpha1.RuntimeConfig) ([]byte, error) {
 	if l := rc.LLMCompute; l != nil {
 		t, err := render("llmCompute", l.Type, l.Options)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		doc["llm_compute"] = t
 	}
-	return toml.Marshal(doc)
+	b, err := toml.Marshal(doc)
+	return b, refs, err
 }
 
 // NewSandbox returns the SwiftSandbox for one replica. The caller sets the

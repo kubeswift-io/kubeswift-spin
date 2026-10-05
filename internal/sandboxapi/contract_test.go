@@ -15,9 +15,11 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/yaml"
 
 	upstream "github.com/kubeswift-io/kubeswift/api/sandbox/v1alpha1"
@@ -27,13 +29,15 @@ import (
 
 // sharedTypes must be the identical upstream Kubernetes type on both sides.
 var sharedTypes = map[reflect.Type]bool{
-	reflect.TypeOf(resource.Quantity{}):           true,
-	reflect.TypeOf(corev1.EnvVar{}):               true,
-	reflect.TypeOf(corev1.LocalObjectReference{}): true,
-	reflect.TypeOf(metav1.Condition{}):            true,
-	reflect.TypeOf(metav1.ObjectMeta{}):           true,
-	reflect.TypeOf(metav1.TypeMeta{}):             true,
-	reflect.TypeOf(metav1.ListMeta{}):             true,
+	reflect.TypeOf(resource.Quantity{}):              true,
+	reflect.TypeOf(corev1.EnvVar{}):                  true,
+	reflect.TypeOf(corev1.LocalObjectReference{}):    true,
+	reflect.TypeOf(metav1.Condition{}):               true,
+	reflect.TypeOf(metav1.ObjectMeta{}):              true,
+	reflect.TypeOf(metav1.TypeMeta{}):                true,
+	reflect.TypeOf(metav1.ListMeta{}):                true,
+	reflect.TypeOf(corev1.Probe{}):                   true,
+	reflect.TypeOf(networkingv1.NetworkPolicyPeer{}): true,
 }
 
 func jsonName(f reflect.StructField) string {
@@ -124,6 +128,7 @@ func TestConstantsMatchUpstream(t *testing.T) {
 	eq("phase Failed", string(ours.SwiftSandboxFailed), string(upstream.SwiftSandboxFailed))
 	eq("condition Resolved", ours.SwiftSandboxConditionResolved, upstream.SwiftSandboxConditionResolved)
 	eq("condition GuestRunning", ours.SwiftSandboxConditionGuestRunning, upstream.SwiftSandboxConditionGuestRunning)
+	eq("condition WorkloadReady", ours.SwiftSandboxConditionWorkloadReady, upstream.SwiftSandboxConditionWorkloadReady)
 }
 
 // TestRoundTrip encodes a fully populated sandbox with our types and decodes
@@ -140,11 +145,23 @@ func TestRoundTrip(t *testing.T) {
 			Command:            []string{"/usr/local/bin/kubeswift-spin-entrypoint"},
 			Args:               []string{"up", "--from=ghcr.io/x/app:v1"},
 			Env:                []corev1.EnvVar{{Name: "SPIN_VARIABLE_X", Value: "y"}},
-			Network:            ours.SandboxNetwork{Mode: ours.SandboxNetworkOpen},
-			RootfsMode:         ours.SandboxRootfsVirtiofs,
-			KernelProfileRef:   &corev1.LocalObjectReference{Name: "sandbox"},
-			NodeSelector:       map[string]string{"zone": "a"},
-			PoolRef:            &corev1.LocalObjectReference{Name: "warm"},
+			Network: ours.SandboxNetwork{
+				Mode:    ours.SandboxNetworkRestricted,
+				Ports:   []ours.SandboxPort{{Name: "http-app", Port: 3000, Protocol: corev1.ProtocolTCP}},
+				Ingress: &ours.SandboxIngress{From: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{}}}},
+				Egress: &ours.SandboxEgress{Allow: []ours.SandboxEgressRule{
+					{Service: &ours.SandboxEgressService{Name: "llm", Namespace: "inference"}, Ports: []ours.SandboxEgressPort{{Port: 8000}}},
+					{CIDR: "10.20.0.0/24"},
+				}},
+			},
+			RootfsMode:       ours.SandboxRootfsVirtiofs,
+			KernelProfileRef: &corev1.LocalObjectReference{Name: "sandbox"},
+			NodeSelector:     map[string]string{"zone": "a"},
+			PoolRef:          &corev1.LocalObjectReference{Name: "warm"},
+			SecretFiles:      []ours.SandboxSecretFile{{SecretName: "s", Items: []ours.SandboxSecretFileItem{{Key: "k", Path: "/run/x", Mode: ptr(0o400)}}}},
+			PodMetadata:      &ours.SandboxPodMetadata{Labels: map[string]string{"a": "b"}, Annotations: map[string]string{"c": "d"}},
+			ReadinessProbe:   &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromString("http-app")}}},
+			LivenessProbe:    &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http-app")}}},
 		},
 		Status: ours.SwiftSandboxStatus{Phase: ours.SwiftSandboxRunning, Message: "m",
 			Conditions: []metav1.Condition{{Type: "GuestRunning", Status: metav1.ConditionTrue, Reason: "GuestRunning"}}},
@@ -211,3 +228,5 @@ func TestRequiredFieldsDeclared(t *testing.T) {
 		}
 	}
 }
+
+func ptr(v int32) *int32 { return &v }

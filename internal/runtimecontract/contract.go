@@ -44,6 +44,41 @@ const (
 	// docs/security-model.md.
 	RuntimeConfigEnv = "KUBESWIFT_SPIN_RUNTIME_CONFIG_B64"
 
+	// SecretDir is where KubeSwift secretFiles are written in the guest
+	// (KubeSwift v0.16.0 and later). Files there belong to root with mode
+	// 0400; the entrypoint reads them before dropping root and hands the
+	// Spin user its own copies.
+	SecretDir = "/run/kubeswift-spin" //nolint:gosec // a directory path, not a credential
+
+	// SecretRuntimeConfigPath receives the runtime-config.toml key of the
+	// Secret named by SpinApp spec.runtimeConfig.loadFromSecret.
+	SecretRuntimeConfigPath = SecretDir + "/runtime-config.toml"
+
+	// RuntimeConfigFileEnv names a runtime-config file delivered as a secret
+	// file. It is mutually exclusive with RuntimeConfigEnv.
+	RuntimeConfigFileEnv = "KUBESWIFT_SPIN_RUNTIME_CONFIG_FILE"
+
+	// SecretValueEnvPrefix prefixes environment variables that carry Secret
+	// values for runtime-config options (env valueFrom.secretKeyRef). The
+	// rendered runtime config holds SecretPlaceholderPrefix+<variable name>
+	// in place of each value; the entrypoint substitutes and removes the
+	// variables before Spin starts.
+	SecretValueEnvPrefix    = "KUBESWIFT_SPIN_SECRET_" //nolint:gosec // a variable name prefix, not a credential
+	SecretPlaceholderPrefix = "kubeswift-spin-secret:" //nolint:gosec // a placeholder marker, not a credential
+
+	// RegistryAuthDir receives the .dockerconfigjson key of each Secret in
+	// SpinApp spec.imagePullSecrets, as <index>.json.
+	RegistryAuthDir = SecretDir + "/registry-auth"
+
+	// RegistryAuthFilesEnv lists those files, comma-separated. The entrypoint
+	// merges them into HomeDir/.docker/config.json, where Spin's registry
+	// client looks for credentials.
+	RegistryAuthFilesEnv = "KUBESWIFT_SPIN_REGISTRY_AUTH_FILES"
+
+	// HTTPPortName is the name of the exposed Spin HTTP port. Spin Operator's
+	// SpinApp Service targets this name.
+	HTTPPortName = "http-app"
+
 	// ListenPort is the port Spin's HTTP trigger listens on inside the guest.
 	// It is unprivileged so the Spin process does not need any capability
 	// after the entrypoint drops root.

@@ -14,6 +14,7 @@ import (
 
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/compatibility"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
@@ -80,7 +81,9 @@ func TestExampleSpinApps(t *testing.T) {
 	if len(files) < 6 {
 		t.Fatalf("expected a SpinApp manifest per example, found %d", len(files))
 	}
-	opts := compatibility.Options{MaxReplicas: 20, Resources: translate.DefaultResourcePolicy()}
+	// Examples target KubeSwift v0.16.0 or later.
+	opts := compatibility.Options{MaxReplicas: 20, Resources: translate.DefaultResourcePolicy(),
+		Features: capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true}}
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -97,7 +100,7 @@ func TestExampleSpinApps(t *testing.T) {
 		if fs := compatibility.Analyze(&app, p, opts); compatibility.Blocking(fs) {
 			t.Errorf("%s: blocked: %s", f, compatibility.Summary(fs))
 		}
-		if _, err := translate.BuildTemplate(&app, p, opts.Resources); err != nil {
+		if _, err := translate.BuildTemplate(&app, p, opts.Resources, opts.Features); err != nil {
 			t.Errorf("%s: %v", f, err)
 		}
 		if !strings.HasPrefix(app.Spec.Image, "ghcr.io/kubeswift-io/kubeswift-spin-examples/") || strings.HasSuffix(app.Spec.Image, ":latest") {

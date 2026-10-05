@@ -10,6 +10,7 @@ import (
 
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 )
 
@@ -170,5 +171,46 @@ func TestParseRequiresRuntimeImage(t *testing.T) {
 	d.RuntimeImage = ""
 	if _, err := Parse(managed("kubeswift", nil), d); err == nil || !strings.Contains(err.Error(), "no runtime image configured") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestParseEgressAndIngress(t *testing.T) {
+	e := managed("kubeswift", map[string]string{
+		AnnEgressAllow: `[{"service":{"name":"llm","namespace":"inference"},"ports":[{"port":8000}]},{"cidr":"10.20.0.0/24"}]`,
+		AnnIngressFrom: `[{"namespaceSelector":{"matchLabels":{"team":"a"}}}]`,
+	})
+	p, err := Parse(e, defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.EgressAllow) != 2 || p.EgressAllow[0].Service.Name != "llm" || p.EgressAllow[1].CIDR != "10.20.0.0/24" {
+		t.Fatalf("egress %+v", p.EgressAllow)
+	}
+	if len(p.IngressFrom) != 1 || p.IngressFrom[0].NamespaceSelector.MatchLabels["team"] != "a" {
+		t.Fatalf("ingress %+v", p.IngressFrom)
+	}
+	all := capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true}
+	if err := p.CheckFeatures(all); err != nil {
+		t.Fatal(err)
+	}
+	err = p.CheckFeatures(capabilities.Sandbox{})
+	if err == nil || !strings.Contains(err.Error(), "egress allowlist") || !strings.Contains(err.Error(), "port exposure") {
+		t.Fatalf("feature check: %v", err)
+	}
+
+	bad := map[string]map[string]string{
+		"not json":         {AnnEgressAllow: `service:llm`},
+		"unknown field":    {AnnEgressAllow: `[{"svc":{"name":"llm"}}]`},
+		"both kinds":       {AnnEgressAllow: `[{"service":{"name":"llm"},"cidr":"10.0.0.0/8"}]`},
+		"ipv6":             {AnnEgressAllow: `[{"cidr":"fd00::/8"}]`},
+		"bad port":         {AnnEgressAllow: `[{"cidr":"10.0.0.0/8","ports":[{"port":70000}]}]`},
+		"open mode":        {AnnEgressAllow: `[{"cidr":"10.0.0.0/8"}]`, AnnNetworkMode: "open"},
+		"empty ingress":    {AnnIngressFrom: `[]`},
+		"trailing garbage": {AnnIngressFrom: `[{"ipBlock":{"cidr":"10.0.0.0/8"}}] x`},
+	}
+	for name, ann := range bad {
+		if _, err := Parse(managed("kubeswift", ann), defaults()); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }

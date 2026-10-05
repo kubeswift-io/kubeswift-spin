@@ -35,21 +35,22 @@ func TestRunningIsNotReady(t *testing.T) {
 	}
 }
 
-func TestDetectedButNotImplementedSaysUpgrade(t *testing.T) {
-	r := Compute(Input{Replicas: 1, Revision: "r1", Exposure: Exposure{Detected: true},
-		Instances: []Instance{si(0, "r1", rollout.Running)}})
-	if r.Available.Reason != ReasonNetworkUnavailable || !strings.Contains(r.Available.Message, "upgrade kubeswift-spin") {
+func TestRunningButNotReadyWithExposure(t *testing.T) {
+	r := Compute(Input{Replicas: 2, Revision: "r1", Exposure: Exposure{Detected: true},
+		Instances: []Instance{si(0, "r1", rollout.Running), si(1, "r1", rollout.Running)}})
+	if r.ReadyReplicas != 0 || r.Available.Status != metav1.ConditionFalse || r.Available.Reason != ReasonApplicationNotReady ||
+		!strings.Contains(r.Available.Message, "2 running sandboxes do not pass the readiness check") {
 		t.Fatalf("available = %+v", r.Available)
 	}
 }
 
 func TestReadyReplicasWhenObservable(t *testing.T) {
-	r := Compute(Input{Replicas: 3, Revision: "r1", Exposure: Exposure{Detected: true, Implemented: true},
+	r := Compute(Input{Replicas: 3, Revision: "r1", Exposure: Exposure{Detected: true},
 		Instances: []Instance{si(0, "r1", rollout.Ready), si(1, "r1", rollout.Ready), si(2, "r1", rollout.Running)}})
 	if r.ReadyReplicas != 2 || r.Available.Status != metav1.ConditionTrue || r.Available.Reason != ReasonApplicationReady {
 		t.Fatalf("result %+v", r)
 	}
-	r = Compute(Input{Replicas: 3, Revision: "r1", Exposure: Exposure{Detected: true, Implemented: true},
+	r = Compute(Input{Replicas: 3, Revision: "r1", Exposure: Exposure{Detected: true},
 		Instances: []Instance{si(0, "r1", rollout.Ready), si(1, "r1", rollout.Running), si(2, "r1", rollout.Running)}})
 	if r.Available.Status != metav1.ConditionFalse {
 		t.Fatalf("1 of 3 ready reported available: %+v", r.Available)

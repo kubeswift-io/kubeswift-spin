@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -133,7 +134,9 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	if o.detector == nil {
-		o.detector = capabilities.Static{}
+		// The real detector against the envtest API server, which serves
+		// the KubeSwift v0.16.0 CRDs: every optional feature is present.
+		o.detector = &capabilities.OpenAPIDetector{Discovery: discovery.NewDiscoveryClientForConfigOrDie(testCfg), TTL: time.Minute}
 	}
 	if o.maxReplicas == 0 {
 		o.maxReplicas = 10
@@ -347,3 +350,14 @@ func updateApp(t *testing.T, ns, name string, mutate func(a *spinv1alpha1.SpinAp
 		return testClient.Update(context.Background(), a)
 	})
 }
+
+// setReady stands in for KubeSwift reporting a running sandbox whose
+// readiness probe passes.
+func setReady(t *testing.T, ns, name string) {
+	t.Helper()
+	setPhase(t, ns, name, sandboxv1alpha1.SwiftSandboxRunning, metav1.Condition{
+		Type: sandboxv1alpha1.SwiftSandboxConditionWorkloadReady, Status: metav1.ConditionTrue, Reason: "ProbeSucceeded"})
+}
+
+// legacy is a detector for KubeSwift v0.15.1, without optional features.
+var legacy = capabilities.Static{}

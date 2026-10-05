@@ -42,6 +42,7 @@ const (
 	ReasonSandboxFailed            = "SandboxFailed"
 	ReasonRuntimeImageUnavailable  = "RuntimeImageUnavailable"
 	ReasonNetworkUnavailable       = "NetworkUnavailable"
+	ReasonApplicationNotReady      = "ApplicationNotReady"
 	ReasonApplicationReady         = "ApplicationReady"
 )
 
@@ -78,16 +79,15 @@ type Instance struct {
 
 // Exposure describes whether replicas can be reached and probed.
 type Exposure struct {
-	// Detected is true when the installed SwiftSandbox CRD advertises port
-	// exposure and readiness probes.
+	// Detected is true when the installed SwiftSandbox API provides port
+	// exposure, readiness probes and launcher pod metadata (KubeSwift v0.16.0
+	// or later); kubeswift-spin then uses them for every replica.
 	Detected bool
-	// Implemented is true when this kubeswift-spin build uses them.
-	Implemented bool
 }
 
 // Usable reports whether replicas can be exposed and their readiness
 // verified.
-func (e Exposure) Usable() bool { return e.Detected && e.Implemented }
+func (e Exposure) Usable() bool { return e.Detected }
 
 // Blocker is a reason the controller is not converging.
 type Blocker struct {
@@ -203,7 +203,10 @@ func Compute(in Input) Result {
 			fmt.Sprintf("%d of %d replicas ready", ready, in.Replicas))
 	case running > 0 && !in.Exposure.Usable():
 		r.Available = cond(TypeAvailable, metav1.ConditionFalse, ReasonNetworkUnavailable,
-			fmt.Sprintf("%d of %d sandboxes running, but no replica is reported ready: %s", running, in.Replicas, exposureMessage(in.Exposure)))
+			fmt.Sprintf("%d of %d sandboxes running, but no replica is reported ready: %s", running, in.Replicas, exposureMessage))
+	case running > ready:
+		r.Available = cond(TypeAvailable, metav1.ConditionFalse, ReasonApplicationNotReady,
+			fmt.Sprintf("%d of %d replicas ready; %d running sandboxes do not pass the readiness check yet", ready, in.Replicas, running-ready))
 	default:
 		r.Available = cond(TypeAvailable, metav1.ConditionFalse, r.Progressing.Reason,
 			fmt.Sprintf("%d of %d replicas ready", ready, in.Replicas))
@@ -211,12 +214,7 @@ func Compute(in Input) Result {
 	return r
 }
 
-func exposureMessage(e Exposure) string {
-	if e.Detected && !e.Implemented {
-		return "the installed KubeSwift advertises sandbox port exposure and readiness probes, but this kubeswift-spin release does not use them yet; upgrade kubeswift-spin"
-	}
-	return "the installed KubeSwift SwiftSandbox API has no inbound port exposure or readiness probes, so the Spin HTTP listener cannot be reached or verified (see docs/upstream/kubeswift-sandbox-service-exposure.md)"
-}
+const exposureMessage = "the installed KubeSwift SwiftSandbox API has no inbound port exposure or readiness probes, so the Spin HTTP listener cannot be reached or verified; upgrade KubeSwift to v0.16.0 or later"
 
 // isRuntimeImageFailure reports whether a SwiftSandbox failure reason means
 // the runtime rootfs image could not be pulled, verified or materialized.

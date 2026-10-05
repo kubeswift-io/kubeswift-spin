@@ -8,16 +8,20 @@
 package executor
 
 import (
+	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 )
 
@@ -53,6 +57,14 @@ const (
 	AnnDefaultCPU = Prefix + "default-cpu"
 	// AnnDefaultMemory is the memory quantity used when a SpinApp sets none.
 	AnnDefaultMemory = Prefix + "default-memory"
+	// AnnEgressAllow is a JSON list of KubeSwift egress rules
+	// (SwiftSandbox spec.network.egress.allow) that restricted sandboxes may
+	// reach in addition to DNS and the public internet. KubeSwift v0.16.0.
+	AnnEgressAllow = Prefix + "egress-allow"
+	// AnnIngressFrom is a JSON list of NetworkPolicy peers allowed to reach
+	// the Spin HTTP port (SwiftSandbox spec.network.ingress.from). Without
+	// it any source may. KubeSwift v0.16.0.
+	AnnIngressFrom = Prefix + "ingress-from"
 )
 
 // knownAnnotations is the complete set of profile annotations. Any other
@@ -69,6 +81,8 @@ var knownAnnotations = map[string]bool{
 	AnnNodeSelector:           true,
 	AnnDefaultCPU:             true,
 	AnnDefaultMemory:          true,
+	AnnEgressAllow:            true,
+	AnnIngressFrom:            true,
 }
 
 // KnownAnnotations returns the supported profile annotation keys, sorted.
@@ -109,6 +123,26 @@ type Profile struct {
 	// Otel is copied from spec.deploymentConfig.otel. Spin reads the standard
 	// OTEL_EXPORTER_OTLP_* variables.
 	Otel *spinv1alpha1.OtelConfig
+
+	// EgressAllow and IngressFrom come from AnnEgressAllow and AnnIngressFrom.
+	EgressAllow []sandboxv1alpha1.SandboxEgressRule
+	IngressFrom []networkingv1.NetworkPolicyPeer
+}
+
+// CheckFeatures reports profile settings the installed KubeSwift cannot
+// honor. Parse validates syntax only; features are detected at runtime.
+func (p *Profile) CheckFeatures(f capabilities.Sandbox) error {
+	var problems []string
+	if len(p.EgressAllow) > 0 && !f.Egress {
+		problems = append(problems, fmt.Sprintf("annotation %s needs the sandbox egress allowlist of KubeSwift v0.16.0 or later", AnnEgressAllow))
+	}
+	if len(p.IngressFrom) > 0 && !f.Exposure() {
+		problems = append(problems, fmt.Sprintf("annotation %s needs sandbox port exposure, KubeSwift v0.16.0 or later", AnnIngressFrom))
+	}
+	if len(problems) > 0 {
+		return &ValidationError{Executor: p.ExecutorName, Problems: problems}
+	}
+	return nil
 }
 
 // IsManaged reports whether kubeswift-spin owns the executor. Ownership is the
@@ -221,6 +255,28 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 		}
 	}
 
+	if v, ok := ann[AnnEgressAllow]; ok {
+		rules, err := parseEgress(v)
+		switch {
+		case err != nil:
+			add("annotation %s: %v", AnnEgressAllow, err)
+		case p.NetworkMode != sandboxv1alpha1.SandboxNetworkRestricted:
+			add("annotation %s is only valid with network mode restricted", AnnEgressAllow)
+		default:
+			p.EgressAllow = rules
+		}
+	}
+	if v, ok := ann[AnnIngressFrom]; ok {
+		var peers []networkingv1.NetworkPolicyPeer
+		if err := strictJSON(v, &peers); err != nil {
+			add("annotation %s must be a JSON list of NetworkPolicy peers: %v", AnnIngressFrom, err)
+		} else if len(peers) == 0 || len(peers) > 16 {
+			add("annotation %s must list between 1 and 16 peers", AnnIngressFrom)
+		} else {
+			p.IngressFrom = peers
+		}
+	}
+
 	for key, dst := range map[string]*resource.Quantity{
 		AnnDefaultCPU:    &p.DefaultCPU,
 		AnnDefaultMemory: &p.DefaultMemory,
@@ -255,6 +311,61 @@ func ValidateRuntimeImage(ref string) error {
 		return fmt.Errorf("%q must include a registry and an explicit tag or digest: %w", ref, err)
 	}
 	return nil
+}
+
+func strictJSON(v string, out any) error {
+	dec := json.NewDecoder(strings.NewReader(v))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	if dec.More() {
+		return fmt.Errorf("trailing data after the JSON value")
+	}
+	return nil
+}
+
+// parseEgress parses and checks AnnEgressAllow. KubeSwift validates the rules
+// again; these checks give an executor-level message instead of a failed
+// sandbox create.
+func parseEgress(v string) ([]sandboxv1alpha1.SandboxEgressRule, error) {
+	var rules []sandboxv1alpha1.SandboxEgressRule
+	if err := strictJSON(v, &rules); err != nil {
+		return nil, fmt.Errorf("must be a JSON list of egress rules: %w", err)
+	}
+	if len(rules) == 0 || len(rules) > 32 {
+		return nil, fmt.Errorf("must list between 1 and 32 rules")
+	}
+	for i, r := range rules {
+		if (r.Service == nil) == (r.CIDR == "") {
+			return nil, fmt.Errorf("rule %d: set exactly one of service and cidr", i)
+		}
+		if r.Service != nil {
+			if errs := validation.IsDNS1123Label(r.Service.Name); len(errs) > 0 {
+				return nil, fmt.Errorf("rule %d: invalid service name %q", i, r.Service.Name)
+			}
+			if r.Service.Namespace != "" {
+				if errs := validation.IsDNS1123Label(r.Service.Namespace); len(errs) > 0 {
+					return nil, fmt.Errorf("rule %d: invalid service namespace %q", i, r.Service.Namespace)
+				}
+			}
+		}
+		if r.CIDR != "" {
+			ip, _, err := net.ParseCIDR(r.CIDR)
+			if err != nil || ip.To4() == nil {
+				return nil, fmt.Errorf("rule %d: cidr %q is not an IPv4 CIDR", i, r.CIDR)
+			}
+		}
+		for _, port := range r.Ports {
+			if port.Port < 1 || port.Port > 65535 {
+				return nil, fmt.Errorf("rule %d: port %d is out of range", i, port.Port)
+			}
+			if port.Protocol != "" && port.Protocol != "TCP" && port.Protocol != "UDP" {
+				return nil, fmt.Errorf("rule %d: protocol %q must be TCP or UDP", i, port.Protocol)
+			}
+		}
+	}
+	return rules, nil
 }
 
 func parseNodeSelector(v string) (map[string]string, error) {

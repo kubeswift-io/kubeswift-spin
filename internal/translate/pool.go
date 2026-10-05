@@ -3,6 +3,8 @@ package translate
 import (
 	"fmt"
 	"maps"
+	"sort"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -17,7 +19,7 @@ import (
 // compare CPU, memory, rootfs mode, kernel or node selector, so a claimed
 // slot could silently run with a different shape. kubeswift-spin therefore
 // checks the full shape itself and refuses to use an incompatible pool.
-func PoolMismatches(spec *sandboxv1alpha1.SwiftSandboxSpec, pool *sandboxv1alpha1.SwiftSandboxPool) []string {
+func PoolMismatches(spec *sandboxv1alpha1.SwiftSandboxSpec, namespace string, pool *sandboxv1alpha1.SwiftSandboxPool) []string {
 	ps := &pool.Spec
 	var out []string
 	add := func(field, want, got string) {
@@ -46,6 +48,14 @@ func PoolMismatches(spec *sandboxv1alpha1.SwiftSandboxSpec, pool *sandboxv1alpha
 	}
 	if !maps.Equal(ps.NodeSelector, spec.NodeSelector) {
 		add("nodeSelector", fmt.Sprint(spec.NodeSelector), fmt.Sprint(ps.NodeSelector))
+	}
+	// KubeSwift v0.16.0 compares exposed ports and the egress allowlist at
+	// checkout too: a slot booted without them cannot be given them.
+	if a, b := portsKey(spec.Network.Ports), portsKey(ps.Network.Ports); a != b {
+		add("network.ports", a, b)
+	}
+	if a, b := egressKey(spec.Network.Egress, namespace), egressKey(ps.Network.Egress, pool.Namespace); a != b {
+		add("network.egress", a, b)
 	}
 	if ps.GPUProfileRef != nil {
 		out = append(out, "gpuProfileRef: pool slots hold a GPU, which a Spin sandbox does not use")
@@ -100,4 +110,48 @@ func refName(r *corev1.LocalObjectReference) string {
 		return ""
 	}
 	return r.Name
+}
+
+func portsKey(ports []sandboxv1alpha1.SandboxPort) string {
+	var out []string
+	for _, p := range ports {
+		proto := string(p.Protocol)
+		if proto == "" {
+			proto = "TCP"
+		}
+		out = append(out, fmt.Sprintf("%s=%d/%s", p.Name, p.Port, proto))
+	}
+	sort.Strings(out)
+	return strings.Join(out, ",")
+}
+
+// egressKey normalizes an egress allowlist; a Service without a namespace is
+// in the namespace of the object that declares it.
+func egressKey(e *sandboxv1alpha1.SandboxEgress, namespace string) string {
+	if e == nil {
+		return ""
+	}
+	var out []string
+	for _, r := range e.Allow {
+		var ports []string
+		for _, p := range r.Ports {
+			proto := string(p.Protocol)
+			if proto == "" {
+				proto = "TCP"
+			}
+			ports = append(ports, fmt.Sprintf("%d/%s", p.Port, proto))
+		}
+		sort.Strings(ports)
+		dest := "cidr " + r.CIDR
+		if r.Service != nil {
+			ns := r.Service.Namespace
+			if ns == "" {
+				ns = namespace
+			}
+			dest = "service " + ns + "/" + r.Service.Name
+		}
+		out = append(out, dest+" "+strings.Join(ports, ","))
+	}
+	sort.Strings(out)
+	return strings.Join(out, "; ")
 }

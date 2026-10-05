@@ -30,6 +30,7 @@ type chatRequest struct {
 
 func main() {
 	addr := flag.String("listen", "127.0.0.1:8090", "listen address")
+	token := flag.String("require-token", "", "if set, /v1/chat/completions requires the header Authorization: bearer <token>")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -38,6 +39,10 @@ func main() {
 		_, _ = fmt.Fprint(w, "outbound-ok\n")
 	})
 	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		if *token != "" && !strings.EqualFold(r.Header.Get("Authorization"), "bearer "+*token) {
+			http.Error(w, `{"error":{"message":"invalid token","type":"invalid_request_error"}}`, http.StatusUnauthorized)
+			return
+		}
 		var req chatRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || len(req.Messages) == 0 {
 			http.Error(w, `{"error":{"message":"invalid request","type":"invalid_request_error"}}`, http.StatusBadRequest)

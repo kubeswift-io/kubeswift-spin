@@ -116,6 +116,15 @@ func run(o options) error {
 	}
 	setupLog.Info("required APIs and permissions verified", "warmPools", poolsServed)
 
+	// Sandbox features shape every sandbox spec, so the controller does not
+	// reconcile before it knows them.
+	detector := &capabilities.OpenAPIDetector{Discovery: cs.Discovery(), TTL: o.capabilityTTL}
+	features, err := detector.Sandbox(context.Background())
+	if err != nil {
+		return fmt.Errorf("detect SwiftSandbox features from the OpenAPI v3 schema of sandbox.kubeswift.io/v1alpha1: %w", err)
+	}
+	setupLog.Info("SwiftSandbox features detected", "exposure", features.Exposure(), "secrets", features.Secrets(), "egress", features.Egress)
+
 	cacheOpts := controller.CacheOptions(namespaces)
 
 	metricsOpts := metricsserver.Options{BindAddress: o.metricsAddr, SecureServing: o.metricsSecure}
@@ -145,7 +154,7 @@ func run(o options) error {
 		Recorder:    mgr.GetEventRecorder("kubeswift-spin"),
 		Defaults:    defaults,
 		Options:     compatibility.Options{MaxReplicas: int32(o.maxReplicas), Resources: policy}, //nolint:gosec // bounded in policy()
-		Detector:    &capabilities.OpenAPIDetector{Discovery: cs.Discovery(), TTL: o.capabilityTTL},
+		Detector:    detector,
 		PoolsServed: poolsServed,
 	}
 	if err := r.SetupWithManager(ctx, mgr); err != nil {

@@ -15,11 +15,18 @@ import (
 
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 )
 
 const runtimeImage = "ghcr.io/kubeswift-io/kubeswift-spin-runtime:v0.1.0"
+
+// legacy is KubeSwift v0.15.1 (no optional features); v16 has all of them.
+var (
+	legacy = capabilities.Sandbox{}
+	v16    = capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true}
+)
 
 func testProfile() *executor.Profile {
 	return &executor.Profile{
@@ -43,7 +50,7 @@ func testApp() *spinv1alpha1.SpinApp {
 }
 
 func TestBuildTemplateBasics(t *testing.T) {
-	tmpl, err := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy())
+	tmpl, err := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy(), legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +97,7 @@ func TestBuildTemplateProfileFields(t *testing.T) {
 	p.NodeSelector = map[string]string{"zone": "a"}
 	p.RuntimeImagePullSecret = "runtime-pull"
 	p.RuntimeImageVerifyKey = "cosign-key"
-	tmpl, err := BuildTemplate(testApp(), p, DefaultResourcePolicy())
+	tmpl, err := BuildTemplate(testApp(), p, DefaultResourcePolicy(), legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +144,7 @@ func TestEnvVariablesOtelAndLimits(t *testing.T) {
 	app.Spec.InvocationLimits = map[string]string{"memory": "64Mi"}
 	p := testProfile()
 	p.Otel = &spinv1alpha1.OtelConfig{ExporterOtlpEndpoint: "http://otel:4318", ExporterOtlpTracesEndpoint: "http://otel:4318/v1/traces"}
-	env, err := Env(app, p)
+	env, _, err := Env(app, p, legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,10 +169,10 @@ func TestEnvRejectsValueFrom(t *testing.T) {
 	app := testApp()
 	app.Spec.Variables = []spinv1alpha1.SpinVar{{Name: "db", ValueFrom: &corev1.EnvVarSource{
 		SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "s"}, Key: "k"}}}}
-	if _, err := Env(app, testProfile()); err == nil {
-		t.Fatal("valueFrom was translated")
+	if _, _, err := Env(app, testProfile(), legacy); err == nil {
+		t.Fatal("secret valueFrom was translated without Secret projection")
 	}
-	if _, err := BuildTemplate(app, testProfile(), DefaultResourcePolicy()); err == nil {
+	if _, err := BuildTemplate(app, testProfile(), DefaultResourcePolicy(), legacy); err == nil {
 		t.Fatal("template built with valueFrom")
 	}
 }
@@ -181,7 +188,7 @@ func TestRuntimeConfigTOML(t *testing.T) {
 			{Name: "url", Value: "http://llm.inference.svc:8000"}, {Name: "auth_token", Value: ""}, {Name: "api_type", Value: "open_ai"},
 		}},
 	}
-	b, err := RuntimeConfigTOML(rc)
+	b, _, err := RuntimeConfigTOML(rc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +212,7 @@ func TestRuntimeConfigTOML(t *testing.T) {
 	}
 
 	// Rendering is deterministic.
-	b2, _ := RuntimeConfigTOML(rc)
+	b2, _, _ := RuntimeConfigTOML(rc)
 	if string(b) != string(b2) {
 		t.Fatal("runtime config rendering is not deterministic")
 	}
@@ -213,7 +220,7 @@ func TestRuntimeConfigTOML(t *testing.T) {
 	// It is delivered base64-encoded in the environment.
 	app := testApp()
 	app.Spec.RuntimeConfig = rc
-	env, err := Env(app, testProfile())
+	env, _, err := Env(app, testProfile(), legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,22 +243,22 @@ func TestRuntimeConfigRejects(t *testing.T) {
 	cases := map[string]spinv1alpha1.RuntimeConfig{
 		"duplicate store": {KeyValueStores: []spinv1alpha1.KeyValueStoreConfig{{Name: "a", Type: "spin"}, {Name: "a", Type: "spin"}}},
 		"reserved type":   {KeyValueStores: []spinv1alpha1.KeyValueStoreConfig{{Name: "a", Type: "spin", Options: []spinv1alpha1.RuntimeConfigOption{{Name: "type", Value: "redis"}}}}},
-		"valueFrom": {LLMCompute: &spinv1alpha1.LLMComputeConfig{Type: "remote_http", Options: []spinv1alpha1.RuntimeConfigOption{
-			{Name: "auth_token", ValueFrom: &spinv1alpha1.RuntimeConfigVarSource{SecretKeyRef: &corev1.SecretKeySelector{Key: "k"}}}}}},
+		"configMap valueFrom": {LLMCompute: &spinv1alpha1.LLMComputeConfig{Type: "remote_http", Options: []spinv1alpha1.RuntimeConfigOption{
+			{Name: "auth_token", ValueFrom: &spinv1alpha1.RuntimeConfigVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}}}}},
 	}
 	for name, rc := range cases {
-		if _, err := RuntimeConfigTOML(rc); err == nil {
+		if _, _, err := RuntimeConfigTOML(rc); err == nil {
 			t.Fatalf("%s: accepted", name)
 		}
 	}
 }
 
 func TestFingerprint(t *testing.T) {
-	base, err := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy())
+	base, err := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy(), legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, _ := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy())
+	again, _ := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy(), legacy)
 	if base.Revision != again.Revision {
 		t.Fatal("fingerprint is not deterministic")
 	}
@@ -260,7 +267,7 @@ func TestFingerprint(t *testing.T) {
 	scaled := testApp()
 	scaled.Spec.Replicas = 7
 	scaled.Labels = map[string]string{"team": "x"}
-	if tm, _ := BuildTemplate(scaled, testProfile(), DefaultResourcePolicy()); tm.Revision != base.Revision {
+	if tm, _ := BuildTemplate(scaled, testProfile(), DefaultResourcePolicy(), legacy); tm.Revision != base.Revision {
 		t.Fatal("scaling changed the revision")
 	}
 
@@ -286,7 +293,7 @@ func TestFingerprint(t *testing.T) {
 	for name, mutate := range changes {
 		a, p := testApp(), testProfile()
 		mutate(a, p)
-		tm, err := BuildTemplate(a, p, DefaultResourcePolicy())
+		tm, err := BuildTemplate(a, p, DefaultResourcePolicy(), legacy)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -298,7 +305,7 @@ func TestFingerprint(t *testing.T) {
 
 func TestNewSandboxLabels(t *testing.T) {
 	app := testApp()
-	tmpl, _ := BuildTemplate(app, testProfile(), DefaultResourcePolicy())
+	tmpl, _ := BuildTemplate(app, testProfile(), DefaultResourcePolicy(), legacy)
 	sb := NewSandbox(app, "kubeswift", tmpl, 1)
 	if sb.Name != "hello-1" || sb.Namespace != "apps" {
 		t.Fatalf("name = %s/%s", sb.Namespace, sb.Name)
@@ -325,12 +332,12 @@ func TestNewSandboxLabels(t *testing.T) {
 }
 
 func TestPoolMismatches(t *testing.T) {
-	tmpl, _ := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy())
+	tmpl, _ := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy(), legacy)
 	ok := &sandboxv1alpha1.SwiftSandboxPool{Spec: sandboxv1alpha1.SwiftSandboxPoolSpec{
 		Image:  runtimeImage,
 		Memory: resource.MustParse("512Mi"),
 	}}
-	if mm := PoolMismatches(&tmpl.Spec, ok); len(mm) != 0 {
+	if mm := PoolMismatches(&tmpl.Spec, "apps", ok); len(mm) != 0 {
 		t.Fatalf("compatible pool reported mismatches: %v", mm)
 	}
 	bad := ok.DeepCopy()
@@ -344,7 +351,7 @@ func TestPoolMismatches(t *testing.T) {
 	bad.Spec.NodeSelector = map[string]string{"a": "b"}
 	bad.Spec.GPUProfileRef = &corev1.LocalObjectReference{Name: "gpu"}
 	bad.Spec.Model = &sandboxv1alpha1.SandboxModel{ImageRef: "m"}
-	mm := PoolMismatches(&tmpl.Spec, bad)
+	mm := PoolMismatches(&tmpl.Spec, "apps", bad)
 	for _, field := range []string{"image", "cpu", "memory", "network.mode", "rootfsMode", "kernelProfileRef", "verifyKeySecretRef", "nodeSelector", "gpuProfileRef", "model"} {
 		found := false
 		for _, m := range mm {
@@ -361,19 +368,19 @@ func TestPoolMismatches(t *testing.T) {
 	explicit.Spec.CPU = 1
 	explicit.Spec.Network.Mode = sandboxv1alpha1.SandboxNetworkRestricted
 	explicit.Spec.RootfsMode = sandboxv1alpha1.SandboxRootfsBlock
-	if mm := PoolMismatches(&tmpl.Spec, explicit); len(mm) != 0 {
+	if mm := PoolMismatches(&tmpl.Spec, "apps", explicit); len(mm) != 0 {
 		t.Fatalf("defaults treated as mismatches: %v", mm)
 	}
 }
 
 func TestPoolDefaultKernelIsNormalized(t *testing.T) {
-	tmpl, _ := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy())
+	tmpl, _ := BuildTemplate(testApp(), testProfile(), DefaultResourcePolicy(), legacy)
 	pool := &sandboxv1alpha1.SwiftSandboxPool{Spec: sandboxv1alpha1.SwiftSandboxPoolSpec{
 		Image:            runtimeImage,
 		Memory:           resource.MustParse("512Mi"),
 		KernelProfileRef: &corev1.LocalObjectReference{Name: "sandbox"},
 	}}
-	if mm := PoolMismatches(&tmpl.Spec, pool); len(mm) != 0 {
+	if mm := PoolMismatches(&tmpl.Spec, "apps", pool); len(mm) != 0 {
 		t.Fatalf("explicit default kernel treated as a mismatch: %v", mm)
 	}
 }

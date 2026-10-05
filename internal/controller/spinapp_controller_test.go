@@ -19,7 +19,6 @@ import (
 
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
 
-	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 	"github.com/kubeswift-io/kubeswift-spin/internal/status"
@@ -64,6 +63,12 @@ func TestCreateTranslatesSpinApp(t *testing.T) {
 	if len(sb.Spec.Env) != 1 || sb.Spec.Env[0].Name != "SPIN_VARIABLE_GREETING" {
 		t.Fatalf("env %+v", sb.Spec.Env)
 	}
+	// The envtest API server serves the KubeSwift v0.16.0 CRDs, so the
+	// detector finds exposure and the sandbox is built for a Service.
+	if len(sb.Spec.Network.Ports) != 1 || sb.Spec.Network.Ports[0].Name != "http-app" || sb.Spec.ReadinessProbe == nil ||
+		sb.Spec.PodMetadata == nil || sb.Spec.PodMetadata.Labels["core.spinkube.dev/app.hello.status"] != "ready" {
+		t.Fatalf("sandbox not exposed: ports %+v probe %+v pod metadata %+v", sb.Spec.Network.Ports, sb.Spec.ReadinessProbe, sb.Spec.PodMetadata)
+	}
 	for k, v := range map[string]string{
 		translate.LabelManagedBy: translate.ManagedByValue, translate.LabelApp: "hello",
 		translate.LabelOrdinal: "0", translate.LabelExecutor: "kubeswift", translate.LabelSpinKubeAppName: "hello",
@@ -80,7 +85,7 @@ func TestCreateTranslatesSpinApp(t *testing.T) {
 	expectCondition(t, ns, "hello", status.TypeAvailable, metav1.ConditionFalse, status.ReasonSandboxCreating)
 }
 
-func TestRunningSandboxesAreNotReportedReady(t *testing.T) {
+func TestReadinessDrivesAvailability(t *testing.T) {
 	startManager(t, harnessOpts{})
 	ns := newNamespace(t)
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 2))
@@ -89,24 +94,66 @@ func TestRunningSandboxesAreNotReportedReady(t *testing.T) {
 	setPhase(t, ns, "hello-0", sandboxv1alpha1.SwiftSandboxMaterializing)
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxMaterializing)
 
+	// A running guest is not a ready application.
 	setPhase(t, ns, "hello-0", sandboxv1alpha1.SwiftSandboxRunning)
 	setPhase(t, ns, "hello-1", sandboxv1alpha1.SwiftSandboxRunning)
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxRunning)
-	a := expectCondition(t, ns, "hello", status.TypeAvailable, metav1.ConditionFalse, status.ReasonNetworkUnavailable)
+	a := expectCondition(t, ns, "hello", status.TypeAvailable, metav1.ConditionFalse, status.ReasonApplicationNotReady)
 	if a.Status.ReadyReplicas != 0 {
-		t.Fatalf("readyReplicas = %d for unreachable sandboxes", a.Status.ReadyReplicas)
+		t.Fatalf("readyReplicas = %d before readiness", a.Status.ReadyReplicas)
 	}
+
+	// KubeSwift reports the readiness probe passing.
+	setReady(t, ns, "hello-0")
+	setReady(t, ns, "hello-1")
+	expectCondition(t, ns, "hello", status.TypeAvailable, metav1.ConditionTrue, status.ReasonApplicationReady)
+	eventually(t, "readyReplicas 2", func() error {
+		if r := getApp(t, ns, "hello").Status.ReadyReplicas; r != 2 {
+			return fmt.Errorf("readyReplicas %d", r)
+		}
+		return nil
+	})
 }
 
-func TestExposureDetectedButNotImplemented(t *testing.T) {
-	startManager(t, harnessOpts{detector: capabilities.Static{Ports: true, ReadinessProbe: true, PodMetadata: true}})
+func TestLegacyKubeSwiftReportsNetworkUnavailable(t *testing.T) {
+	startManager(t, harnessOpts{detector: legacy})
 	ns := newNamespace(t)
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
 	expectSandboxes(t, ns, "hello-0")
-	setPhase(t, ns, "hello-0", sandboxv1alpha1.SwiftSandboxRunning)
+	if sb := getSandbox(t, ns, "hello-0"); sb.Spec.Network.Ports != nil || sb.Spec.ReadinessProbe != nil || sb.Spec.PodMetadata != nil {
+		t.Fatalf("v0.16.0 fields used without the feature: %+v", sb.Spec)
+	}
+	setReady(t, ns, "hello-0")
 	a := expectCondition(t, ns, "hello", status.TypeAvailable, metav1.ConditionFalse, status.ReasonNetworkUnavailable)
-	if c := findCond(a, status.TypeAvailable); !strings.Contains(c.Message, "upgrade kubeswift-spin") {
-		t.Fatalf("message %q", c.Message)
+	if a.Status.ReadyReplicas != 0 {
+		t.Fatal("a sandbox without a readiness probe was counted as ready")
+	}
+}
+
+func TestSecretVariablesAreReferences(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	app := spinApp(ns, "hello", "kubeswift", 1)
+	app.Spec.Variables = []spinv1alpha1.SpinVar{{Name: "database_url", ValueFrom: &corev1.EnvVarSource{
+		SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "db"}, Key: "url"}}}}
+	app.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: "ghcr"}}
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), app)
+	expectSandboxes(t, ns, "hello-0")
+	sb := getSandbox(t, ns, "hello-0")
+	var ref *corev1.SecretKeySelector
+	for _, e := range sb.Spec.Env {
+		if e.Name == "SPIN_VARIABLE_DATABASE_URL" {
+			if e.Value != "" || e.ValueFrom == nil {
+				t.Fatalf("secret variable stored by value: %+v", e)
+			}
+			ref = e.ValueFrom.SecretKeyRef
+		}
+	}
+	if ref == nil || ref.Name != "db" || ref.Key != "url" {
+		t.Fatalf("secret reference %+v", ref)
+	}
+	if len(sb.Spec.SecretFiles) != 1 || sb.Spec.SecretFiles[0].SecretName != "ghcr" {
+		t.Fatalf("registry credentials %+v", sb.Spec.SecretFiles)
 	}
 }
 
@@ -212,8 +259,8 @@ func TestRollingReplacementOnImageChange(t *testing.T) {
 	ns := newNamespace(t)
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 2))
 	expectSandboxes(t, ns, "hello-0", "hello-1")
-	setPhase(t, ns, "hello-0", sandboxv1alpha1.SwiftSandboxRunning)
-	setPhase(t, ns, "hello-1", sandboxv1alpha1.SwiftSandboxRunning)
+	setReady(t, ns, "hello-0")
+	setReady(t, ns, "hello-1")
 	oldRev := getSandbox(t, ns, "hello-0").Labels[translate.LabelRevision]
 	uid0 := getSandbox(t, ns, "hello-0").UID
 
@@ -246,7 +293,7 @@ func TestRollingReplacementOnImageChange(t *testing.T) {
 	})
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonRollingUpdate)
 
-	setPhase(t, ns, "hello-1", sandboxv1alpha1.SwiftSandboxRunning)
+	setReady(t, ns, "hello-1")
 	eventually(t, "hello-0 replaced", func() error {
 		simulateGC(t, ns)
 		var sb sandboxv1alpha1.SwiftSandbox
@@ -266,12 +313,12 @@ func TestUnsupportedConfigurationIsReported(t *testing.T) {
 	app := spinApp(ns, "hello", "kubeswift", 1)
 	app.Spec.Volumes = []corev1.Volume{{Name: "data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
 	app.Spec.Variables = []spinv1alpha1.SpinVar{{Name: "database_url", ValueFrom: &corev1.EnvVarSource{
-		SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "db"}, Key: "url"}}}}
+		ConfigMapKeyRef: &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "db"}, Key: "url"}}}}
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), app)
 
 	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonUnsupportedConfiguration)
 	msg := findCond(a, status.TypeProgressing).Message
-	for _, want := range []string{"spec.volumes", `variable "database_url" uses secretKeyRef`} {
+	for _, want := range []string{"spec.volumes", `variable "database_url" uses configMapKeyRef`} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("message %q lacks %q", msg, want)
 		}
@@ -506,7 +553,8 @@ func TestWarmPool(t *testing.T) {
 
 	pool := &sandboxv1alpha1.SwiftSandboxPool{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "spin-pool"},
-		Spec:       sandboxv1alpha1.SwiftSandboxPoolSpec{Image: testRuntimeImage, CPU: 2, Memory: resource.MustParse("512Mi")},
+		Spec: sandboxv1alpha1.SwiftSandboxPoolSpec{Image: testRuntimeImage, CPU: 2, Memory: resource.MustParse("512Mi"),
+			Network: sandboxv1alpha1.SandboxNetwork{Ports: []sandboxv1alpha1.SandboxPort{{Name: "http-app", Port: 3000}}}},
 	}
 	mustCreate(t, pool)
 	// The pool watch requeues the app; the reason stays the same but the

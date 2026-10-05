@@ -31,12 +31,27 @@ func goldenApp() *spinv1alpha1.SpinApp {
 }
 
 func TestGoldenRevision(t *testing.T) {
-	tm, err := BuildTemplate(goldenApp(), testProfile(), DefaultResourcePolicy())
+	tm, err := BuildTemplate(goldenApp(), testProfile(), DefaultResourcePolicy(), legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if tm.Revision != goldenRevision {
 		t.Fatalf("revision changed from %s to %s: the rendered sandbox spec changed and upgrades would replace every replica; "+
 			"if intended, update goldenRevision and add an upgrade note to CHANGELOG.md", goldenRevision, tm.Revision)
+	}
+}
+
+// goldenRevisionV16 pins the revision of goldenApp on a KubeSwift with
+// every v0.16.0 sandbox feature.
+const goldenRevisionV16 = "9750b02d06"
+
+func TestGoldenRevisionV16(t *testing.T) {
+	tm, err := BuildTemplate(goldenApp(), testProfile(), DefaultResourcePolicy(), v16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tm.Revision != goldenRevisionV16 {
+		t.Fatalf("revision changed from %s to %s: the rendered sandbox spec changed and upgrades would replace every replica; "+
+			"if intended, update goldenRevisionV16 and add an upgrade note to CHANGELOG.md", goldenRevisionV16, tm.Revision)
 	}
 }

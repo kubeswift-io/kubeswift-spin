@@ -15,6 +15,7 @@ import (
 
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
 )
@@ -155,7 +156,7 @@ func TestUnsupportedConfigurationBlocks(t *testing.T) {
 		}, "variables", "more than once"},
 		"secret variable": {func(a *spinv1alpha1.SpinApp) {
 			a.Spec.Variables = []spinv1alpha1.SpinVar{{Name: "database_url", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretRef}}}
-		}, "variables", `variable "database_url" uses secretKeyRef, but the installed KubeSwift SwiftSandbox API does not provide secure secret projection`},
+		}, "variables", `variable "database_url" uses secretKeyRef, but the installed KubeSwift does not provide Secret projection`},
 		"configmap variable": {func(a *spinv1alpha1.SpinApp) {
 			a.Spec.Variables = []spinv1alpha1.SpinVar{{Name: "x", ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}}}
 		}, "variables", "configMapKeyRef"},
@@ -166,7 +167,7 @@ func TestUnsupportedConfigurationBlocks(t *testing.T) {
 		"secret option": {func(a *spinv1alpha1.SpinApp) {
 			a.Spec.RuntimeConfig.KeyValueStores = []spinv1alpha1.KeyValueStoreConfig{{Name: "default", Type: "redis", Options: []spinv1alpha1.RuntimeConfigOption{
 				{Name: "url", ValueFrom: &spinv1alpha1.RuntimeConfigVarSource{SecretKeyRef: secretRef}}}}}
-		}, "runtimeConfig", "secure secret projection"},
+		}, "runtimeConfig", "does not provide Secret projection"},
 		"literal credential option": {func(a *spinv1alpha1.SpinApp) {
 			a.Spec.RuntimeConfig.LLMCompute = &spinv1alpha1.LLMComputeConfig{Type: "remote_http", Options: []spinv1alpha1.RuntimeConfigOption{
 				{Name: "url", Value: "http://llm"}, {Name: "auth_token", Value: "sk-live-123"}}}
@@ -193,11 +194,11 @@ func TestUnsupportedConfigurationBlocks(t *testing.T) {
 		"service account":          {func(a *spinv1alpha1.SpinApp) { a.Spec.ServiceAccountName = "app-sa" }, "serviceAccountName", "no Kubernetes identity"},
 		"deployment annotations":   {func(a *spinv1alpha1.SpinApp) { a.Spec.DeploymentAnnotations = map[string]string{"a": "b"} }, "deploymentAnnotations", "no Deployment"},
 		"pod annotations":          {func(a *spinv1alpha1.SpinApp) { a.Spec.PodAnnotations = map[string]string{"a": "b"} }, "podAnnotations", "no application pod"},
-		"pod labels":               {func(a *spinv1alpha1.SpinApp) { a.Spec.PodLabels = map[string]string{"a": "b"} }, "podLabels", "do not carry user labels"},
-		"volumes":                  {func(a *spinv1alpha1.SpinApp) { a.Spec.Volumes = []corev1.Volume{{Name: "v"}} }, "volumes", "file projection"},
+		"pod labels":               {func(a *spinv1alpha1.SpinApp) { a.Spec.PodLabels = map[string]string{"a": "b"} }, "podLabels", "port exposure"},
+		"volumes":                  {func(a *spinv1alpha1.SpinApp) { a.Spec.Volumes = []corev1.Volume{{Name: "v"}} }, "volumes", "Secret files and OCI artifacts"},
 		"volume mounts": {func(a *spinv1alpha1.SpinApp) {
 			a.Spec.VolumeMounts = []corev1.VolumeMount{{Name: "v", MountPath: "/x"}}
-		}, "volumeMounts", "file projection"},
+		}, "volumeMounts", "Secret files and OCI artifacts"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -357,5 +358,80 @@ func TestSummaryIsBounded(t *testing.T) {
 	s := Summary(Analyze(a, profile(), opts()))
 	if len(s) > 2000 || !strings.Contains(s, "more problems") {
 		t.Fatalf("summary not bounded (%d bytes): %.200s", len(s), s)
+	}
+}
+
+func v16opts() Options {
+	o := opts()
+	o.Features = capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true}
+	return o
+}
+
+func TestV16FeaturesUnblockFields(t *testing.T) {
+	ref := &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "db"}, Key: "url"}
+	a := app()
+	a.Spec.Variables = []spinv1alpha1.SpinVar{{Name: "database_url", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: ref}}}
+	a.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: "ghcr"}}
+	a.Spec.PodLabels = map[string]string{"team": "payments", "example.com/tier": "web"}
+	a.Spec.Checks.Readiness = &spinv1alpha1.HealthProbe{HTTPGet: &spinv1alpha1.HTTPHealthProbe{Path: "/healthz"}}
+	a.Spec.RuntimeConfig.LLMCompute = &spinv1alpha1.LLMComputeConfig{Type: "remote_http", Options: []spinv1alpha1.RuntimeConfigOption{
+		{Name: "url", Value: "https://llm.example.com"},
+		{Name: "auth_token", ValueFrom: &spinv1alpha1.RuntimeConfigVarSource{SecretKeyRef: ref}},
+	}}
+	if fs := Analyze(a, profile(), v16opts()); len(fs) != 0 {
+		t.Fatalf("findings with v0.16.0 features: %+v", fs)
+	}
+	if !Blocking(Analyze(a, profile(), opts())) {
+		t.Fatal("the same SpinApp is not blocked on a v0.15.1 cluster")
+	}
+}
+
+func TestV16StillRejects(t *testing.T) {
+	cases := map[string]struct {
+		mutate func(a *spinv1alpha1.SpinApp)
+		field  string
+		want   string
+	}{
+		"reserved pod label": {func(a *spinv1alpha1.SpinApp) { a.Spec.PodLabels = map[string]string{"sandbox.kubeswift.io/x": "y"} }, "podLabels", "KubeSwift-reserved"},
+		"spinkube pod label": {func(a *spinv1alpha1.SpinApp) {
+			a.Spec.PodLabels = map[string]string{"core.spinkube.dev/app.x.status": "ready"}
+		}, "podLabels", "core.spinkube.dev"},
+		"invalid pod label": {func(a *spinv1alpha1.SpinApp) { a.Spec.PodLabels = map[string]string{"bad key": "y"} }, "podLabels", "not a valid label"},
+		"configmap variable": {func(a *spinv1alpha1.SpinApp) {
+			a.Spec.Variables = []spinv1alpha1.SpinVar{{Name: "x", ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}}}
+		}, "variables", "configMapKeyRef"},
+		"loadFromSecret with stores": {func(a *spinv1alpha1.SpinApp) {
+			a.Spec.RuntimeConfig.LoadFromSecret = "rc"
+			a.Spec.RuntimeConfig.KeyValueStores = []spinv1alpha1.KeyValueStoreConfig{{Name: "default", Type: "spin"}}
+		}, "runtimeConfig", "replaces the whole runtime configuration"},
+		"literal token": {func(a *spinv1alpha1.SpinApp) {
+			a.Spec.RuntimeConfig.LLMCompute = &spinv1alpha1.LLMComputeConfig{Type: "remote_http", Options: []spinv1alpha1.RuntimeConfigOption{{Name: "auth_token", Value: "sk"}}}
+		}, "runtimeConfig", "valueFrom.secretKeyRef"},
+		"relative check path": {func(a *spinv1alpha1.SpinApp) {
+			a.Spec.Checks.Readiness = &spinv1alpha1.HealthProbe{HTTPGet: &spinv1alpha1.HTTPHealthProbe{Path: "healthz"}}
+		}, "checks", "must start with /"},
+		"long name": {func(a *spinv1alpha1.SpinApp) { a.Name = strings.Repeat("a", 53) }, "name", "at most 52 characters"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			a := app()
+			tc.mutate(a)
+			found := false
+			for _, f := range Analyze(a, profile(), v16opts()) {
+				if f.Field == tc.field && f.Blocking && strings.Contains(f.Message, tc.want) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("no blocking %s finding containing %q: %+v", tc.field, tc.want, Analyze(a, profile(), v16opts()))
+			}
+		})
+	}
+	a := app()
+	a.Name = strings.Repeat("a", 52)
+	for _, f := range Analyze(a, profile(), v16opts()) {
+		if f.Field == "name" {
+			t.Fatalf("52-character name rejected: %s", f.Message)
+		}
 	}
 }

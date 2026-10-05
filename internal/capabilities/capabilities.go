@@ -87,7 +87,8 @@ func Served(dc discovery.DiscoveryInterface, gvr schema.GroupVersionResource) (b
 	return false, nil
 }
 
-// Sandbox describes optional SwiftSandbox features relevant to Spin.
+// Sandbox describes optional SwiftSandbox features relevant to Spin. All of
+// them first appear in KubeSwift v0.16.0.
 type Sandbox struct {
 	// Ports is true when spec.network.ports exists (inbound port exposure).
 	Ports bool
@@ -96,12 +97,21 @@ type Sandbox struct {
 	// PodMetadata is true when spec.podMetadata exists, letting a client
 	// label the launcher pod so a Service can select it.
 	PodMetadata bool
+	// SecretFiles is true when spec.secretFiles exists. The same release
+	// honors env[].valueFrom.secretKeyRef, which the schema cannot show.
+	SecretFiles bool
+	// Egress is true when spec.network.egress exists (restricted-mode
+	// allowlist).
+	Egress bool
 }
 
 // Exposure reports whether every feature needed to put sandboxes behind a
-// Service with readiness is present. The field names follow the proposal in
-// docs/upstream/kubeswift-sandbox-service-exposure.md.
+// Service with readiness is present.
 func (s Sandbox) Exposure() bool { return s.Ports && s.ReadinessProbe && s.PodMetadata }
+
+// Secrets reports whether Secret values can be delivered to the guest
+// without being written to any object.
+func (s Sandbox) Secrets() bool { return s.SecretFiles }
 
 // SandboxDetector reports Sandbox features, refreshing at most every TTL.
 type SandboxDetector interface {
@@ -117,6 +127,7 @@ type OpenAPIDetector struct {
 
 	mu      sync.Mutex
 	cached  Sandbox
+	ok      bool
 	lastErr error
 	fetched time.Time
 }
@@ -126,6 +137,10 @@ const sandboxSchemaName = "io.kubeswift.sandbox.v1alpha1.SwiftSandbox"
 // Sandbox returns the detected features.
 // Failures are cached for the TTL too, so a cluster without OpenAPI v3 does
 // not cost a discovery round trip on every reconcile.
+//
+// The features only change on a successful read. A failed read returns the
+// last successful result: features feed the sandbox spec, so flipping them
+// off on a transient error would replace every replica.
 func (d *OpenAPIDetector) Sandbox(_ context.Context) (Sandbox, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -135,9 +150,16 @@ func (d *OpenAPIDetector) Sandbox(_ context.Context) (Sandbox, error) {
 	s, err := d.fetch()
 	d.fetched, d.lastErr = time.Now(), err
 	if err == nil {
-		d.cached = s
+		d.cached, d.ok = s, true
 	}
 	return d.cached, err
+}
+
+// Ready reports whether at least one detection has succeeded.
+func (d *OpenAPIDetector) Ready() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.ok
 }
 
 func (d *OpenAPIDetector) fetch() (Sandbox, error) {
@@ -175,10 +197,13 @@ func ParseSandboxSchema(raw []byte) (Sandbox, error) {
 		return Sandbox{}, fmt.Errorf("schema %s not found in sandbox.kubeswift.io OpenAPI document", sandboxSchemaName)
 	}
 	spec := root.Properties["spec"]
-	_, ports := spec.Properties["network"].Properties["ports"]
+	network := spec.Properties["network"]
+	_, ports := network.Properties["ports"]
+	_, egress := network.Properties["egress"]
 	_, probe := spec.Properties["readinessProbe"]
 	_, podMeta := spec.Properties["podMetadata"]
-	return Sandbox{Ports: ports, ReadinessProbe: probe, PodMetadata: podMeta}, nil
+	_, secretFiles := spec.Properties["secretFiles"]
+	return Sandbox{Ports: ports, ReadinessProbe: probe, PodMetadata: podMeta, SecretFiles: secretFiles, Egress: egress}, nil
 }
 
 // Static is a SandboxDetector returning fixed features, for tests and for

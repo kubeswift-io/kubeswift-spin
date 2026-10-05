@@ -18,9 +18,11 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
 )
@@ -46,23 +48,23 @@ type Entry struct {
 // name. docs/compatibility.md mirrors it.
 var Matrix = []Entry{
 	{"executor", Supported, "Selects the SpinAppExecutor. Only executors labelled spin.kubeswift.io/managed-by=kubeswift-spin are realized."},
-	{"image", Supported, "Passed to `spin up --from`. Must be a registry reference reachable from the sandbox without credentials."},
+	{"image", Supported, "Passed to `spin up --from`. Must be a registry reference reachable from the sandbox; private registries need imagePullSecrets."},
 	{"replicas", Supported, "One SwiftSandbox per replica, named <app>-<ordinal>. Bounded by the controller --max-replicas flag."},
 	{"resources", PartiallySupported, "cpu and memory size the microVM (see docs/executor-contract.md). Any other resource name is rejected."},
 	{"components", Supported, "Passed as `spin up --component-id`, which Spin marks experimental."},
-	{"variables", PartiallySupported, "Literal values become SPIN_VARIABLE_* environment variables. valueFrom is rejected: KubeSwift has no secure secret or ConfigMap projection."},
-	{"runtimeConfig", PartiallySupported, "keyValueStores, sqliteDatabases and llmCompute with literal, non-credential options are rendered to a runtime-config file. loadFromSecret, valueFrom and credential options are rejected."},
-	{"checks", PartiallySupported, "Accepted, but KubeSwift cannot probe a sandbox, so readiness is never reported (see docs/upstream/kubeswift-sandbox-health-probes.md)."},
-	{"imagePullSecrets", Unsupported, "Spin pulls the application inside the guest; KubeSwift cannot deliver registry credentials to it securely."},
+	{"variables", PartiallySupported, "Literal values and secretKeyRef (KubeSwift v0.16.0 or later) become SPIN_VARIABLE_* environment variables. configMapKeyRef, fieldRef and resourceFieldRef are rejected."},
+	{"runtimeConfig", PartiallySupported, "loadFromSecret, keyValueStores, sqliteDatabases and llmCompute are rendered into the runtime-config file; Secret-backed options need KubeSwift v0.16.0. configMapKeyRef, literal credentials and llmCompute type spin are rejected."},
+	{"checks", Supported, "Become the sandbox readiness and liveness probes against the Spin HTTP port (KubeSwift v0.16.0 or later). Without a readiness check a TCP check is used."},
+	{"imagePullSecrets", Supported, "Delivered as secret files to the Spin process, which pulls the application (KubeSwift v0.16.0 or later). The credentials are in the guest, outside the Wasm sandbox."},
 	{"enableAutoscaling", Unsupported, "SpinApp has no scale subresource and no Deployment exists for an HPA or KEDA to target."},
 	{"invocationLimits", PartiallySupported, "memory maps to SPIN_MAX_INSTANCE_MEMORY, as in Spin Operator. Other keys are rejected."},
 	{"serviceAccountName", Unsupported, "A sandbox guest has no Kubernetes identity, so a service account cannot be granted to it."},
-	{"serviceAnnotations", Supported, "Applied by Spin Operator, which still creates the SpinApp Service when createDeployment is false."},
+	{"serviceAnnotations", Supported, "Applied by Spin Operator, which creates the SpinApp Service when createDeployment is false."},
 	{"deploymentAnnotations", NotApplicable, "No Deployment exists. Rejected if set; Spin Operator's webhook also rejects it."},
-	{"podAnnotations", NotApplicable, "No pod is created for the application. Rejected if set; Spin Operator's webhook also rejects it."},
-	{"podLabels", Unsupported, "KubeSwift launcher pods do not take user labels, so selectors that rely on them would silently match nothing."},
-	{"volumes", Unsupported, "KubeSwift has no generic file projection into a sandbox."},
-	{"volumeMounts", Unsupported, "KubeSwift has no generic file projection into a sandbox."},
+	{"podAnnotations", NotApplicable, "No application pod exists. Rejected if set; Spin Operator's webhook also rejects it."},
+	{"podLabels", Supported, "Added to the KubeSwift launcher pod (KubeSwift v0.16.0 or later). Keys under kubeswift.io and core.spinkube.dev are rejected."},
+	{"volumes", Unsupported, "KubeSwift mounts only Secret files and OCI artifacts into a sandbox, not Kubernetes volumes."},
+	{"volumeMounts", Unsupported, "KubeSwift mounts only Secret files and OCI artifacts into a sandbox, not Kubernetes volumes."},
 }
 
 // Finding is one problem detected on a SpinApp. Messages identify fields and
@@ -78,7 +80,15 @@ type Finding struct {
 type Options struct {
 	MaxReplicas int32
 	Resources   translate.ResourcePolicy
+	// Features are the SwiftSandbox features detected on the cluster. Fields
+	// that need a missing feature are rejected.
+	Features capabilities.Sandbox
 }
+
+const (
+	needSecretsMsg  = "the installed KubeSwift does not provide Secret projection into sandboxes (KubeSwift v0.16.0 or later)"
+	needExposureMsg = "the installed KubeSwift does not provide sandbox port exposure, probes and launcher pod metadata (KubeSwift v0.16.0 or later)"
+)
 
 var (
 	// Spin variable names: lowercase ASCII letters, digits and underscores,
@@ -158,11 +168,12 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 		if vf := v.ValueFrom; vf != nil {
 			switch {
 			case vf.SecretKeyRef != nil:
-				block("variables", Unsupported,
-					"variable %s uses secretKeyRef, but the installed KubeSwift SwiftSandbox API does not provide secure secret projection (see docs/upstream/kubeswift-sandbox-secret-projection.md)", quoteName(v.Name))
+				if !o.Features.Secrets() {
+					block("variables", Unsupported, "variable %s uses secretKeyRef, but %s", quoteName(v.Name), needSecretsMsg)
+				}
 			case vf.ConfigMapKeyRef != nil:
 				block("variables", Unsupported,
-					"variable %s uses configMapKeyRef, which the KubeSwift executor does not resolve; use a literal value", quoteName(v.Name))
+					"variable %s uses configMapKeyRef, which KubeSwift does not resolve for sandboxes; use a literal value or a Secret", quoteName(v.Name))
 			default:
 				block("variables", Unsupported,
 					"variable %s uses a valueFrom source (fieldRef or resourceFieldRef) that has no meaning inside a sandbox guest", quoteName(v.Name))
@@ -170,21 +181,42 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 		}
 	}
 
-	analyzeRuntimeConfig(&s.RuntimeConfig, block)
+	analyzeRuntimeConfig(&s.RuntimeConfig, o.Features, block)
 
 	if s.Checks.Readiness != nil || s.Checks.Liveness != nil {
 		for name, probe := range map[string]*spinv1alpha1.HealthProbe{"readiness": s.Checks.Readiness, "liveness": s.Checks.Liveness} {
-			if probe != nil && probe.HTTPGet == nil {
+			if probe == nil {
+				continue
+			}
+			if probe.HTTPGet == nil {
 				block("checks", Unsupported, "spec.checks.%s has no httpGet; only HTTP checks are defined by SpinKube", name)
+			} else if !strings.HasPrefix(probe.HTTPGet.Path, "/") {
+				block("checks", Unsupported, "spec.checks.%s.httpGet.path must start with /", name)
 			}
 		}
-		note("checks", PartiallySupported,
-			"spec.checks are accepted but cannot be enforced: the installed KubeSwift SwiftSandbox API has no health probes, so no replica is reported ready (see docs/upstream/kubeswift-sandbox-health-probes.md)")
+		if !o.Features.Exposure() {
+			note("checks", PartiallySupported, "spec.checks are accepted but cannot be enforced: "+needExposureMsg)
+		}
 	}
 
-	if len(s.ImagePullSecrets) > 0 {
+	if len(s.ImagePullSecrets) > 0 && !o.Features.Secrets() {
 		block("imagePullSecrets", Unsupported,
-			"spec.imagePullSecrets is not supported: Spin pulls the application inside the sandbox and KubeSwift cannot deliver registry credentials to the guest securely (see docs/upstream/kubeswift-sandbox-artifact-projection.md)")
+			"spec.imagePullSecrets needs registry credentials inside the sandbox, where Spin pulls the application, but "+needSecretsMsg)
+	}
+	for i, ps := range s.ImagePullSecrets {
+		if ps.Name == "" {
+			block("imagePullSecrets", Unsupported, "spec.imagePullSecrets[%d] has no name", i)
+		}
+	}
+
+	if o.Features.Exposure() {
+		// The Service Spin Operator creates selects
+		// core.spinkube.dev/app.<name>.status, whose name part must be a
+		// valid label name of at most 63 characters.
+		if errs := validation.IsQualifiedName(translate.StatusLabelKey(app.Name)); len(errs) > 0 {
+			block("name", Unsupported,
+				"the SpinApp name is too long to be selected by the SpinApp Service (label %s is invalid); use a name of at most 52 characters", quoteName(translate.StatusLabelKey(app.Name)))
+		}
 	}
 
 	for k, v := range s.InvocationLimits {
@@ -209,13 +241,26 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 		block("podAnnotations", NotApplicable, "spec.podAnnotations cannot be honored: no application pod is created")
 	}
 	if len(s.PodLabels) > 0 {
-		block("podLabels", Unsupported, "spec.podLabels cannot be honored: KubeSwift launcher pods do not carry user labels")
+		if !o.Features.Exposure() {
+			block("podLabels", Unsupported, "spec.podLabels cannot be honored: "+needExposureMsg)
+		}
+		for k, v := range s.PodLabels {
+			prefix, _, hasPrefix := strings.Cut(k, "/")
+			switch {
+			case len(validation.IsQualifiedName(k)) > 0 || len(validation.IsValidLabelValue(v)) > 0:
+				block("podLabels", Unsupported, "spec.podLabels key %s or its value is not a valid label", quoteName(k))
+			case hasPrefix && (prefix == "kubeswift.io" || strings.HasSuffix(prefix, ".kubeswift.io")):
+				block("podLabels", Unsupported, "spec.podLabels key %s is under a KubeSwift-reserved domain", quoteName(k))
+			case hasPrefix && prefix == "core.spinkube.dev":
+				block("podLabels", Unsupported, "spec.podLabels key %s is under core.spinkube.dev, which kubeswift-spin and Spin Operator set", quoteName(k))
+			}
+		}
 	}
 	if len(s.Volumes) > 0 {
-		block("volumes", Unsupported, "spec.volumes is not supported: KubeSwift has no generic file projection into a sandbox")
+		block("volumes", Unsupported, "spec.volumes is not supported: KubeSwift mounts only Secret files and OCI artifacts into a sandbox")
 	}
 	if len(s.VolumeMounts) > 0 {
-		block("volumeMounts", Unsupported, "spec.volumeMounts is not supported: KubeSwift has no generic file projection into a sandbox")
+		block("volumeMounts", Unsupported, "spec.volumeMounts is not supported: KubeSwift mounts only Secret files and OCI artifacts into a sandbox")
 	}
 
 	sort.SliceStable(out, func(i, j int) bool {
@@ -227,10 +272,17 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 	return out
 }
 
-func analyzeRuntimeConfig(rc *spinv1alpha1.RuntimeConfig, block func(string, Level, string, ...any)) {
+func analyzeRuntimeConfig(rc *spinv1alpha1.RuntimeConfig, f capabilities.Sandbox, block func(string, Level, string, ...any)) {
 	if rc.LoadFromSecret != "" {
-		block("runtimeConfig", Unsupported,
-			"spec.runtimeConfig.loadFromSecret is not supported: KubeSwift SwiftSandbox has no secure secret projection (see docs/upstream/kubeswift-sandbox-secret-projection.md)")
+		if !f.Secrets() {
+			block("runtimeConfig", Unsupported, "spec.runtimeConfig.loadFromSecret is not supported: "+needSecretsMsg)
+		}
+		if len(rc.KeyValueStores) > 0 || len(rc.SqliteDatabases) > 0 || rc.LLMCompute != nil {
+			// Spin Operator silently ignores the other fields in this case;
+			// kubeswift-spin reports the conflict instead.
+			block("runtimeConfig", Unsupported,
+				"spec.runtimeConfig.loadFromSecret replaces the whole runtime configuration; remove keyValueStores, sqliteDatabases and llmCompute or loadFromSecret")
+		}
 	}
 	check := func(kind, storeName, typ string, opts []spinv1alpha1.RuntimeConfigOption) {
 		if storeName != "" && !configName.MatchString(storeName) {
@@ -252,20 +304,21 @@ func analyzeRuntimeConfig(rc *spinv1alpha1.RuntimeConfig, block func(string, Lev
 			seen[o.Name] = true
 			if vf := o.ValueFrom; vf != nil {
 				if vf.SecretKeyRef != nil {
-					block("runtimeConfig", Unsupported,
-						"%s uses secretKeyRef, but the installed KubeSwift SwiftSandbox API does not provide secure secret projection (see docs/upstream/kubeswift-sandbox-secret-projection.md)", label)
+					if !f.Secrets() {
+						block("runtimeConfig", Unsupported, "%s uses secretKeyRef, but %s", label, needSecretsMsg)
+					}
 				} else {
-					block("runtimeConfig", Unsupported, "%s uses configMapKeyRef, which the KubeSwift executor does not resolve; use a literal value", label)
+					block("runtimeConfig", Unsupported, "%s uses configMapKeyRef, which KubeSwift does not resolve for sandboxes; use a literal value or a Secret", label)
 				}
 				continue
 			}
 			if IsCredentialOption(o.Name) && o.Value != "" {
 				block("runtimeConfig", Unsupported,
-					"%s looks like a credential; literal credentials are not copied into the sandbox spec, where KubeSwift stores them in a plain ConfigMap, and secret-backed values need KubeSwift secret projection", label)
+					"%s looks like a credential; literal values are stored in plain text in the sandbox spec, so reference a Secret with valueFrom.secretKeyRef instead", label)
 			}
 			if urlHasCredentials(o.Value) {
 				block("runtimeConfig", Unsupported,
-					"%s contains a URL with embedded credentials, which would be stored in plain text in the sandbox spec", label)
+					"%s contains a URL with embedded credentials, which would be stored in plain text in the sandbox spec; reference a Secret with valueFrom.secretKeyRef instead", label)
 			}
 		}
 	}

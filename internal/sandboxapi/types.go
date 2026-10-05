@@ -18,6 +18,7 @@ package sandboxapi
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -56,9 +57,70 @@ const (
 	SandboxNetworkNone       SandboxNetworkMode = "none"
 )
 
-// SandboxNetwork is the sandbox networking policy.
+// SandboxNetwork is the sandbox networking policy. Egress, Ports and
+// Ingress exist from KubeSwift v0.16.0.
 type SandboxNetwork struct {
-	Mode SandboxNetworkMode `json:"mode,omitempty"`
+	Mode    SandboxNetworkMode `json:"mode,omitempty"`
+	Egress  *SandboxEgress     `json:"egress,omitempty"`
+	Ports   []SandboxPort      `json:"ports,omitempty"`
+	Ingress *SandboxIngress    `json:"ingress,omitempty"`
+}
+
+// SandboxPort is one guest port exposed as a named launcher containerPort.
+type SandboxPort struct {
+	Name     string          `json:"name"`
+	Port     int32           `json:"port"`
+	Protocol corev1.Protocol `json:"protocol,omitempty"`
+}
+
+// SandboxIngress limits the sources allowed to reach a sandbox's ports.
+type SandboxIngress struct {
+	From []networkingv1.NetworkPolicyPeer `json:"from,omitempty"`
+}
+
+// SandboxEgress refines the restricted egress posture.
+type SandboxEgress struct {
+	Allow []SandboxEgressRule `json:"allow,omitempty"`
+}
+
+// SandboxEgressRule allows one destination: a Service or an IPv4 CIDR.
+type SandboxEgressRule struct {
+	Service *SandboxEgressService `json:"service,omitempty"`
+	CIDR    string                `json:"cidr,omitempty"`
+	Ports   []SandboxEgressPort   `json:"ports,omitempty"`
+}
+
+// SandboxEgressService names a Service whose ClusterIP the sandbox may reach.
+type SandboxEgressService struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// SandboxEgressPort is one allowed destination port.
+type SandboxEgressPort struct {
+	Port     int32           `json:"port"`
+	Protocol corev1.Protocol `json:"protocol,omitempty"`
+}
+
+// SandboxSecretFile writes keys of a Secret into the guest as files.
+type SandboxSecretFile struct {
+	SecretName string                  `json:"secretName"`
+	Items      []SandboxSecretFileItem `json:"items"`
+	Mode       *int32                  `json:"mode,omitempty"`
+	Optional   bool                    `json:"optional,omitempty"`
+}
+
+// SandboxSecretFileItem is one Secret key written to one guest path.
+type SandboxSecretFileItem struct {
+	Key  string `json:"key"`
+	Path string `json:"path"`
+	Mode *int32 `json:"mode,omitempty"`
+}
+
+// SandboxPodMetadata is metadata for a sandbox's launcher pod.
+type SandboxPodMetadata struct {
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // SandboxModel is a read-only model artifact mounted into a sandbox. It is
@@ -78,11 +140,15 @@ type SwiftSandboxSpec struct {
 	Command            []string                     `json:"command,omitempty"`
 	Args               []string                     `json:"args,omitempty"`
 	Env                []corev1.EnvVar              `json:"env,omitempty"`
+	SecretFiles        []SandboxSecretFile          `json:"secretFiles,omitempty"`
 	Network            SandboxNetwork               `json:"network,omitempty"`
 	RootfsMode         SandboxRootfsMode            `json:"rootfsMode,omitempty"`
 	KernelProfileRef   *corev1.LocalObjectReference `json:"kernelProfileRef,omitempty"`
 	NodeSelector       map[string]string            `json:"nodeSelector,omitempty"`
 	PoolRef            *corev1.LocalObjectReference `json:"poolRef,omitempty"`
+	PodMetadata        *SandboxPodMetadata          `json:"podMetadata,omitempty"`
+	ReadinessProbe     *corev1.Probe                `json:"readinessProbe,omitempty"`
+	LivenessProbe      *corev1.Probe                `json:"livenessProbe,omitempty"`
 }
 
 // SwiftSandboxPhase is the sandbox lifecycle phase.
@@ -100,6 +166,9 @@ const (
 const (
 	SwiftSandboxConditionResolved     = "Resolved"
 	SwiftSandboxConditionGuestRunning = "GuestRunning"
+	// SwiftSandboxConditionWorkloadReady reports spec.readinessProbe
+	// (KubeSwift v0.16.0 and later).
+	SwiftSandboxConditionWorkloadReady = "WorkloadReady"
 )
 
 // SwiftSandboxStatus is the subset of the sandbox status kubeswift-spin reads.

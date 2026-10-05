@@ -227,9 +227,13 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		return ctrl.Result{}, nil
 	}
 
-	exposure := r.exposure(ctx)
+	features := r.features(ctx)
+	exposure := status.Exposure{Detected: features.Exposure()}
 
 	profile, perr := executor.Parse(&exec, r.Defaults)
+	if perr == nil {
+		perr = profile.CheckFeatures(features)
+	}
 	if perr != nil {
 		if exec.Spec.CreateDeployment {
 			// Spin Operator owns the SpinApp status of executors with
@@ -245,7 +249,9 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, EventExecutorInvalid)
 	}
 
-	findings := compatibility.Analyze(&app, profile, r.Options)
+	opts := r.Options
+	opts.Features = features
+	findings := compatibility.Analyze(&app, profile, opts)
 	newGeneration := r.isNewGeneration(&app)
 	if newGeneration {
 		for _, f := range findings {
@@ -261,7 +267,7 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, EventUnsupported)
 	}
 
-	tmpl, err := translate.BuildTemplate(&app, profile, r.Options.Resources)
+	tmpl, err := translate.BuildTemplate(&app, profile, r.Options.Resources, features)
 	if err != nil {
 		blocker := &status.Blocker{Reason: status.ReasonUnsupportedConfiguration, Message: err.Error()}
 		return ctrl.Result{}, r.finish(ctx, &app, owned, "", blocker, exposure, EventUnsupported)
@@ -359,19 +365,18 @@ func (r *SpinAppReconciler) controlledByApp(ctx context.Context, app *spinv1alph
 	return metav1.IsControlledBy(&sb, app), nil
 }
 
-// exposure reports whether replicas can be put behind a Service. This build
-// is compiled against the KubeSwift v0.15.1 API, which has no port exposure,
-// so Implemented is always false; detection still runs so the status message
-// can tell an operator when an upgrade of kubeswift-spin would help.
-func (r *SpinAppReconciler) exposure(ctx context.Context) status.Exposure {
+// features returns the SwiftSandbox features of the installed KubeSwift.
+// The detector keeps its last successful result on errors, so a transient
+// discovery failure never changes the rendered sandbox spec.
+func (r *SpinAppReconciler) features(ctx context.Context) capabilities.Sandbox {
 	if r.Detector == nil {
-		return status.Exposure{}
+		return capabilities.Sandbox{}
 	}
-	caps, err := r.Detector.Sandbox(ctx)
+	f, err := r.Detector.Sandbox(ctx)
 	if err != nil {
-		log.FromContext(ctx).V(1).Info("sandbox capability detection failed", "error", err.Error())
+		log.FromContext(ctx).V(1).Info("sandbox capability detection failed; using the last result", "error", err.Error())
 	}
-	return status.Exposure{Detected: caps.Exposure(), Implemented: false}
+	return f
 }
 
 // isNewGeneration reports whether this generation has not been processed
@@ -394,7 +399,7 @@ func (r *SpinAppReconciler) checkPool(ctx context.Context, app *spinv1alpha1.Spi
 		}
 		return nil, err
 	}
-	if mm := translate.PoolMismatches(&tmpl.Spec, &pool); len(mm) > 0 {
+	if mm := translate.PoolMismatches(&tmpl.Spec, app.Namespace, &pool); len(mm) > 0 {
 		return &status.Blocker{Reason: status.ReasonWarmPoolIncompatible,
 			Message: fmt.Sprintf("SwiftSandboxPool %q is incompatible with this SpinApp: %s", p.SandboxPool, strings.Join(mm, "; "))}, nil
 	}
@@ -453,7 +458,7 @@ func (r *SpinAppReconciler) observe(app *spinv1alpha1.SpinApp, owned []sandboxv1
 					sb.Name, sb.Status.Phase, firstNonEmpty(inst.FailureReason, "no reason reported"))
 			}
 		}
-		if inst.Health == rollout.Running && inst.Revision == revision {
+		if (inst.Health == rollout.Running || inst.Health == rollout.Ready) && inst.Revision == revision {
 			r.Backoff.RecordRunning(key, inst.Ordinal, string(sb.UID), now)
 		}
 		out = append(out, inst)
@@ -477,6 +482,13 @@ func Classify(appName string, sb *sandboxv1alpha1.SwiftSandbox) status.Instance 
 	switch sb.Status.Phase {
 	case sandboxv1alpha1.SwiftSandboxRunning:
 		inst.Health = rollout.Running
+		// Ready needs evidence that Spin serves: a readiness probe on this
+		// sandbox and KubeSwift reporting it passes. A running guest alone
+		// is not enough, and a sandbox without a probe (created before
+		// KubeSwift supported them) is never counted as ready.
+		if sb.Spec.ReadinessProbe != nil && apimeta.IsStatusConditionTrue(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionWorkloadReady) {
+			inst.Health = rollout.Ready
+		}
 	case sandboxv1alpha1.SwiftSandboxCompleted, sandboxv1alpha1.SwiftSandboxFailed:
 		inst.Health = rollout.Terminal
 		if c := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionGuestRunning); c != nil && c.Status == metav1.ConditionFalse {
