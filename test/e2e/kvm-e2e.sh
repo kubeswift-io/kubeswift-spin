@@ -33,7 +33,7 @@ set -euo pipefail
 
 NS="${E2E_NAMESPACE:-kubeswift-spin-e2e}"
 EXAMPLES="${EXAMPLES:-ghcr.io/kubeswift-io/kubeswift-spin-examples}"
-TAG="${EXAMPLES_TAG:-v0.1.0}"
+TAG="${EXAMPLES_TAG:-v0.1.0-rc1}"
 EXECUTOR="${EXECUTOR:-kubeswift}"
 TIMEOUT="${TIMEOUT:-300}"
 SCRATCH="${E2E_SCRATCH_REGISTRY:-}"

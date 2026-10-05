@@ -3,6 +3,6 @@ kind: SpinApp
 metadata:
   name: mcp-tools
 spec:
-  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/mcp-tools:v0.1.0
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/mcp-tools:v0.1.0-rc1
   executor: kubeswift
   replicas: 1

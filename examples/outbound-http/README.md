@@ -72,10 +72,12 @@ For the allowlist case, an executor like
 spin.kubeswift.io/egress-allow: '[{"service":{"name":"upstream","namespace":"kubeswift-spin-examples"},"ports":[{"port":8090}]}]'
 ```
 
-This example has not been run in a sandbox. Only the first two rows were
-measured, with the serverless-ai application in the KVM e2e test: a
-restricted sandbox without the allowlist could not reach an in-cluster
-Service (the request timed out), and one with an allowlist entry could. The
+Only the first two rows were measured, in the KVM e2e test. This
+application ran in a restricted sandbox with an `egress-allow` entry for an
+in-cluster Service and fetched from it (phase 8, which uses `/fetch` as a
+liveness check). The serverless-ai application in a restricted sandbox
+without the allowlist could not reach an in-cluster Service (the request
+timed out). The
 `open` and public internet rows follow the KubeSwift documentation and were
 not measured, except that Spin pulled the example applications from
 `ghcr.io` under `restricted`.

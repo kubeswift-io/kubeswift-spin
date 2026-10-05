@@ -88,7 +88,9 @@ Without `RUNTIME_IMAGE`, the image is tagged
 
 The Dockerfile builds the entrypoint for `TARGETARCH` and selects the
 matching Spin archive and digest, so `docker buildx build --platform
-linux/amd64,linux/arm64` works; only amd64 has been built and tested so far.
+linux/amd64,linux/arm64` builds both. The release workflow publishes both;
+only linux/amd64 has been tested (in Docker and on KVM). The arm64 image
+is built but has never been run.
 
 ## Testing without Kubernetes
 

@@ -42,7 +42,7 @@ the repository README), a `kubeswift` executor in the namespace, and a Ready
 SwiftKernel named `sandbox` in the namespace.
 
 ```bash
-make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0 NAMESPACE=<namespace>
+make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc1 NAMESPACE=<namespace>
 ```
 
 ```bash
@@ -69,11 +69,12 @@ kubectl -n <namespace> run curl --rm -i --restart=Never --image=curlimages/curl:
 ```
 
 The response is `Hello from Spin on KubeSwift`. On the KVM lab cluster the
-SpinApp became `Available` 19 to 22 seconds after it was created (see
+SpinApp became `Available` 19 to 26 seconds after it was created (see
 [docs/compatibility.md](../../docs/compatibility.md#kvm-e2e-lab-run-2026-10-05)).
 
-To use `/healthz` as the readiness check instead of the TCP check, add it to
-the SpinApp. `httpHeaders: []` is required by Spin Operator v0.6.1:
+The manifest uses `/healthz` as the readiness check. `httpHeaders: []` is
+required by Spin Operator v0.6.1, which otherwise rejects the SpinApp at
+admission:
 
 ```yaml
 spec:

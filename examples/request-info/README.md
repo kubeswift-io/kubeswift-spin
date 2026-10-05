@@ -32,7 +32,7 @@ sandbox.
 ## Deploy
 
 ```bash
-make example-deploy EXAMPLE=request-info EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0 NAMESPACE=<namespace>
+make example-deploy EXAMPLE=request-info EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc1 NAMESPACE=<namespace>
 ```
 
 The SpinApp requests two replicas, so kubeswift-spin creates

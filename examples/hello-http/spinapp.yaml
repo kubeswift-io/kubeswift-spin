@@ -3,10 +3,18 @@ kind: SpinApp
 metadata:
   name: hello-http
 spec:
-  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc1
   executor: kubeswift
   replicas: 1
   resources:
     limits:
       cpu: 500m      # rounded up to 1 vCPU
       memory: 256Mi
+  checks:
+    readiness:
+      httpGet:
+        path: /healthz
+        # Required with Spin Operator v0.6.1, which rejects an httpGet
+        # check without httpHeaders (see docs/compatibility.md).
+        httpHeaders: []
+      periodSeconds: 2

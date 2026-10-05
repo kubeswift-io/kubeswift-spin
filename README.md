@@ -16,33 +16,36 @@ KubeSwift.
 
 ## Status
 
-Early, unreleased (v0.1.0 in development). Not production-ready. What works
-today:
+v0.1.0-rc1 is the first release candidate. It validates the initial
+architecture and the core execution path on real KVM hardware and is meant
+for evaluation and integration testing while the project builds broader
+compatibility and operational experience. It is not production-ready.
 
-- SpinApps are translated, reconciled, scaled, rolled and deleted. This is
-  covered by unit tests, an envtest suite against the real CRDs, a kind
-  integration test with Spin Operator installed, and Docker tests of the
-  runtime image.
-- **The KVM path was validated on one lab cluster** with KubeSwift v0.16.0
-  ([test/e2e](test/e2e/README.md)): HTTP SpinApps became `Available` and
-  were reached through the SpinApp Service, scaled, rolled without failed
-  requests, read a Secret-backed variable and token, called an in-cluster
-  service through an egress allowlist, and started from a warm pool.
-- **HTTP applications are reachable on KubeSwift v0.16.0** through the
-  Service Spin Operator creates; `readyReplicas` follows KubeSwift's
-  readiness probes. On KubeSwift v0.15.1, SpinApps run but report
-  `Available=False` with reason `NetworkUnavailable`.
-- **Secrets are passed by reference.** On KubeSwift v0.16.0, Secret-backed
-  variables and runtime-config options (tested on the lab cluster),
-  `runtimeConfig.loadFromSecret` and private application registries
-  (`imagePullSecrets`; both tested with Docker only) are supported.
-  kubeswift-spin never reads a Secret; KubeSwift delivers the values to the
-  guest.
+Tested on linux/amd64 only, with KubeSwift v0.16.0, Spin Operator v0.6.1
+and Kubernetes 1.34 (one k0s lab cluster with Calico). arm64 images are
+published but not validated. [docs/compatibility.md](docs/compatibility.md)
+lists what was tested and the support status of every SpinApp field.
 
-Not tested: `loadFromSecret` and private registries in a microVM,
-`spin.kubeswift.io/ingress-from`, replacement after a liveness failure,
-arm64 and the GitHub workflows. See [docs/compatibility.md](docs/compatibility.md)
-for what was tested and the full field support matrix.
+What works on KubeSwift v0.16.0, exercised by the KVM end-to-end test
+([test/e2e](test/e2e/README.md)):
+
+- HTTP SpinApps become `Available` and are reached through the Service
+  Spin Operator creates; `readyReplicas` follows KubeSwift's readiness
+  probes. Scaling, rolling updates without failed requests, and deletion.
+- A replica whose liveness check fails is replaced, with a growing backoff
+  while it keeps failing.
+- Secrets passed by reference, never copied into objects: Secret-backed
+  variables and runtime-config options, `runtimeConfig.loadFromSecret`, and
+  private application registries through `imagePullSecrets`.
+- Egress allowlists (`spin.kubeswift.io/egress-allow`), ingress
+  restriction (`spin.kubeswift.io/ingress-from`) and warm pools.
+
+On KubeSwift v0.15.1, SpinApps run but report `Available=False` with reason
+`NetworkUnavailable`, and Secret-backed configuration is rejected.
+
+Read [why kubeswift-spin](docs/why-kubeswift-spin.md) for when a microVM
+around a Wasm application is worth its cost, and when standard SpinKube is
+the better choice.
 
 ## How it works
 
@@ -90,57 +93,37 @@ features it can use and logs `SwiftSandbox features detected`.
 
 ## Install
 
-No images or chart have been published yet. Build and push them to a
-registry your cluster can pull from (`make` targets are listed by
-`make help`). Build both images from the same commit. The runtime image has
-its own version, read from `runtime/VERSION` (currently `spin-4.2.1-r1`), so
-that controller upgrades do not replace running replicas:
+The release images, chart and example artifacts are public on
+`ghcr.io/kubeswift-io`, signed with cosign keyless signing; see
+[docs/releasing.md](docs/releasing.md#verifying-a-release) for
+verification. The chart pins the controller and runtime images by digest.
+
+The namespace for SpinApps (`demo` here) must exist before the chart
+creates an executor in it, and needs a Ready SwiftKernel named `sandbox`:
 
 ```bash
-make image runtime-image REGISTRY=<registry> VERSION=v0.1.0-dev
+kubectl create namespace demo
 ```
 
-```bash
-docker push <registry>/kubeswift-spin:v0.1.0-dev
-```
+Install the chart with a `kubeswift` executor in `demo`:
 
 ```bash
-docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r1
-```
-
-KubeSwift pulls the runtime image on the nodes; if the registry is private,
-create a docker-registry Secret in each SpinApp namespace and set the
-executor's `runtimeImagePullSecret` value. The controller image uses the
-chart's `imagePullSecrets` value instead.
-
-Install the chart and create a `kubeswift` executor in namespace `demo`:
-
-```bash
-helm install kubeswift-spin charts/kubeswift-spin \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc1 \
   --namespace kubeswift-spin-system --create-namespace \
-  --set image.repository=<registry>/kubeswift-spin --set image.tag=v0.1.0-dev \
-  --set runtimeImage.repository=<registry>/kubeswift-spin-runtime \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
 
-The namespace must exist before the chart creates executors in it. Chart
-values are documented in [charts/kubeswift-spin](charts/kubeswift-spin/README.md).
+```bash
+kubectl -n kubeswift-spin-system rollout status deployment/kubeswift-spin
+```
+
+Chart values are documented in
+[charts/kubeswift-spin](charts/kubeswift-spin/README.md).
 
 ## Run hello-http
 
 ```bash
-make spin
-```
-
-```bash
-make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=<registry> EXAMPLE_TAG=v0.1.0-dev
-```
-
-Spin pulls the artifact inside the sandbox. For a private registry, add
-`spec.imagePullSecrets` to the SpinApp.
-
-```bash
-make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=<registry> EXAMPLE_TAG=v0.1.0-dev NAMESPACE=demo
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc1/examples/hello-http/spinapp.yaml
 ```
 
 ```bash
@@ -169,8 +152,45 @@ More examples, including request-info with Secret-backed variables,
 key-value, outbound HTTP, serverless AI with an egress allowlist and an
 experimental MCP server, are in [examples](examples/).
 
+## Build from source
+
+Build both images from the same commit and push them to a registry your
+cluster can pull from (`make help` lists the targets). The runtime image
+has its own version, read from `runtime/VERSION` (currently
+`spin-4.2.1-r1`), so that controller upgrades do not replace running
+replicas:
+
+```bash
+make image runtime-image REGISTRY=<registry> VERSION=v0.1.0-dev
+```
+
+```bash
+docker push <registry>/kubeswift-spin:v0.1.0-dev
+```
+
+```bash
+docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r1
+```
+
+Then install from the source tree:
+
+```bash
+helm install kubeswift-spin charts/kubeswift-spin \
+  --namespace kubeswift-spin-system --create-namespace \
+  --set image.repository=<registry>/kubeswift-spin --set image.tag=v0.1.0-dev \
+  --set runtimeImage.repository=<registry>/kubeswift-spin-runtime \
+  --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
+```
+
+KubeSwift pulls the runtime image on the nodes; if the registry is private,
+create a docker-registry Secret in each SpinApp namespace and set the
+executor's `runtimeImagePullSecret` value. The controller image uses the
+chart's `imagePullSecrets` value instead. To publish an example to your own
+registry, see [examples](examples/README.md).
+
 ## Documentation
 
+- [Why kubeswift-spin](docs/why-kubeswift-spin.md): when it is worth it, trust model, costs
 - [Architecture](docs/architecture.md): design, verified upstream contracts, diagrams
 - [Executor contract](docs/executor-contract.md): profiles, translation, replicas, status
 - [Compatibility](docs/compatibility.md): tested versions and SpinApp field support
@@ -180,6 +200,7 @@ experimental MCP server, are in [examples](examples/).
 - [Observability](docs/observability.md)
 - [Serverless AI](docs/serverless-ai.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [Releasing](docs/releasing.md): release process and artifact verification
 - [Upstream KubeSwift requirements](docs/upstream/README.md)
 - [Architecture decisions](docs/adr/README.md)
 

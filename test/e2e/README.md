@@ -5,8 +5,8 @@ reaches them through the SpinApp Service from a client pod, as real clients
 do. It is the only test in this repository that exercises execution; the
 envtest and kind tests stand in for KubeSwift.
 
-It passed on a lab cluster on 2026-10-05 with KubeSwift v0.16.0 and
-`E2E_WARM_POOL=1`; see [Lab result](#lab-result).
+It passed on a lab cluster on 2026-10-05 with KubeSwift v0.16.0 and all
+nine phases; see [Lab result](#lab-result).
 
 ## Phases
 
@@ -81,7 +81,7 @@ make example-push EXAMPLE=serverless-ai EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 |---|---|---|
 | `E2E_NAMESPACE` | `kubeswift-spin-e2e` | namespace with the executor and the SwiftKernel |
 | `EXAMPLES` | `ghcr.io/kubeswift-io/kubeswift-spin-examples` | registry prefix of the example artifacts |
-| `EXAMPLES_TAG` | `v0.1.0` | tag of the example artifacts; no tag has been published yet, so set it |
+| `EXAMPLES_TAG` | `v0.1.0-rc1` | tag of the example artifacts |
 | `EXECUTOR` | `kubeswift` | executor for phases 1 to 3 |
 | `TIMEOUT` | `300` | seconds to wait for each step |
 | `E2E_PHASES` | `1 2 3 5 7 8 9` | phases to run; when set, `E2E_WARM_POOL` and `E2E_SCRATCH_REGISTRY` add no phases |
@@ -95,27 +95,21 @@ make example-push EXAMPLE=serverless-ai EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 The script uses the current kubeconfig context. From the repository root:
 
 ```bash
-E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES=<registry>/kubeswift-spin-examples EXAMPLES_TAG=<tag> E2E_WARM_POOL=1 test/e2e/kvm-e2e.sh
+E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.1.0-rc1 E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh test/e2e/kvm-e2e.sh
 ```
 
 `make e2e` runs the same script and passes these variables through.
 
 ## Lab result
 
-On 2026-10-05 the script passed every check with `E2E_WARM_POOL=1` on a k0s
-Kubernetes v1.34.3 cluster with three nodes (two kernel nodes with KVM),
-KubeSwift v0.16.0, cert-manager v1.21.1 and Spin Operator v0.6.1, with a
-kubeswift-spin development build from `charts/kubeswift-spin`:
-
-- hello-http `Available` 19 to 22 seconds after creation
-- rolling update: 0 failed requests out of about 470
-- warm-pool checkout `Available` in 6 to 7 seconds
-- the request to the mock without the allowlist timed out
-
-Not covered by this script: secret files (private application registries
-through `imagePullSecrets`, `runtimeConfig.loadFromSecret`),
-`spin.kubeswift.io/ingress-from`, replacement after a liveness failure, and
-arm64.
+On 2026-10-05 the script passed every check with all nine phases
+(`E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh`) on a k0s Kubernetes
+v1.34.3 cluster with three linux/amd64 nodes (two kernel nodes with KVM)
+and Calico, KubeSwift v0.16.0, cert-manager v1.21.1 and Spin Operator
+v0.6.1, with a kubeswift-spin development build from `charts/kubeswift-spin`.
+The timings are in
+[compatibility.md](../docs/compatibility.md#kvm-e2e-lab-run-2026-10-05).
+Not covered: arm64.
 
 ## CI
 

@@ -7,7 +7,7 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.1.0 (unreleased, `main`) | all tests below |
+| kubeswift-spin | v0.1.0-rc1 | all tests below; the KVM run below used a development build of the commit before the version change |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
@@ -15,52 +15,67 @@ that ran; nothing else is implied.
 | KubeSwift | v0.15.1 | legacy mode only: unit and envtest tests with a feature detector that reports no optional features. Legacy mode uses only the API subset that was contract-tested against v0.15.1 before the module moved to v0.16.0. Not run on a v0.15.1 cluster since the v0.16.0 integration. |
 | cert-manager | v1.21.1 | KVM e2e cluster (the kind integration test pins v1.21.2) |
 | Kubernetes API server | 1.34.1, 1.37.0 | envtest controller suite |
-| Kubernetes (k0s) | v1.34.3 | KVM e2e cluster |
+| Kubernetes (k0s) | v1.34.3, Calico CNI, linux/amd64 nodes | KVM e2e cluster |
+| Architecture | linux/amd64 | everything above; arm64 images are built and published but have never been run |
 | Kubernetes (kind) | v1.34.0 | kind integration test |
 
 ### KVM e2e lab run (2026-10-05)
 
-Cluster: k0s Kubernetes v1.34.3, three nodes, two of them kernel nodes with
-KVM; KubeSwift v0.16.0, cert-manager v1.21.1, Spin Operator v0.6.1.
-kubeswift-spin was a development build installed from
-`charts/kubeswift-spin`, with controller, runtime and example images built
-from the same commit (development tags `v0.1.0-dev.<commit>` and
-`spin-4.2.1-r1-dev.<commit>`).
+Cluster: k0s Kubernetes v1.34.3, three linux/amd64 nodes, two of them
+kernel nodes with KVM, Calico; KubeSwift v0.16.0, cert-manager v1.21.1,
+Spin Operator v0.6.1. kubeswift-spin was a development build of commit
+4e5f606 (controller `v0.1.0-dev.4e5f606`, runtime
+`spin-4.2.1-r1-dev.4e5f606`) installed from `charts/kubeswift-spin`, with
+the example artifacts tagged `v0.1.0-dev.49ded6b`.
 
-`test/e2e/kvm-e2e.sh` with `E2E_WARM_POOL=1` passed every check:
+`test/e2e/kvm-e2e.sh` with all nine phases (`E2E_WARM_POOL=1`,
+`E2E_SCRATCH_REGISTRY=ttl.sh`) passed every check:
 
-- hello-http became `Available` 19 to 22 seconds after the SpinApp was
-  created, and answered through the SpinApp Service from a client pod.
-- Scaling to 2 replicas and back to 1 updated `readyReplicas` and the
-  Service endpoints.
-- A rolling update under continuous traffic had 0 failed requests out of
-  about 470.
-- request-info with a Secret-backed variable returned the Secret value; the
-  value was in no SwiftSandbox and no ConfigMap in the namespace.
-- serverless-ai reached an in-cluster OpenAI-compatible mock through the
-  egress allowlist with a Secret-backed token. The same application on a
-  restricted executor without the allowlist could not reach the mock (the
-  request timed out: packets are dropped).
-- A replica checked out from a warm pool was `Available` in 6 to 7 seconds.
+- hello-http became `Available` 26 seconds after the SpinApp was created
+  (19 to 26 seconds over several runs) and answered through the SpinApp
+  Service from a client pod. Scaling to 3, 2 and 1 replicas updated
+  `readyReplicas` and the Service endpoints.
+- A rolling update of two replicas took 104 seconds, with 0 failed
+  requests out of 503 sent during it.
+- Secret-backed variable, Secret-backed runtime-config option,
+  `loadFromSecret` and `imagePullSecrets`: each value reached Spin, and a
+  leak scan found none of them outside Secrets (objects, Events, logs; see
+  [security-model.md](security-model.md#secrets)).
+- serverless-ai reached an in-cluster mock through the egress allowlist; a
+  restricted sandbox without the allowlist could not (the request timed
+  out).
+- A replica checked out from a warm pool was `Available` in 7 seconds (6
+  to 7 seconds over several runs).
+- Private registry: Spin pulled hello-http from an in-cluster htpasswd
+  registry with `imagePullSecrets` (`Available` in 29 seconds); without the
+  Secret the sandbox failed and the SpinApp never became ready.
+- `ingress-from`: a labelled client was admitted, an unlabelled client got
+  no connection, and relabelling the same pod flipped the result.
+- Liveness: after the check started failing, the sandbox was `Failed`
+  (`LivenessProbeFailed`) within 7 seconds and `readyReplicas` dropped to
+  0. kubeswift-spin deleted it 10 seconds after the failure and the next
+  failed replacement 20 seconds after its failure (backoff), recreating
+  each once the foreground deletion finished (12 to 22 seconds). After
+  the target recovered, the replacement was `Available` 48 seconds after
+  recovery and stayed unchanged for 90 seconds. The controller logged no
+  error.
+- Teardown left no SpinApp, sandbox, Service or sandbox NetworkPolicy.
 
 See [test/e2e](../test/e2e/README.md) for the phases.
 
 ### Not tested
 
-- Secret files in a microVM: private application registries
-  (`imagePullSecrets`) and `runtimeConfig.loadFromSecret`. Covered only by
-  the Docker runtime test, which pulls from an htpasswd-protected local
-  registry with the merged Docker config, refuses the pull without
-  credentials, and reads a runtime config from a root-owned 0400 file.
-- The `spin.kubeswift.io/ingress-from` annotation on a cluster.
-- Replacement of a replica after a liveness probe failure.
+- arm64, other CNIs than Calico, other Kubernetes distributions, and more
+  than one cluster.
+- A Wasm component actively trying to read guest files or credentials; the
+  credential boundary rests on Spin's capability model.
 - Spin Operator `main` after v0.6.1. Its Go module path changed to
   `github.com/spinframework/spin-operator` and it adds the status fields
   `deploymentName` and `serviceName`; kubeswift-spin builds against the
   v0.6.1 module (`github.com/spinkube/spin-operator`).
-- arm64. The runtime image Dockerfile supports it and pins the arm64 Spin
-  digest, but no arm64 build has been run.
-- The GitHub workflows (CI, release, KVM e2e). None has run.
+- The KVM e2e workflow on a self-hosted runner (none is registered); the
+  KVM test was run by hand.
+- KubeSwift v0.15.1 on a cluster since the v0.16.0 integration.
 
 ## Required APIs
 

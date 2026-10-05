@@ -77,7 +77,7 @@ kubectl -n <namespace> apply -f config/executor/kubeswift-egress.yaml
 ```
 
 ```bash
-make example-deploy EXAMPLE=serverless-ai EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0 NAMESPACE=<namespace>
+make example-deploy EXAMPLE=serverless-ai EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc1 NAMESPACE=<namespace>
 ```
 
 The token never appears in the SwiftSandbox: the rendered runtime
