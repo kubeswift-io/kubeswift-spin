@@ -89,8 +89,9 @@ check-prose: ## Reject em dashes and section signs in project-authored text.
 	hack/check-prose.sh
 
 .PHONY: lint-workflows
-lint-workflows: $(ACTIONLINT) ## Lint GitHub Actions workflows.
+lint-workflows: $(ACTIONLINT) ## Lint GitHub Actions workflows (with shellcheck when it is installed, as in CI).
 	$(ACTIONLINT) .github/workflows/*.yaml
+	@command -v shellcheck >/dev/null || echo "note: shellcheck is not installed; CI also runs it on workflow scripts"
 
 .PHONY: vulncheck
 vulncheck: $(GOVULNCHECK) ## Scan Go dependencies for known vulnerabilities.

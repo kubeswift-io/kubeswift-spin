@@ -193,7 +193,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          out="$(helm push dist/kubeswift-spin-*.tgz oci://${REGISTRY}/charts 2>&1)"
+          out="$(helm push dist/kubeswift-spin-*.tgz "oci://${REGISTRY}/charts" 2>&1)"
           echo "$out"
           digest="$(sed -n 's/^Digest: //p' <<<"$out")"
           cosign sign --yes "${REGISTRY}/charts/kubeswift-spin@${digest}"
