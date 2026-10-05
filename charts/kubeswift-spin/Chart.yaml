@@ -16,4 +16,4 @@ keywords:
   - microvm
 annotations:
   # Prerequisites, not chart dependencies: the chart never installs them.
-  kubeswift.io/requires: "KubeSwift >= v0.15.1 (sandbox CRDs), Spin Operator v0.6.1 (core.spinkube.dev CRDs)"
+  spin.kubeswift.io/requires: "KubeSwift >= v0.15.1 (sandbox CRDs), Spin Operator v0.6.1 (core.spinkube.dev CRDs)"

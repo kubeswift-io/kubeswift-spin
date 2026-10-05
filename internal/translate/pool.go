@@ -1,6 +1,7 @@
 package translate
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"sort"
@@ -49,13 +50,17 @@ func PoolMismatches(spec *sandboxv1alpha1.SwiftSandboxSpec, namespace string, po
 	if !maps.Equal(ps.NodeSelector, spec.NodeSelector) {
 		add("nodeSelector", fmt.Sprint(spec.NodeSelector), fmt.Sprint(ps.NodeSelector))
 	}
-	// KubeSwift v0.16.0 compares exposed ports and the egress allowlist at
-	// checkout too: a slot booted without them cannot be given them.
+	// KubeSwift v0.16.0 compares exposed ports, the egress allowlist and the
+	// ingress peers at checkout too: a slot booted without them cannot be
+	// given them.
 	if a, b := portsKey(spec.Network.Ports), portsKey(ps.Network.Ports); a != b {
 		add("network.ports", a, b)
 	}
 	if a, b := egressKey(spec.Network.Egress, namespace), egressKey(ps.Network.Egress, pool.Namespace); a != b {
 		add("network.egress", a, b)
+	}
+	if a, b := ingressKey(spec.Network.Ingress), ingressKey(ps.Network.Ingress); a != b {
+		add("network.ingress.from", a, b)
 	}
 	if ps.GPUProfileRef != nil {
 		out = append(out, "gpuProfileRef: pool slots hold a GPU, which a Spin sandbox does not use")
@@ -154,4 +159,17 @@ func egressKey(e *sandboxv1alpha1.SandboxEgress, namespace string) string {
 	}
 	sort.Strings(out)
 	return strings.Join(out, "; ")
+}
+
+// ingressKey is ingress.from as JSON, compared the way KubeSwift v0.16.0
+// does at checkout (order matters); "" when any source may connect.
+func ingressKey(in *sandboxv1alpha1.SandboxIngress) string {
+	if in == nil || len(in.From) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(in.From)
+	if err != nil {
+		return fmt.Sprintf("unencodable %d peers", len(in.From))
+	}
+	return string(b)
 }

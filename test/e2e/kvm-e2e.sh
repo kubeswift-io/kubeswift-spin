@@ -23,10 +23,11 @@
 #   EXAMPLES_TAG     tag of the example artifacts
 #   EXECUTOR         executor name (default kubeswift)
 #   TIMEOUT          seconds to wait for each step (default 300)
-#   E2E_PHASES       phases to run (default "1 2 3 5 6 7 8 9")
+#   E2E_PHASES       phases to run (default "1 2 3 5 7 8 9", plus 4 and 6
+#                    as below)
 #   E2E_WARM_POOL=1  also run phase 4
 #   E2E_SCRATCH_REGISTRY  registry for the phase 6 test runtime image, for
-#                    example ttl.sh (required by phase 6)
+#                    example ttl.sh; setting it also runs phase 6
 #   KEEP=1           keep the test objects afterwards
 set -euo pipefail
 
@@ -35,9 +36,12 @@ EXAMPLES="${EXAMPLES:-ghcr.io/kubeswift-io/kubeswift-spin-examples}"
 TAG="${EXAMPLES_TAG:-v0.1.0}"
 EXECUTOR="${EXECUTOR:-kubeswift}"
 TIMEOUT="${TIMEOUT:-300}"
-PHASES=" ${E2E_PHASES:-1 2 3 5 6 7 8 9} "
-[[ "${E2E_WARM_POOL:-}" == "1" ]] && PHASES+="4 "
 SCRATCH="${E2E_SCRATCH_REGISTRY:-}"
+PHASES=" ${E2E_PHASES:-1 2 3 5 7 8 9} "
+if [[ -z "${E2E_PHASES:-}" ]]; then
+  [[ "${E2E_WARM_POOL:-}" == "1" ]] && PHASES+="4 "
+  [[ -n "$SCRATCH" ]] && PHASES+="6 "
+fi
 CURL_IMAGE="curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 GO_IMAGE="golang:1.26.8-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d"
 REGISTRY_IMAGE="registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
@@ -800,7 +804,7 @@ none_left() {
   done
   return 0
 }
-until_true "no SpinApp (finalizers released), sandbox, Service or sandbox NetworkPolicy left" none_left
+until_true "no SpinApp, sandbox, Service or sandbox NetworkPolicy left" none_left
 fi
 
 if [[ $FAILED -ne 0 ]]; then

@@ -240,4 +240,19 @@ func TestPoolComparesPortsAndEgress(t *testing.T) {
 	if mm := PoolMismatches(spec, "apps", pool); len(mm) != 0 {
 		t.Fatalf("equivalent egress reported %v", mm)
 	}
+	// Ingress peers must match too, or KubeSwift boots the replica cold.
+	peers := []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "client"}}}}
+	spec.Network.Ingress = &sandboxv1alpha1.SandboxIngress{From: peers}
+	if mm := PoolMismatches(spec, "apps", pool); len(mm) != 1 || !strings.HasPrefix(mm[0], "network.ingress.from:") {
+		t.Fatalf("ingress mismatch not reported: %v", mm)
+	}
+	pool.Spec.Network.Ingress = &sandboxv1alpha1.SandboxIngress{From: peers}
+	if mm := PoolMismatches(spec, "apps", pool); len(mm) != 0 {
+		t.Fatalf("equal ingress reported %v", mm)
+	}
+	spec.Network.Ingress = &sandboxv1alpha1.SandboxIngress{}
+	pool.Spec.Network.Ingress = nil
+	if mm := PoolMismatches(spec, "apps", pool); len(mm) != 0 {
+		t.Fatalf("empty ingress and no ingress reported %v", mm)
+	}
 }

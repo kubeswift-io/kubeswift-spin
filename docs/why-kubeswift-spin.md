@@ -44,7 +44,9 @@ policy says must not share a kernel with the node:
 The user API stays the standard `SpinApp`, so moving an application between
 a standard executor and a KubeSwift executor is a change of
 `spec.executor`, within the limits listed in
-[compatibility.md](compatibility.md).
+[compatibility.md](compatibility.md). The switch is not seamless: Spin
+Operator deletes the application's Deployment at once, and the application
+is unreachable until the first sandbox is ready.
 
 ## Trust model
 

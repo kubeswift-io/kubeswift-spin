@@ -20,7 +20,7 @@ It passed on a lab cluster on 2026-10-05 with KubeSwift v0.16.0 and
 | 6 private registry | an in-cluster registry with TLS (a CA created for the run) and htpasswd (a password created for the run) refuses anonymous pulls; a Job copies the hello-http artifact into it with the docker-registry Secret `e2e-registry-auth`. The test builds a runtime image that also trusts the run's CA from the configured runtime image and pushes it to `E2E_SCRATCH_REGISTRY`, because Spin speaks only HTTPS to registries and kubeswift-spin has no CA option. SpinApp `private-e2e` with `imagePullSecrets` on executor `kubeswift-e2e-private` (that runtime image, egress to the registry) becomes `Available` and serves HTTP; its sandbox has a `secretFiles` entry for the Secret; SpinApp `private-noauth-e2e` without `imagePullSecrets` fails (`SandboxFailed`) and never becomes ready; leak scan for the password and the base64 `auth` value |
 | 7 ingress-from | executor `kubeswift-e2e-ingress` with `spin.kubeswift.io/ingress-from` admitting pods labelled `e2e-role=allowed`; SpinApp `ingress-e2e` becomes `Available`; KubeSwift's NetworkPolicy `ingress-e2e-0-restricted` has that peer; a labelled client gets HTTP 200 through the Service, the unlabelled client gets no connection; the unlabelled client is admitted after it gets the label and blocked again after it loses it |
 | 8 liveness | SpinApp `live-e2e` (outbound-http) whose liveness check calls `/fetch`, which returns 502 when its in-cluster target (a busybox httpd) stops serving a file. After the file is removed: the sandbox becomes `Failed` (`LivenessProbeFailed`), `readyReplicas` drops to 0, kubeswift-spin replaces the sandbox, the replacement fails too while the target is broken, the file is restored, the next replacement (after a longer backoff) becomes `Available` and serves requests, one sandbox and one sandbox NetworkPolicy remain, nothing changes for 90 seconds, and the controller logged no error. Timings are printed |
-| 9 teardown | deleting the SpinApps removes them (finalizers released), their sandboxes, their Services and the sandbox NetworkPolicies |
+| 9 teardown | deleting the SpinApps removes them, their sandboxes, their Services and the sandbox NetworkPolicies |
 
 The leak scan searches every namespaced object in the test namespace except
 Secrets (SpinApps, SwiftSandboxes, Pods and their command lines,
@@ -84,9 +84,9 @@ make example-push EXAMPLE=serverless-ai EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 | `EXAMPLES_TAG` | `v0.1.0` | tag of the example artifacts; no tag has been published yet, so set it |
 | `EXECUTOR` | `kubeswift` | executor for phases 1 to 3 |
 | `TIMEOUT` | `300` | seconds to wait for each step |
-| `E2E_PHASES` | `1 2 3 5 6 7 8 9` | phases to run |
+| `E2E_PHASES` | `1 2 3 5 7 8 9` | phases to run; when set, `E2E_WARM_POOL` and `E2E_SCRATCH_REGISTRY` add no phases |
 | `E2E_WARM_POOL` | unset | `1` also runs phase 4 |
-| `E2E_SCRATCH_REGISTRY` | unset | registry for the phase 6 test runtime image; phase 6 stops the script if it is unset |
+| `E2E_SCRATCH_REGISTRY` | unset | registry for the phase 6 test runtime image; setting it also runs phase 6, and phase 6 stops the script if it is unset |
 | `KUBESWIFT_NAMESPACE` | `kubeswift-system` | namespace of the KubeSwift pods whose logs the leak scan reads |
 | `KEEP` | unset | `1` keeps the test objects afterwards |
 

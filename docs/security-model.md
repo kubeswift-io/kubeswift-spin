@@ -242,8 +242,8 @@ executor names a cosign key Secret.
 
 ## Network isolation
 
-- Inbound (KubeSwift v0.16.0): KubeSwift's sandbox NetworkPolicy
-  (`<sandbox>-restricted`, in both `restricted` and `open` modes) admits
+- Inbound (KubeSwift v0.16.0): KubeSwift creates a NetworkPolicy for each
+  sandbox (in both `restricted` and `open` modes) that admits
   traffic to the Spin HTTP port (3000, named `http-app`) and nothing else.
   Without the executor annotation `spin.kubeswift.io/ingress-from`, any
   source in the cluster may connect to that port, directly or through the

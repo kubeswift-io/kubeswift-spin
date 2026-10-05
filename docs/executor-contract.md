@@ -324,19 +324,27 @@ sandboxes; every transition below is covered by unit and envtest tests.
   `Running`. An outdated replica that is not available is replaced at once.
   An available outdated replica is replaced only while every desired
   replica is available, one at a time, highest ordinal first. A broken new
-  revision therefore stops the rollout after one replica. Because the
-  SpinApp Service only routes to ready replicas, the lab KVM e2e run saw no
-  failed request during a rolling update (see
-  [compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05)).
+  revision therefore stops the rollout after one replica. There is no
+  surge: a replica is deleted before its replacement exists. With two or
+  more replicas the SpinApp Service keeps routing to the others, and the
+  KVM e2e test sees no failed request during a rolling update of two
+  replicas (see [compatibility.md](compatibility.md#tested-versions)).
+  **A SpinApp with one replica is unavailable during every replacement**
+  (any spec change, including a runtime image change on upgrade), for the
+  sandbox deletion plus a boot (a cold boot to `Available` took about 20
+  seconds on the lab cluster). Use
+  at least two replicas for applications that must stay reachable.
 - **Failure**: KubeSwift launcher pods never restart, so when Spin exits the
   sandbox becomes `Completed` or `Failed`. kubeswift-spin replaces it after a
   backoff of 10 seconds, doubling per consecutive failure up to 5 minutes.
   The count resets only after a replica has run for 10 minutes without
   failing, because a guest is `Running` before Spin has pulled the
   application. The backoff state is in memory and restarts from 10 seconds
-  after a controller restart. What happens when a liveness probe fails is
-  decided by KubeSwift; replacement after a liveness failure has not been
-  tested.
+  after a controller restart. When a liveness probe fails `failureThreshold`
+  times, KubeSwift marks the sandbox `Failed` (`LivenessProbeFailed`) and
+  restarts nothing; kubeswift-spin then replaces it with the same backoff.
+  The KVM e2e test covers this, including a replacement that fails again
+  and recovery.
 - **Deletion**: sandboxes are deleted with foreground propagation, so a
   replacement with the same name is created only after KubeSwift's launcher
   pod, runtime-intent ConfigMap and NetworkPolicy are gone.
@@ -411,7 +419,8 @@ cold.
 
 kubeswift-spin compares the pool with the sandbox spec before it sets
 `poolRef`: image, CPU, memory, network mode, rootfs mode, kernel profile,
-verify key, node selector, `network.ports` and `network.egress`. It refuses
+verify key, node selector, `network.ports`, `network.egress` and
+`network.ingress.from` (in order, as KubeSwift compares it). It refuses
 to create sandboxes for an incompatible or missing pool (`Progressing=False`,
 reason `WarmPoolIncompatible`, with the mismatching fields in the message).
 An unset kernel profile is compared as `sandbox`, KubeSwift's default, and an
@@ -420,8 +429,19 @@ object that declares it. KubeSwift v0.16.0 also compares the full slot shape
 at checkout and boots cold on a mismatch; KubeSwift v0.15.1 compared only
 image, network mode and verify key.
 
+The image is compared as an exact string. The released chart passes the
+runtime image to the controller by digest
+(`ghcr.io/kubeswift-io/kubeswift-spin-runtime@sha256:...`, listed in the
+release's `images.txt`), so a pool must use that same reference, not the
+`spin-4.2.1-r1` tag. The controller's reference is in its arguments:
+
+```bash
+kubectl -n kubeswift-spin-system get deployment kubeswift-spin -o jsonpath='{.spec.template.spec.containers[0].args}'
+```
+
 On KubeSwift v0.16.0 every sandbox exposes `http-app`, so the pool must
-declare the same port, and the same egress allowlist as the executor:
+declare the same port, and the same egress allowlist and ingress peers as
+the executor. With an image built from source, by tag:
 
 ```yaml
 apiVersion: sandbox.kubeswift.io/v1alpha1
@@ -439,8 +459,9 @@ spec:
         port: 3000
   minWarm: 2
   maxWarm: 4
-``` Whether the SwiftSandboxPool API exists is
-discovered at controller startup; installing it later requires restarting
+```
+
+Whether the SwiftSandboxPool API exists is discovered at controller startup; installing it later requires restarting
 the controller. When the pool is compatible but has no
 free slot, KubeSwift's own cold fallback applies and is recorded by KubeSwift
 as a `PoolColdFallback` Event on the SwiftSandbox. The pool is a capacity

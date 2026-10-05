@@ -1,6 +1,8 @@
 # Warm pool for the kubeswift-warm executor. Image, CPU, memory and network
-# mode must equal what kubeswift-spin puts in each SwiftSandbox; set image to
-# the runtime image the controller uses (Helm value runtimeImage).
+# mode must equal what kubeswift-spin puts in each SwiftSandbox. Set image to
+# exactly the runtime image reference the controller uses: a released chart
+# passes it by digest (see the --runtime-image argument of the controller,
+# or images.txt in the GitHub release), and a tag does not match a digest.
 apiVersion: sandbox.kubeswift.io/v1alpha1
 kind: SwiftSandboxPool
 metadata:

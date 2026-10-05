@@ -1,6 +1,6 @@
 # Executor profile that starts replicas from a warm SwiftSandboxPool. The
 # pool must match the sandbox shape exactly (runtime image, CPU, memory,
-# network mode, exposed ports, egress allowlist, rootfs mode, kernel, node
+# network mode, exposed ports, egress allowlist, ingress peers, rootfs mode, kernel, node
 # selector); see
 # config/samples/swiftsandboxpool.yaml and docs/executor-contract.md.
 apiVersion: core.spinkube.dev/v1alpha1

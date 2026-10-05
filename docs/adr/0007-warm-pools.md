@@ -12,8 +12,9 @@ v0.15.1 checkout compares only image, network mode and verification key.
 An executor profile may name a pool. Each replica is still its own
 SwiftSandbox with `poolRef`; the pool is never the replica set.
 kubeswift-spin compares the full slot shape (image, CPU, memory, network
-mode, rootfs mode, kernel profile, verify key, node selector, no GPU, no
-model) and refuses a missing or incompatible pool with
+mode, rootfs mode, kernel profile, verify key, node selector, and on
+KubeSwift v0.16.0 exposed ports, egress allowlist and ingress peers; no
+GPU, no model) and refuses a missing or incompatible pool with
 `WarmPoolIncompatible`. When the pool is compatible but empty, KubeSwift's
 cold fallback applies.
 
