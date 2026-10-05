@@ -49,7 +49,10 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/kubeswift-spin
-          tags: type=semver,pattern=v{{version}}
+          # The validated git tag itself (v0.1.0, v0.1.0-rc2). type=semver
+          # would drop the "v" from pre-release tags: metadata-action emits
+          # only {{version}} for pre-releases, whatever the pattern.
+          tags: type=raw,value=${{ github.ref_name }}
           # Only the exact version tag; never a moving "latest".
           flavor: latest=false
       - id: build
