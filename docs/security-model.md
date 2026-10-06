@@ -330,6 +330,10 @@ time, so a vulnerability in the base image or the entrypoint's modules
 disclosed between the last CI run and the release is not caught by the
 release itself.
 
+Findings the scanner classifies as uncalled do not fail a scan, but the full
+scans still send them to code scanning, where they stay open as alerts so
+that they remain visible until the dependency is upgraded.
+
 Current findings:
 
 | ID | Package | Classification | Reason |

@@ -49,7 +49,7 @@ Spin applications are published as Spin OCI artifacts with
 `spin registry push`. The release workflow publishes the examples to
 `ghcr.io/kubeswift-io/kubeswift-spin-examples/<name>:<version>`, where
 `<name>` is the application name in `spin.toml` (`mcp-tools` for
-experimental/mcp), and each `spinapp.yaml` references the v0.1.0-rc2
+experimental/mcp), and each `spinapp.yaml` references the v0.1.0-rc3
 artifact. To deploy a published example, from the repository root:
 
 ```bash
@@ -60,11 +60,11 @@ To use your own registry, push the example and deploy it with the same
 registry and tag (`make example-deploy` rewrites `spec.image`):
 
 ```bash
-make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc2
+make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc3
 ```
 
 ```bash
-make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc2 NAMESPACE=<namespace>
+make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc3 NAMESPACE=<namespace>
 ```
 
 `EXAMPLE_REGISTRY` must start with a registry host. Spin pulls the artifact

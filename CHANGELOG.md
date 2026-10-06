@@ -7,7 +7,11 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## Unreleased
+## v0.1.0-rc3 (2026-10-06)
+
+Release candidate with no controller, runtime or translation change since
+v0.1.0-rc2: the rendered SwiftSandbox spec is unchanged, so upgrading from
+rc2 replaces no replicas. The runtime image `spin-4.2.1-r1` is reused.
 
 ### Added
 

@@ -51,7 +51,7 @@ failure it prints the SpinApps, sandboxes, Services and conditions first.
 - the hello-http, request-info, serverless-ai and outbound-http artifacts
   under one registry prefix the sandboxes can pull from without
   credentials. The defaults (`EXAMPLES`, `EXAMPLES_TAG`) name the artifacts
-  published by the v0.1.0-rc2 release. To test other builds, push them to
+  published by the v0.1.0-rc3 release. To test other builds, push them to
   your registry and set `EXAMPLES` and `EXAMPLES_TAG`, for example:
 
 ```bash
@@ -88,7 +88,7 @@ make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 |---|---|---|
 | `E2E_NAMESPACE` | `kubeswift-spin-e2e` | namespace with the executor and the SwiftKernel |
 | `EXAMPLES` | `ghcr.io/kubeswift-io/kubeswift-spin-examples` | registry prefix of the example artifacts |
-| `EXAMPLES_TAG` | `v0.1.0-rc2` | tag of the example artifacts |
+| `EXAMPLES_TAG` | `v0.1.0-rc3` | tag of the example artifacts |
 | `EXECUTOR` | `kubeswift` | executor for phases 1 to 3 |
 | `TIMEOUT` | `300` | seconds to wait for each step |
 | `E2E_PHASES` | `1 2 3 5 7 8 9` | phases to run; when set, `E2E_WARM_POOL` and `E2E_SCRATCH_REGISTRY` add no phases |
@@ -102,7 +102,7 @@ make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 The script uses the current kubeconfig context. From the repository root:
 
 ```bash
-E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.1.0-rc2 E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh test/e2e/kvm-e2e.sh
+E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.1.0-rc3 E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh test/e2e/kvm-e2e.sh
 ```
 
 `make e2e` runs the same script and passes these variables through.

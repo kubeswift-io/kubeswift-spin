@@ -54,7 +54,7 @@ curl -s http://127.0.0.1:3000/mcp -d '{"jsonrpc":"2.0","id":2,"method":"tools/ca
 
 This example has not been run in a sandbox. `spinapp.yaml` defines the
 SpinApp `mcp-tools` on the `kubeswift` executor, using the artifact
-`ghcr.io/kubeswift-io/kubeswift-spin-examples/mcp-tools:v0.1.0-rc2`
+`ghcr.io/kubeswift-io/kubeswift-spin-examples/mcp-tools:v0.1.0-rc3`
 published by the release. From the repository root:
 
 ```bash
