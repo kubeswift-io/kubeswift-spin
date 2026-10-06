@@ -59,7 +59,8 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 
 ## Kubernetes API access
 
-The chart's ClusterRole (see `charts/kubeswift-spin/templates/rbac.yaml`):
+The chart's ClusterRole, and its leader-election Role for the rows marked
+release namespace only (see `charts/kubeswift-spin/templates/rbac.yaml`):
 
 | Resource | Verbs | Why |
 |---|---|---|
@@ -245,8 +246,9 @@ application.
   runtime image is reused only after `cosign verify` confirms it was signed
   by this release workflow. Jobs that run third-party build code (cargo)
   have read-only tokens; checkouts do not persist credentials, except in
-  the OSV pull request scan, which keeps its read-only token to check out
-  the base branch.
+  the OSV pull request scan, whose upstream reusable workflow keeps its
+  token (`contents: read`, `actions: read`, `security-events: write`) to
+  check out the base branch.
 
 The KVM e2e workflow runs on a self-hosted runner with cluster
 credentials. No such runner is registered. Whoever registers one must put
@@ -260,26 +262,34 @@ Three scanners run, each for a different question; none replaces another:
 
 | Scanner | Question it answers | Where |
 |---|---|---|
-| `govulncheck` | Does kubeswift-spin's Go code call a vulnerable function? Call-graph analysis of the controller and entrypoint. | CI Go job (Kubernetes 1.37 leg), `make vulncheck` |
+| `govulncheck` | Does kubeswift-spin's Go code call a vulnerable function? Call-graph analysis of every package in the Go module (`./...`), including the controller and the runtime entrypoint. | CI Go job (Kubernetes 1.37 leg), `make vulncheck` |
 | OSV-Scanner | Which dependencies in `go.mod` and `examples/Cargo.lock` have known vulnerabilities, today? Inventory against the OSV database, with Go call analysis to mark uncalled findings. | `.github/workflows/osv-scanner-pr.yaml`, `osv-scanner.yaml`, the release workflow, `make osv-scan` |
-| Grype | What do the built images contain? Packages in the controller and runtime images, including the Spin binary and the base image. | CI image jobs |
+| Grype | What do the built images contain? Packages that Syft catalogs in the controller and runtime images: the base image packages and the Go modules of the controller and entrypoint binaries. Fails on fixable high or critical findings. | CI image jobs |
+
+A Syft catalog of the published `spin-4.2.1-r1` runtime image lists the
+Debian packages and the entrypoint's Go modules but not Spin, so none of
+the three scanners inventories Spin's own Rust dependencies; they change
+only when the pinned Spin release changes.
 
 OSV-Scanner runs in three places, all through
 `google/osv-scanner-action` v2.6.0 pinned by commit:
 
 - **Pull requests**: a differential scan of the base branch and the pull
   request. It fails only on vulnerabilities the pull request introduces, so
-  a finding already on `main` does not block unrelated changes; it is a
-  required check on `main`. Results go to code scanning for pull requests
-  from this repository; pull requests from forks have a read-only token and
-  get annotations and the check result only.
+  a finding already on `main` does not block unrelated changes. Its check,
+  `OSV-Scanner / osv-scan`, is a required status check on `main` (see
+  [releasing.md](releasing.md#repository-settings)). Results go to code
+  scanning for pull requests from this repository; pull requests from
+  forks have a read-only token and get annotations and the check result
+  only.
 - **Daily and on every push to `main`**: a full scan, so that
   vulnerabilities disclosed after a change merged are reported in
   Security, Code scanning. It fails on any finding that the scanner does not
   classify as uncalled.
-- **Releases**: the same full scan of the tagged commit is the first job of
-  the release workflow, and every publishing job depends on it, so a
-  finding blocks publication even if the pull requests were clean.
+- **Releases**: the same full scan runs on the tagged commit at the start
+  of the release workflow, and every publishing job depends on it, so a
+  finding that fails the scan blocks publication even if the pull requests
+  were clean.
 
 `make osv-scan` runs the same CLI version locally and is part of
 `make verify-all`, with `govulncheck`. Neither is in `make verify`: both

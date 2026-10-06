@@ -195,7 +195,7 @@ example-deploy: ## Apply one example SpinApp: make example-deploy EXAMPLE=hello-
 verify: fmt-check vet lint lint-workflows verify-generated check-deps check-prose test helm-lint ## Pre-commit gate: formatting, vet, lint, prose, tests, chart.
 
 .PHONY: verify-all
-verify-all: verify vulncheck osv-scan example-test runtime-test ## verify plus vulnerability scan, example tests and runtime image tests.
+verify-all: verify vulncheck osv-scan example-test runtime-test ## verify plus vulnerability scans (govulncheck, OSV-Scanner), example tests and runtime image tests.
 
 ##@ Tools
 

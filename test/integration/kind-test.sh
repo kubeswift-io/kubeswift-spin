@@ -139,7 +139,19 @@ if [[ "${WITH_SPIN_OPERATOR:-}" == "1" ]]; then
   helm --kube-context "$CTX" install spin-operator "$dl/spin-operator.tgz" --namespace spin-operator --create-namespace \
     --wait --timeout 300s >/dev/null
   rm -rf "$dl"
-  ok "Spin Operator installed"
+  # helm --wait returns when the webhook pod is ready, which can be before its
+  # Service routes to it; creating a SpinAppExecutor then fails with
+  # "connection refused". A server-side dry run goes through the webhook.
+  probe='{"apiVersion":"core.spinkube.dev/v1alpha1","kind":"SpinAppExecutor","metadata":{"name":"webhook-probe"},"spec":{"createDeployment":false}}'
+  for i in $(seq 1 60); do
+    $K -n "$NS" apply --dry-run=server -f - <<<"$probe" >/dev/null 2>&1 && break
+    if [[ $i -eq 60 ]]; then
+      fail "the Spin Operator webhook did not answer within 120s"
+      exit 1
+    fi
+    sleep 2
+  done
+  ok "Spin Operator installed and its webhook answers"
 fi
 
 log "installing kubeswift-spin from the Helm chart"
@@ -284,10 +296,13 @@ sc="$($K -n "$SYS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityCont
 [[ "$sc" == "true/false/true" ]] && ok "hardened controller pod" || fail "security context $sc"
 
 log "controller log"
-# Any permission the controller lacks shows up as "forbidden", including
-# Events recorded by libraries (leader election uses the core/v1 API).
-if $K -n "$SYS" logs deploy/kubeswift-spin | grep -q 'forbidden'; then
-  fail "RBAC denial in the controller log: $($K -n "$SYS" logs deploy/kubeswift-spin | grep -m1 -o '[a-z.]* is forbidden[^,]*')"
+# An API request that RBAC denies is logged with "forbidden", including
+# Events recorded by libraries (leader election uses the core/v1 Events API).
+# The log is read completely first: with pipefail, "kubectl logs | grep -q"
+# can fail on SIGPIPE when grep stops at an early match, and report nothing.
+controller_log="$($K -n "$SYS" logs deploy/kubeswift-spin)"
+if grep -q 'forbidden' <<<"$controller_log"; then
+  fail "RBAC denial in the controller log: $(grep -m1 -o '[a-z.]* is forbidden[^,]*' <<<"$controller_log")"
 else
   ok "no RBAC denial in the controller log"
 fi

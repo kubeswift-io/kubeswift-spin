@@ -25,7 +25,9 @@ running replicas on upgrade) say so under "Upgrade notes".
   Event through the core/v1 API, and without it every leader acquisition
   logged "events is forbidden". The kind integration test now fails on any
   RBAC denial in the controller log.
-- docs/releasing.md: verifying signatures needs cosign v3.
+- docs/releasing.md: release signatures are Sigstore bundles stored as OCI
+  referrers; verify them with cosign v3 (cosign v2.2.2 reports "no
+  matching signatures").
 
 ## v0.1.0-rc2 (2026-10-05)
 
