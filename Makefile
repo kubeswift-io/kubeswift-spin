@@ -26,6 +26,8 @@ GOVULNCHECK_VERSION ?= v1.8.0
 # Keep in step with the google/osv-scanner-action release used in
 # .github/workflows/osv-scanner*.yaml and release.yaml.
 OSV_SCANNER_VERSION ?= v2.6.0
+# Every tracked dependency manifest; hack/check-osv-inputs.sh enforces it.
+OSV_LOCKFILES := go.mod examples/Cargo.lock
 SETUP_ENVTEST_VERSION ?= v0.25.2
 KUBECONFORM_VERSION ?= v0.8.0
 ACTIONLINT_VERSION ?= v1.7.12
@@ -108,7 +110,11 @@ vulncheck: $(GOVULNCHECK) ## Scan Go dependencies for known vulnerabilities.
 
 .PHONY: osv-scan
 osv-scan: $(OSV_SCANNER) ## Scan go.mod and examples/Cargo.lock with OSV-Scanner (needs network), as CI does.
-	$(OSV_SCANNER) scan source -r ./
+	$(OSV_SCANNER) scan source $(addprefix --lockfile=,$(OSV_LOCKFILES))
+
+.PHONY: check-osv-inputs
+check-osv-inputs: ## Check that every OSV scan covers all dependency manifests and that exceptions follow the policy.
+	hack/check-osv-inputs.sh $(OSV_LOCKFILES)
 
 ##@ Test
 
@@ -192,7 +198,7 @@ example-deploy: ## Apply one example SpinApp: make example-deploy EXAMPLE=hello-
 ##@ Quality gate
 
 .PHONY: verify
-verify: fmt-check vet lint lint-workflows verify-generated check-deps check-prose test helm-lint ## Pre-commit gate: formatting, vet, lint, prose, tests, chart.
+verify: fmt-check vet lint lint-workflows verify-generated check-deps check-prose check-osv-inputs test helm-lint ## Pre-commit gate: formatting, vet, lint, prose, tests, chart.
 
 .PHONY: verify-all
 verify-all: verify vulncheck osv-scan example-test runtime-test ## verify plus vulnerability scans (govulncheck, OSV-Scanner), example tests and runtime image tests.

@@ -16,7 +16,11 @@ running replicas on upgrade) say so under "Upgrade notes".
   vulnerabilities, a full scan daily and on every push to `main` reported in
   code scanning, and a full scan of the tagged commit that gates every
   publishing job of the release workflow. `make osv-scan` runs the same
-  CLI version locally and is part of `make verify-all`.
+  CLI version locally and is part of `make verify-all`. Scans name their
+  lockfiles explicitly; `make verify` checks that list against the tracked
+  dependency manifests and checks `osv-scanner.toml` exceptions.
+- The chart policy check also requires the leader-election rules to be a
+  namespaced Role and the other rule sets to be ClusterRoles.
 
 ### Fixed
 

@@ -32,6 +32,12 @@ jobs:
     with:
       runs-on: ubuntu-24.04
       ref: ${{ github.sha }}
+      # Explicit lockfiles: a recursive scan follows .gitignore, even for
+      # tracked files. hack/check-osv-inputs.sh (make verify) keeps this list
+      # equal to the tracked dependency manifests.
+      scan-args: |-
+        --lockfile=go.mod
+        --lockfile=examples/Cargo.lock
 
   controller-image:
     name: Controller image
@@ -262,6 +268,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The release never restores caches that other workflows wrote.
+          cache: false
       - name: Build and test
         run: make example-test
       # Only the Wasm binaries cross to the publishing job; it uses the

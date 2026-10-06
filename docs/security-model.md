@@ -271,8 +271,23 @@ Debian packages and the entrypoint's Go modules but not Spin, so none of
 the three scanners inventories Spin's own Rust dependencies; they change
 only when the pinned Spin release changes.
 
-OSV-Scanner runs in three places, all through
-`google/osv-scanner-action` v2.6.0 pinned by commit:
+OSV-Scanner runs in three places, all through Google's reusable workflows
+from `google/osv-scanner-action` v2.6.0. The workflows and the actions they
+call are pinned by commit, but those actions run the scanner from the
+container image `ghcr.io/google/osv-scanner-action:v2.6.0`, a tag
+(`sha256:71ad04ab2f8798be47870f9b18817ad317c2f8f2f97aa6726ba10d5578bc174a`
+when this was written). Whoever can move that tag could change what the
+scan reports and use the job's `security-events: write` permission; the
+job holds no package, signing or contents write permission, and the
+release's example build does not restore Actions caches. Pinning the image
+would mean replacing Google's workflows with a copy; this project uses the
+supported integration and accepts that risk.
+
+Every scan names its inputs, `go.mod` and `examples/Cargo.lock`, with
+`--lockfile`, because a recursive scan follows `.gitignore` even for
+tracked files. `make verify` runs `hack/check-osv-inputs.sh`, which fails
+when that list (in the Makefile and in every OSV workflow) differs from the
+tracked dependency manifests.
 
 - **Pull requests**: a differential scan of the base branch and the pull
   request. It fails only on vulnerabilities the pull request introduces, so
@@ -299,17 +314,27 @@ change to the repository.
 Every finding is classified as affecting, not affecting, unreachable,
 test-only, tooling-only, false positive, or requires investigation. An
 affecting finding is fixed before release. An exception is added to an
-`osv-scanner.toml` only for one vulnerability ID at a time, with the
-technical reason and an `ignoreUntil` review date; dependency presence
-alone is not treated as exploitability, and neither is its absence from a
-call graph treated as a reason to stop tracking it. There are no
+`osv-scanner.toml` at the repository root only for one vulnerability ID at
+a time, with the technical reason and an `ignoreUntil` review date;
+`hack/check-osv-inputs.sh` rejects nested configuration files, entries
+without a reason or review date, and package-wide ignores. Exceptions
+still need careful review: the `main` ruleset requires no approving review,
+and a pull request's own scan reads its own configuration. Dependency
+presence alone is not treated as exploitability, and neither is its absence
+from a call graph treated as a reason to stop tracking it. There are no
 exceptions today.
+
+The release gate covers the source dependency manifests. The images are
+scanned by Grype in CI on every change to `main`, not again at release
+time, so a vulnerability in the base image or the entrypoint's modules
+disclosed between the last CI run and the release is not caught by the
+release itself.
 
 Current findings:
 
 | ID | Package | Classification | Reason |
 |---|---|---|---|
-| GO-2026-6094 | `github.com/google/cel-go` v0.29.2 (fixed in v0.30.0), indirect through `k8s.io/apiserver` and controller-runtime's metrics authorization | unreachable | The vulnerable symbols (`ext.NativeTypes`, `ext.ParseStructTag`) are not called: `govulncheck` reports no affected code, and OSV-Scanner's Go call analysis classifies it as uncalled, which does not fail the scan. cel-go stays at the version Kubernetes pins; it is upgraded with the Kubernetes dependencies. |
+| GO-2026-6094 | `github.com/google/cel-go` v0.29.2 (fixed in v0.30.0 according to the Go vulnerability database; the GitHub advisory GHSA-gcjh-h69q-9w9g lists v0.29.0, so Grype does not report it), indirect through `k8s.io/apiserver` and controller-runtime's metrics authorization | unreachable | The vulnerable symbols (`ext.NativeTypes`, `ext.ParseStructTag`) are not called: `govulncheck` reports no affected code, and OSV-Scanner's Go call analysis classifies it as uncalled, which does not fail the scan. cel-go stays at the version Kubernetes pins; it is upgraded with the Kubernetes dependencies. |
 
 ## Application artifacts
 
