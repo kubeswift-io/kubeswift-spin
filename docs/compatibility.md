@@ -7,7 +7,7 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.1.0-rc2 | all tests below; the first KVM run used a development build of the commit before the version change, the second the published v0.1.0-rc2 artifacts |
+| kubeswift-spin | v0.1.0-rc3, v0.1.0-rc2 | all tests below; KVM runs used a development build before rc2, then the published v0.1.0-rc2 and v0.1.0-rc3 artifacts |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
@@ -88,6 +88,37 @@ the published example artifacts.
 - The controller logged no error or warning during the run, except one
   rejected LeaderElection Event at startup (the chart did not allow core
   Events in its namespace; fixed after rc2).
+
+### v0.1.0-rc3 from published artifacts (2026-10-06)
+
+Same cluster, after removing the v0.1.0-rc2 installation (Helm release,
+cluster role and binding, both namespaces, executors, SpinApps and the
+leader-election Lease; the SwiftKernel was recreated). v0.1.0-rc3 was
+installed with the README command from
+`oci://ghcr.io/kubeswift-io/charts/kubeswift-spin` version `0.1.0-rc3`
+(chart digest `sha256:ad4ccf89...`); the controller ran the published
+digest `sha256:7e9f65eb...`. The runtime image is the same digest as in
+rc2, so nodes may have had it cached.
+
+- The controller was ready 17 seconds after `helm install` and recorded
+  the LeaderElection Event without an RBAC denial; after its pod was
+  deleted, the new pod acquired the lease and recorded its own Event, again
+  without a denial. The controller logged no warning or error during the
+  whole validation.
+- hello-http from the release tag became `Available` in 20 seconds; scaled
+  to 3 replicas on both kernel nodes, each replica answered and 12 of 12
+  requests through the Service succeeded; scaling to 1 and deleting left
+  no sandbox, Service or NetworkPolicy.
+- `test/e2e/kvm-e2e.sh` from the tag with all nine phases and the published
+  example artifacts passed all 75 checks: cold start 19 seconds, rolling
+  update with 0 failed requests out of 504, no Secret value found outside
+  Secrets, egress allowed and denied, ingress allowed and denied, liveness
+  replacement as in rc2. The warm-pool phase took 38 seconds: the first
+  checkout failed (see the warm-pool issue under
+  [Known upstream issues](#known-upstream-issues)) and kubeswift-spin
+  replaced the sandbox. The private registry phase took 51 seconds, of
+  which 27 were KubeSwift materializing the test runtime image that the
+  test builds and pushes for every run.
 
 ### Not tested
 
@@ -206,6 +237,19 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
           path: /healthz
           httpHeaders: []
   ```
+
+- **KubeSwift v0.16.0 can hand out a warm-pool slot before its guest is
+  ready.** A slot counts as warm, and can be checked out, as soon as its
+  launcher container is running. A checkout in the first seconds after a
+  slot is created can fail with `ExecFailed`; kubeswift-spin then replaces
+  the sandbox after the failure backoff, and the replacement is usually
+  served by the same pool. Observed once, right after a pool was created,
+  during the v0.1.0-rc3 validation. Create pools some time before relying
+  on warm starts.
+- **KubeSwift v0.16.0 logs write conflicts as `Reconciler error`** at error
+  level, although it retries them and converges
+  ([kubeswift-io/kubeswift#758](https://github.com/kubeswift-io/kubeswift/issues/758)).
+  Do not alert on those lines alone.
 
 ## Upgrading upstream versions
 
