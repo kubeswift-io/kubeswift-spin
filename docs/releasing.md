@@ -88,7 +88,9 @@ provenance attestations.
 
 ## Verifying a release
 
-Signatures. Check the exact workflow identity of the release tag, not a
+Signatures need cosign v3 or later: the release workflow signs with the
+Sigstore bundle format, which cosign v2 reports as "no matching
+signatures". Check the exact workflow identity of the release tag, not a
 pattern:
 
 ```bash

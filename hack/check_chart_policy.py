@@ -37,6 +37,7 @@ EXPECTED = {
     ]),
     "leader-election": norm([
         {"apiGroups": ["coordination.k8s.io"], "resources": ["leases"], "verbs": ["get", "create", "update"]},
+        {"apiGroups": [""], "resources": ["events"], "verbs": ["create", "patch"]},
     ]),
     "metrics-auth": norm([
         {"apiGroups": ["authentication.k8s.io"], "resources": ["tokenreviews"], "verbs": ["create"]},

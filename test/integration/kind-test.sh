@@ -283,6 +283,15 @@ log "controller security context"
 sc="$($K -n "$SYS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext.readOnlyRootFilesystem}/{.spec.containers[0].securityContext.allowPrivilegeEscalation}/{.spec.securityContext.runAsNonRoot}')"
 [[ "$sc" == "true/false/true" ]] && ok "hardened controller pod" || fail "security context $sc"
 
+log "controller log"
+# Any permission the controller lacks shows up as "forbidden", including
+# Events recorded by libraries (leader election uses the core/v1 API).
+if $K -n "$SYS" logs deploy/kubeswift-spin | grep -q 'forbidden'; then
+  fail "RBAC denial in the controller log: $($K -n "$SYS" logs deploy/kubeswift-spin | grep -m1 -o '[a-z.]* is forbidden[^,]*')"
+else
+  ok "no RBAC denial in the controller log"
+fi
+
 if [[ $FAILED -ne 0 ]]; then
   echo "kind integration test FAILED" >&2
   exit 1

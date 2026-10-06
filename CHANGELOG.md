@@ -7,6 +7,17 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## Unreleased
+
+### Fixed
+
+- The chart's leader-election Role allows core `events` create and patch in
+  the release namespace. controller-runtime records the LeaderElection
+  Event through the core/v1 API, and without it every leader acquisition
+  logged "events is forbidden". The kind integration test now fails on any
+  RBAC denial in the controller log.
+- docs/releasing.md: verifying signatures needs cosign v3.
+
 ## v0.1.0-rc2 (2026-10-05)
 
 First complete release candidate. The v0.1.0-rc1 tag exists, but its
