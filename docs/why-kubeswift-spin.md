@@ -19,12 +19,26 @@ the Spin runtime in a container) when:
   your own source;
 - the isolation of Wasmtime plus a Linux container on a shared node kernel
   is sufficient for your threat model;
-- startup time and density matter most: a standard executor starts Spin
-  without booting a virtual machine, while a kubeswift-spin replica boots a
-  microVM first (19 to 26 seconds cold and 6 to 7 seconds from a warm pool
-  to `Available` on the lab cluster, see
-  [compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05));
+- replica startup time and density matter most: a standard executor starts
+  Spin without booting a virtual machine, while a kubeswift-spin replica
+  boots a microVM first, or takes one from a warm pool. On the lab cluster
+  a new replica returned its first direct response (to the pod IP) 9.9
+  seconds after SpinApp creation when it booted a microVM and 2.8 seconds
+  from a warm pool, and its first response through the Service after 13.0
+  and 5.2 seconds (medians, see [performance.md](performance.md));
 - a microVM adds no meaningful protection for what you run.
+
+## Startup time is not request latency
+
+The startup times above are paid when a replica is created: on deployment,
+scale-out, a rolling update or the replacement of a failed replica. A
+running replica keeps its microVM and its Spin process, and serves every
+request from them; no microVM is booted per request.
+
+kubeswift-spin is built for strong isolation first. The project's goal is
+a first direct response from a warm pool in under one second; on the lab
+cluster it is 2.81 seconds (p50) today. The measured stages, and which of them are
+fixed waits rather than work, are in [performance.md](performance.md).
 
 ## When kubeswift-spin is useful
 

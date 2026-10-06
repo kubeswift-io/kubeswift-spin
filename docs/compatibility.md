@@ -19,6 +19,35 @@ that ran; nothing else is implied.
 | Architecture | linux/amd64 | everything above; arm64 images are built and published but not validated (never run) |
 | Kubernetes (kind) | v1.34.0 | kind integration test |
 
+### Startup latency (2026-10-06)
+
+Measured with `make perf-startup` on the lab cluster below, with the
+v0.1.0-rc3 controller and runtime image and the canonical hello-http
+SpinApp (readiness check with `initialDelaySeconds: 1`; 20 runs per mode;
+seconds from SpinApp creation; terms and method in
+[performance.md](performance.md)):
+
+Cold (the sandbox boots a microVM; runtime image cached on the node):
+
+- first direct response: p50 9.92, p95 10.41
+- first Service response: p50 12.99, p95 13.07
+- SpinApp `Available`: p50 11.86, p95 12.11
+
+Warm pool:
+
+- slot claim (from SwiftSandbox creation; not workload readiness): p50
+  25 ms, p95 53 ms
+- first direct response: p50 2.81, p95 3.53
+- first Service response: p50 5.18, p95 5.94
+- SpinApp `Available`: p50 4.16, p95 4.89
+
+The `Available` durations in the run records below were measured by the
+KVM e2e test (and, for the release-tag checks, by hand) with 3-second
+polling. The hello-http and private-registry SpinApps had readiness checks
+without `initialDelaySeconds`, so the Spin Operator default of 10 seconds
+applied. Each value includes up to 3 seconds of polling delay. They are
+control-plane availability times, not first-response times.
+
 ### KVM e2e lab run (2026-10-05)
 
 Cluster: k0s Kubernetes v1.34.3, three linux/amd64 nodes, two of them
@@ -32,8 +61,10 @@ the example artifacts tagged `v0.1.0-dev.49ded6b`.
 `E2E_SCRATCH_REGISTRY=ttl.sh`) passed every check:
 
 - hello-http became `Available` 26 seconds after the SpinApp was created
-  (19 to 26 seconds over several runs) and answered through the SpinApp
-  Service from a client pod. Scaling to 3, 2 and 1 replicas updated
+  (19 to 26 seconds over several runs, with the 10-second readiness
+  default and 3-second polling; see
+  [Startup latency](#startup-latency-2026-10-06)) and answered through the
+  SpinApp Service from a client pod. Scaling to 3, 2 and 1 replicas updated
   `readyReplicas` and the Service endpoints.
 - A rolling update of two replicas took 104 seconds, with 0 failed
   requests out of 503 sent during it.
@@ -45,7 +76,8 @@ the example artifacts tagged `v0.1.0-dev.49ded6b`.
   restricted sandbox without the allowlist could not (the request timed
   out).
 - A replica checked out from a warm pool was `Available` in 7 seconds (6
-  to 7 seconds over several runs).
+  to 7 seconds over several runs; this SpinApp had no readiness check, so
+  a TCP check without delay applied, and the test polled every 3 seconds).
 - Private registry: Spin pulled hello-http from an in-cluster htpasswd
   registry with `imagePullSecrets` (`Available` in 29 seconds); without the
   Secret the sandbox failed and the SpinApp never became ready.
@@ -80,8 +112,9 @@ the published example artifacts.
   Service succeeded; scaling back to 1 and deleting left no sandbox,
   Service or sandbox NetworkPolicy.
 - `test/e2e/kvm-e2e.sh` from the tag, with all nine phases and the default
-  (published) example artifacts, passed all 75 checks: cold start 19
-  seconds, warm pool 6 seconds, rolling update with 0 failed requests out
+  (published) example artifacts, passed all 75 checks: time to `Available`
+  19 seconds cold and 6 seconds from a warm pool (see the note above),
+  rolling update with 0 failed requests out
   of 504, private registry `Available` in 31 seconds, no Secret value found
   outside Secrets, liveness replacement with the same timings as in the
   development-build run above.
@@ -110,8 +143,8 @@ rc2, so nodes may have had it cached.
   requests through the Service succeeded; scaling to 1 and deleting left
   no sandbox, Service or NetworkPolicy.
 - `test/e2e/kvm-e2e.sh` from the tag with all nine phases and the published
-  example artifacts passed all 75 checks: cold start 19 seconds, rolling
-  update with 0 failed requests out of 504, no Secret value found outside
+  example artifacts passed all 75 checks: time to `Available` 19 seconds
+  cold (see the note above), rolling update with 0 failed requests out of 504, no Secret value found outside
   Secrets, egress allowed and denied, ingress allowed and denied, liveness
   replacement as in rc2. The warm-pool phase took 38 seconds: the first
   checkout failed (see the warm-pool issue under

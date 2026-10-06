@@ -112,3 +112,67 @@ func TestExampleSpinApps(t *testing.T) {
 		}
 	}
 }
+
+// Project-owned readiness checks set initialDelaySeconds explicitly. Without
+// it Spin Operator applies 10 seconds, which kept a replica that could
+// already serve out of service for about 8 seconds (docs/performance.md).
+// 0 is avoided because Spin Operator's Go type omits a zero value, so a
+// typed client that rewrites the spec restores the default of 10.
+func TestReadinessChecksSetASmallInitialDelay(t *testing.T) {
+	files := append(glob(t, "examples/*/spinapp*.yaml"), glob(t, "examples/experimental/*/spinapp*.yaml")...)
+	sawHello := false
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var app spinv1alpha1.SpinApp
+		if err := yaml.UnmarshalStrict(b, &app); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		r := app.Spec.Checks.Readiness
+		if filepath.Base(filepath.Dir(f)) == "hello-http" {
+			sawHello = true
+			if r == nil || r.HTTPGet == nil || r.HTTPGet.Path != "/healthz" || r.HTTPGet.HTTPHeaders == nil {
+				t.Errorf("%s: the canonical example must check /healthz with httpHeaders: []", f)
+			}
+		}
+		if r != nil && r.InitialDelaySeconds != 1 {
+			t.Errorf("%s: readiness initialDelaySeconds is %d, want 1", f, r.InitialDelaySeconds)
+		}
+	}
+	if !sawHello {
+		t.Fatal("examples/hello-http/spinapp.yaml not found")
+	}
+
+	// The KVM e2e manifests are heredocs in a shell script: every readiness
+	// block there must carry the same setting.
+	b, err := os.ReadFile(filepath.Join(root, "test/e2e/kvm-e2e.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := 0
+	lines := strings.Split(string(b), "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "readiness:" {
+			continue
+		}
+		blocks++
+		indent := len(l) - len(strings.TrimLeft(l, " "))
+		found := false
+		for _, next := range lines[i+1:] {
+			if len(next)-len(strings.TrimLeft(next, " ")) <= indent {
+				break
+			}
+			if strings.TrimSpace(next) == "initialDelaySeconds: 1" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("test/e2e/kvm-e2e.sh:%d: readiness check without initialDelaySeconds: 1", i+1)
+		}
+	}
+	if blocks == 0 {
+		t.Error("no readiness checks found in test/e2e/kvm-e2e.sh")
+	}
+}

@@ -1,0 +1,25 @@
+runs started (UTC, 2026-10-06): cold.jsonl 11:20 to 11:34, warm.jsonl
+  11:59 to 12:11, readiness-default/cold.jsonl 11:03 to 11:11,
+  readiness-default/warm.jsonl 11:51 to 11:58
+commit: c14537b with the changes of the branch that added startupbench
+node: one KVM kernel node; benchmark pod and all sandboxes on it
+kubelet: v1.34.3+k0s
+kernel: 6.8.0-137-generic
+os: Ubuntu 24.04.4 LTS
+runtime: containerd://1.7.30
+cpu: 8
+memory: 64 GiB
+cni: Calico
+controller images:
+  kubeswift-spin-system/kubeswift-spin ghcr.io/kubeswift-io/kubeswift-spin@sha256:7e9f65eb2d83a07190137dd5be28f8c1d58f45a3e3112c62f54f56d8673616ca (v0.1.0-rc3)
+  kubeswift-system/controller-manager ghcr.io/kubeswift-io/kubeswift/controller-manager:v0.16.0
+  spin-operator/spin-operator-controller-manager ghcr.io/spinframework/spin-operator:v0.6.1
+runtime image: ghcr.io/kubeswift-io/kubeswift-spin-runtime@sha256:29e515d9ca721c99d8efbbebb927dd6fa52d2a6b61683fc9c9b3c78fe91f7e8b (spin-4.2.1-r1), cached on the node
+application: ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc3, pulled by Spin at every start
+manifest: examples/hello-http/spinapp.yaml (initialDelaySeconds: 1);
+          readiness-default/ uses the v0.1.0-rc3 manifest, without initialDelaySeconds
+runs: cold 20, warm 20; readiness-default: cold 10, warm 10
+warm: one-slot pool (1 vCPU, 256Mi), slot at least 30 s old, start jitter below 2 s,
+  launcher logs read (PERF_LAUNCHER_LOGS=1); cold runs without launcher logs
+note: condensed by hand from the environment.txt files of the four
+  hack/perf-startup.sh runs (which also listed unrelated controllers)

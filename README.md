@@ -202,6 +202,7 @@ To publish an example to your own registry, see
 - [Architecture](docs/architecture.md): design, verified upstream contracts, diagrams
 - [Executor contract](docs/executor-contract.md): profiles, translation, replicas, status
 - [Compatibility](docs/compatibility.md): tested versions and SpinApp field support
+- [Startup performance](docs/performance.md): startup latency terms, lab results, release-time benchmark
 - [Networking](docs/networking.md): exposure through the SpinApp Service, egress, feature detection
 - [Security model](docs/security-model.md)
 - [Runtime image](docs/runtime-image.md)

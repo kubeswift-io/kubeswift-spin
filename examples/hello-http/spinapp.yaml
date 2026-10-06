@@ -17,4 +17,12 @@ spec:
         # Required with Spin Operator v0.6.1, which rejects an httpGet
         # check without httpHeaders (see docs/compatibility.md).
         httpHeaders: []
+      # Without this field the Spin Operator CRD sets initialDelaySeconds to
+      # 10, which keeps a hello-http replica from being Available for about
+      # 9 seconds after it can answer. 0 is not used: Spin Operator's Go type omits a zero
+      # value, so a client that rewrites the spec through that type would
+      # restore the default of 10. A probe that runs before Spin listens
+      # fails and is retried after periodSeconds; the replica stays not
+      # ready until a probe succeeds.
+      initialDelaySeconds: 1
       periodSeconds: 2

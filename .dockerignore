@@ -4,5 +4,7 @@
 !go.sum
 !cmd/
 !internal/
+!test/perf/startupbench/
 cmd/**/*_test.go
 internal/**/*_test.go
+test/**/*_test.go
