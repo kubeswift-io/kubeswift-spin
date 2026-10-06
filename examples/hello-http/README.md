@@ -30,12 +30,12 @@ curl -i http://127.0.0.1:3000/hello
 ## Publish
 
 The release publishes this example as
-`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc2`, the
+`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc3`, the
 image `spinapp.yaml` uses. To publish it to your own registry, from the
 repository root:
 
 ```bash
-make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc2
+make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc3
 ```
 
 ## Deploy on Kubernetes
@@ -52,7 +52,7 @@ kubectl -n <namespace> apply -f examples/hello-http/spinapp.yaml
 or the artifact you pushed (same registry and tag as above):
 
 ```bash
-make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc2 NAMESPACE=<namespace>
+make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc3 NAMESPACE=<namespace>
 ```
 
 ```bash

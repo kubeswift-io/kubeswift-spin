@@ -3,7 +3,7 @@ kind: SpinApp
 metadata:
   name: hello-http
 spec:
-  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc2
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc3
   executor: kubeswift
   replicas: 1
   resources:
