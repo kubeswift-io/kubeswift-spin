@@ -65,7 +65,11 @@ Configure these before the first release:
    git push origin v0.1.0-rc2
    ```
 
-7. Approve the `release` deployments, wait for every job, check the
+7. The release workflow first runs a full OSV-Scanner scan of the tagged
+   commit; every publishing job waits for it, and a finding stops the
+   release before anything is published (see
+   [security-model.md](security-model.md#vulnerability-scanning)).
+8. Approve the `release` deployments, wait for every job, check the
    artifacts (below), then publish the draft GitHub release.
 
 ## What the workflow publishes

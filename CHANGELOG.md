@@ -9,6 +9,15 @@ running replicas on upgrade) say so under "Upgrade notes".
 
 ## Unreleased
 
+### Added
+
+- OSV-Scanner (google/osv-scanner-action v2.6.0, pinned by commit): a
+  differential scan on pull requests that fails on newly introduced
+  vulnerabilities, a full scan daily and on every push to `main` reported in
+  code scanning, and a full scan of the tagged commit that gates every
+  publishing job of the release workflow. `make osv-scan` runs the same
+  CLI version locally and is part of `make verify-all`.
+
 ### Fixed
 
 - The chart's leader-election Role allows core `events` create and patch in

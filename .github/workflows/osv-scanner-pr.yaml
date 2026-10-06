@@ -1,0 +1,28 @@
+name: OSV-Scanner PR
+
+# Differential dependency scan: scans the base branch and the pull request
+# and fails only on vulnerabilities the pull request introduces. Known
+# findings on main are reported by osv-scanner.yaml and do not block
+# unrelated pull requests. See docs/security-model.md (Vulnerability
+# scanning).
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan-pr:
+    name: OSV-Scanner
+    permissions:
+      actions: read          # the SARIF upload reads the workflow run
+      contents: read
+      security-events: write # SARIF upload to code scanning
+    # google/osv-scanner-action v2.6.0; its own actions are pinned by SHA.
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+    with:
+      runs-on: ubuntu-24.04
+      # Pull requests from forks get a read-only token, which cannot upload
+      # SARIF; they still get annotations and the pass/fail result.
+      upload-sarif: ${{ github.event.pull_request.head.repo.full_name == github.repository }}

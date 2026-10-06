@@ -16,6 +16,23 @@ env:
   REGISTRY: ghcr.io/kubeswift-io
 
 jobs:
+  # Full OSV dependency scan of the tagged source before anything is
+  # published: a vulnerability disclosed after the last pull request cannot
+  # ship because PR-time scanning was clean. The runtime image job, which
+  # every publishing job depends on, needs it.
+  osv-scan:
+    name: OSV-Scanner
+    if: github.repository == 'kubeswift-io/kubeswift-spin'
+    permissions:
+      actions: read          # the SARIF upload reads the workflow run
+      contents: read
+      security-events: write # SARIF upload to code scanning
+    # google/osv-scanner-action v2.6.0; its own actions are pinned by SHA.
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+    with:
+      runs-on: ubuntu-24.04
+      ref: ${{ github.sha }}
+
   controller-image:
     name: Controller image
     if: github.repository == 'kubeswift-io/kubeswift-spin'
@@ -85,6 +102,7 @@ jobs:
   runtime-image:
     name: Runtime image
     if: github.repository == 'kubeswift-io/kubeswift-spin'
+    needs: osv-scan
     runs-on: ubuntu-24.04
     environment: release
     permissions:

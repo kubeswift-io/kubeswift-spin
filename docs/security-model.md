@@ -227,7 +227,8 @@ application.
 - **CI** (`.github/workflows/ci.yaml`) runs `govulncheck`, golangci-lint
   (including gosec), actionlint, Grype image scans that fail on fixable
   high or critical vulnerabilities, and generates SPDX SBOMs for both
-  images.
+  images. OSV-Scanner runs in its own workflows (see
+  [Vulnerability scanning](#vulnerability-scanning)).
 - **Releases** (`.github/workflows/release.yaml`) run only for validated
   semver tags in the canonical repository after approval of the `release`
   environment. The approval protects only jobs that declare the
@@ -243,13 +244,62 @@ application.
   complete run of the release workflow. An existing
   runtime image is reused only after `cosign verify` confirms it was signed
   by this release workflow. Jobs that run third-party build code (cargo)
-  have read-only tokens; checkouts do not persist credentials.
+  have read-only tokens; checkouts do not persist credentials, except in
+  the OSV pull request scan, which keeps its read-only token to check out
+  the base branch.
 
 The KVM e2e workflow runs on a self-hosted runner with cluster
 credentials. No such runner is registered. Whoever registers one must put
 it in a runner group restricted to that workflow on `main`, because any
 pull request can otherwise request its labels (see
 [test/e2e](../test/e2e/README.md#ci)).
+
+## Vulnerability scanning
+
+Three scanners run, each for a different question; none replaces another:
+
+| Scanner | Question it answers | Where |
+|---|---|---|
+| `govulncheck` | Does kubeswift-spin's Go code call a vulnerable function? Call-graph analysis of the controller and entrypoint. | CI Go job (Kubernetes 1.37 leg), `make vulncheck` |
+| OSV-Scanner | Which dependencies in `go.mod` and `examples/Cargo.lock` have known vulnerabilities, today? Inventory against the OSV database, with Go call analysis to mark uncalled findings. | `.github/workflows/osv-scanner-pr.yaml`, `osv-scanner.yaml`, the release workflow, `make osv-scan` |
+| Grype | What do the built images contain? Packages in the controller and runtime images, including the Spin binary and the base image. | CI image jobs |
+
+OSV-Scanner runs in three places, all through
+`google/osv-scanner-action` v2.6.0 pinned by commit:
+
+- **Pull requests**: a differential scan of the base branch and the pull
+  request. It fails only on vulnerabilities the pull request introduces, so
+  a finding already on `main` does not block unrelated changes; it is a
+  required check on `main`. Results go to code scanning for pull requests
+  from this repository; pull requests from forks have a read-only token and
+  get annotations and the check result only.
+- **Daily and on every push to `main`**: a full scan, so that
+  vulnerabilities disclosed after a change merged are reported in
+  Security, Code scanning. It fails on any finding that the scanner does not
+  classify as uncalled.
+- **Releases**: the same full scan of the tagged commit is the first job of
+  the release workflow, and every publishing job depends on it, so a
+  finding blocks publication even if the pull requests were clean.
+
+`make osv-scan` runs the same CLI version locally and is part of
+`make verify-all`, with `govulncheck`. Neither is in `make verify`: both
+query live vulnerability databases, so their results change without any
+change to the repository.
+
+Every finding is classified as affecting, not affecting, unreachable,
+test-only, tooling-only, false positive, or requires investigation. An
+affecting finding is fixed before release. An exception is added to an
+`osv-scanner.toml` only for one vulnerability ID at a time, with the
+technical reason and an `ignoreUntil` review date; dependency presence
+alone is not treated as exploitability, and neither is its absence from a
+call graph treated as a reason to stop tracking it. There are no
+exceptions today.
+
+Current findings:
+
+| ID | Package | Classification | Reason |
+|---|---|---|---|
+| GO-2026-6094 | `github.com/google/cel-go` v0.29.2 (fixed in v0.30.0), indirect through `k8s.io/apiserver` and controller-runtime's metrics authorization | unreachable | The vulnerable symbols (`ext.NativeTypes`, `ext.ParseStructTag`) are not called: `govulncheck` reports no affected code, and OSV-Scanner's Go call analysis classifies it as uncalled, which does not fail the scan. cel-go stays at the version Kubernetes pins; it is upgraded with the Kubernetes dependencies. |
 
 ## Application artifacts
 
