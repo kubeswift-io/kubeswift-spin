@@ -139,6 +139,10 @@ kind-test: image ## Controller integration test on kind (API reconciliation only
 e2e: ## KVM end-to-end test against the current kubeconfig context. See test/e2e/README.md.
 	test/e2e/kvm-e2e.sh
 
+.PHONY: perf-startup
+perf-startup: ## Startup benchmark on a KVM cluster: make perf-startup PERF_NODE=<node> PERF_REGISTRY=ttl.sh. See test/perf/startupbench/README.md.
+	hack/perf-startup.sh
+
 ##@ Build
 
 .PHONY: build

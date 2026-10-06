@@ -13,7 +13,7 @@ nine phases; see [Lab result](#lab-result).
 
 | Phase | Checks |
 |---|---|
-| 1 hello-http | SpinApp `hello-e2e` with a `/healthz` readiness check becomes `Available` (`ApplicationReady`) with `readyReplicas` 1; the time to `Available` is printed; HTTP through the Service returns the expected body and a 404 for an unknown route; scale to 3 gives 3 ready replicas and 3 ready Service endpoints, scale to 2 removes one; a variable change rolls both replicas to a new revision while a loop in the client pod sends requests, and no request may fail; scale back to 1 leaves one sandbox and one endpoint; deletion removes the sandboxes |
+| 1 hello-http | SpinApp `hello-e2e` with a `/healthz` readiness check (`initialDelaySeconds: 1`) becomes `Available` (`ApplicationReady`) with `readyReplicas` 1; the time to `Available` is printed; HTTP through the Service returns the expected body and a 404 for an unknown route; scale to 3 gives 3 ready replicas and 3 ready Service endpoints, scale to 2 removes one; a variable change rolls both replicas to a new revision while a loop in the client pod sends requests, and no request may fail; scale back to 1 leaves one sandbox and one endpoint; deletion removes the sandboxes |
 | 2 request-info | SpinApp `info-e2e` with 2 replicas, one literal variable and one from the Secret `e2e-greeting`: both replicas ready; the response contains the Secret value and the literal value and does not echo the `Authorization` header; leak scan for the Secret value |
 | 3 serverless-ai | an OpenAI-compatible mock (`examples/tools/upstream`, requiring a token it reads from the Secret `e2e-llm-token`) runs as Pod and Service `upstream`; executor `kubeswift-e2e-egress` allows that Service on port 8090. SpinApp `ai-e2e` on that executor, with the token as a Secret-backed runtime-config option, gets a completion; SpinApp `ai-blocked-e2e` on `$EXECUTOR` without the allowlist must not (HTTP 502 or a client timeout); leak scan for the token |
 | 4 warm pool | a SwiftSandboxPool `spin-e2e-warm` with the controller's runtime image, 1 CPU, 512Mi, `restricted` and port `http-app` 3000 gets a warm slot; SpinApp `warm-e2e` on executor `kubeswift-e2e-warm` becomes `Available`, the time is printed, a `CheckedOut` Event exists for `warm-e2e-0`, and HTTP through the Service works |
@@ -33,6 +33,13 @@ to the run and never printed.
 
 The script deletes everything it created when it exits, unless `KEEP=1`. On
 failure it prints the SpinApps, sandboxes, Services and conditions first.
+
+The printed durations are functional indicators, not latency measurements.
+Waits for `Available` use `kubectl wait`, which watches the SpinApp; the
+other timed steps poll every 0.5 seconds, and untimed steps every 3
+seconds. Startup latency is measured with `make perf-startup` (see
+[test/perf/startupbench](../perf/startupbench/README.md) and
+[docs/performance.md](../../docs/performance.md)).
 
 ## Requirements
 

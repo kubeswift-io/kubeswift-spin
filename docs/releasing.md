@@ -48,7 +48,11 @@ Configure these before the first release:
    is green on the commit to tag.
 2. The KVM end-to-end test passes on a KubeSwift cluster
    ([test/e2e](../test/e2e/README.md)); record the versions in
-   [compatibility.md](compatibility.md).
+   [compatibility.md](compatibility.md). On the same cluster, run the
+   startup benchmark against the previous results and keep the new ones
+   ([release-time benchmark](performance.md#release-time-benchmark)). A
+   flagged regression is explained in the release notes; it does not block
+   the release on its own.
 3. `CHANGELOG.md` has an entry for the version, including upgrade notes if
    the rendered SwiftSandbox spec changed.
 4. `charts/kubeswift-spin/Chart.yaml` `version` and `appVersion`, the

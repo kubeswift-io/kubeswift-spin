@@ -66,14 +66,35 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; FAILED=1; }
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 want() { [[ "$PHASES" == *" $1 "* ]]; }
 
+# until_true polls a predicate every POLL seconds (default 3). Steps whose
+# duration is printed set POLL=0.5. The printed durations are functional
+# indicators; startup latency is measured with startupbench
+# (test/perf/startupbench), which watches every transition instead.
 until_true() {
   local what="$1"
   shift
   local deadline=$((SECONDS + TIMEOUT))
   while ((SECONDS < deadline)); do
     if "$@" >/dev/null 2>&1; then ok "$what"; return 0; fi
-    sleep 3
+    sleep "${POLL:-3}"
   done
+  fail "timed out after ${TIMEOUT}s: $what"
+  return 1
+}
+
+# since prints the seconds elapsed since an earlier $EPOCHREALTIME value.
+since() { awk -v a="$1" -v b="$EPOCHREALTIME" 'BEGIN { printf "%.1fs", b - a }'; }
+
+# wait_available waits for SpinApp $2 to become Available with reason
+# ApplicationReady. kubectl wait watches the object, so the wait ends when
+# the condition changes rather than at the next poll.
+wait_available() {
+  local what="$1" app="$2"
+  if $K wait --for=condition=Available=True "spinapp/$app" --timeout="${TIMEOUT}s" >/dev/null 2>&1 \
+    && has_reason "$app" Available ApplicationReady; then
+    ok "$what"
+    return 0
+  fi
   fail "timed out after ${TIMEOUT}s: $what"
   return 1
 }
@@ -288,11 +309,12 @@ spec:
   checks:
     readiness:
       httpGet: {path: /healthz, httpHeaders: []}
+      initialDelaySeconds: 1
       periodSeconds: 2
 YAML
-start=$SECONDS
-until_true "hello-e2e-0 Running and the SpinApp Available" has_reason hello-e2e Available ApplicationReady
-echo "   time to Available: $((SECONDS - start))s"
+start=$EPOCHREALTIME
+wait_available "hello-e2e-0 Running and the SpinApp Available" hello-e2e
+echo "   time to Available: $(since "$start")"
 ready_replicas hello-e2e 1 && ok "readyReplicas 1" || fail "readyReplicas"
 # Readiness is reported from the sandbox; the Service routes once the
 # EndpointSlice lists the launcher pod, which can lag by a moment.
@@ -314,15 +336,15 @@ $K exec e2e-client -- sh -c 'rm -f /tmp/stop /tmp/result; end=$(($(date +%s)+240
 traffic=$!
 sleep 5
 $K patch spinapp hello-e2e --type=merge -p '{"spec":{"variables":[{"name":"rollout","value":"2"}]}}' >/dev/null
-start=$SECONDS
+start=$EPOCHREALTIME
 rolled() {
   local r0 r1
   r0="$(jp swiftsandbox/hello-e2e-0 '{.metadata.labels.spin\.kubeswift\.io/revision}')"
   r1="$(jp swiftsandbox/hello-e2e-1 '{.metadata.labels.spin\.kubeswift\.io/revision}')"
   [[ -n "$r0" && "$r0" != "$old_rev" && "$r0" == "$r1" ]] && ready_replicas hello-e2e 2 && has_reason hello-e2e Available ApplicationReady
 }
-until_true "both replicas replaced at the new revision" rolled
-echo "   rollout time: $((SECONDS - start))s"
+POLL=0.5 until_true "both replicas replaced at the new revision" rolled
+echo "   rollout time: $(since "$start")"
 sleep 5
 $K exec e2e-client -- touch /tmp/stop >/dev/null
 wait "$traffic" || true
@@ -448,9 +470,9 @@ spec:
   executor: kubeswift-e2e-warm
   replicas: 1
 YAML
-  start=$SECONDS
-  until_true "warm-e2e Available" has_reason warm-e2e Available ApplicationReady
-  echo "   time to Available from a warm slot: $((SECONDS - start))s"
+  start=$EPOCHREALTIME
+  wait_available "warm-e2e Available" warm-e2e
+  echo "   time to Available from a warm slot: $(since "$start")"
   until_true "warm-e2e endpoint ready" has_endpoints warm-e2e 1
   if $K get events.events.k8s.io --field-selector regarding.name=warm-e2e-0,reason=CheckedOut -o name | grep -q .; then
     ok "checked out a warm slot"
@@ -624,14 +646,15 @@ spec:
   checks:
     readiness:
       httpGet: {path: /healthz, httpHeaders: []}
+      initialDelaySeconds: 1
       periodSeconds: 2
 YAML
     if [[ -n "$secret" ]]; then printf '  imagePullSecrets:\n    - name: %s\n' "$secret"; fi
   } | apply_app
 done
-start=$SECONDS
-until_true "private-e2e Available" has_reason private-e2e Available ApplicationReady
-echo "   time to Available: $((SECONDS - start))s"
+start=$EPOCHREALTIME
+wait_available "private-e2e Available" private-e2e
+echo "   time to Available: $(since "$start")"
 until_true "private-e2e endpoint ready" has_endpoints private-e2e 1
 [[ "$(http http://private-e2e/hello)" == "Hello from Spin on KubeSwift" ]] \
   && ok "application pulled by Spin from the authenticated registry serves HTTP" || fail "HTTP to private-e2e"
@@ -669,6 +692,7 @@ spec:
   checks:
     readiness:
       httpGet: {path: /healthz, httpHeaders: []}
+      initialDelaySeconds: 1
       periodSeconds: 2
 YAML
 $K delete pod e2e-client-allowed --ignore-not-found --wait=true >/dev/null
@@ -747,6 +771,7 @@ spec:
   checks:
     readiness:
       httpGet: {path: /healthz, httpHeaders: []}
+      initialDelaySeconds: 1
       periodSeconds: 2
     liveness:
       httpGet: {path: /fetch, httpHeaders: []}
@@ -764,25 +789,25 @@ since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 uid1="$(uid_of live-e2e-0)"
 
 $K exec e2e-live-target -- rm /www/alive
-t0=$SECONDS
-until_true "liveness failure detected: sandbox Failed" is_failed live-e2e-0 "$uid1"
-echo "   failure to Failed: $((SECONDS - t0))s; sandbox status: $(jp swiftsandbox/live-e2e-0 '{.status.message}{" ["}{range .status.conditions[*]}{.type}={.reason} {end}{"]"}')"
+t0=$EPOCHREALTIME
+POLL=0.5 until_true "liveness failure detected: sandbox Failed" is_failed live-e2e-0 "$uid1"
+echo "   failure to Failed: $(since "$t0"); sandbox status: $(jp swiftsandbox/live-e2e-0 '{.status.message}{" ["}{range .status.conditions[*]}{.type}={.reason} {end}{"]"}')"
 until_true "SpinApp reports 0 ready replicas" ready_replicas live-e2e 0
 echo "   SpinApp Available: $(reason live-e2e Available); Progressing: $(reason live-e2e Progressing)"
-t1=$SECONDS
-until_true "failed sandbox replaced (new UID)" new_uid live-e2e-0 "$uid1"
-echo "   Failed to replacement created: $((SECONDS - t1))s"
+t1=$EPOCHREALTIME
+POLL=0.5 until_true "failed sandbox replaced (new UID)" new_uid live-e2e-0 "$uid1"
+echo "   Failed to replacement created: $(since "$t1")"
 uid2="$(uid_of live-e2e-0)"
 # The target is still broken, so the replacement fails as well; the second
 # replacement waits longer (backoff).
 until_true "replacement fails while the target is still broken" is_failed live-e2e-0 "$uid2"
 $K exec e2e-live-target -- sh -c 'echo ok > /www/alive'
-t2=$SECONDS
-until_true "second replacement created after backoff" new_uid live-e2e-0 "$uid2"
-echo "   Failed to second replacement created: $((SECONDS - t2))s"
+t2=$EPOCHREALTIME
+POLL=0.5 until_true "second replacement created after backoff" new_uid live-e2e-0 "$uid2"
+echo "   Failed to second replacement created: $(since "$t2")"
 uid3="$(uid_of live-e2e-0)"
-until_true "healthy replacement Available" has_reason live-e2e Available ApplicationReady
-echo "   health restored to Available: $((SECONDS - t2))s"
+wait_available "healthy replacement Available" live-e2e
+echo "   health restored to Available: $(since "$t2")"
 until_true "one ready endpoint" has_endpoints live-e2e 1
 [[ "$(http_code http://live-e2e/fetch)" == "200" ]] && ok "requests succeed after replacement" || fail "/fetch after replacement"
 has_count live-e2e 1 && ok "no stale sandbox remains" || fail "$(count live-e2e) sandboxes for live-e2e"

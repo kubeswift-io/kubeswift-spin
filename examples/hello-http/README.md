@@ -60,8 +60,12 @@ kubectl -n <namespace> get spinapp,swiftsandbox
 ```
 
 `spinapp.yaml` sets a 500m CPU limit, which becomes 1 vCPU, and 256Mi of
-guest memory. Its readiness check calls `/healthz` every 2 seconds, so a
-replica is ready once Spin answers that path (see [Validate](#validate)).
+guest memory. Its readiness check calls `/healthz` every 2 seconds,
+starting 1 second after KubeSwift starts probing the guest, so a replica is
+ready once Spin answers that path (see [Validate](#validate)). Without
+`initialDelaySeconds`, the Spin Operator CRD would default it to 10, and
+the first check would run 10 seconds after probing starts (see
+[docs/performance.md](../../docs/performance.md#readiness-configuration)).
 
 ## Validate
 
@@ -78,9 +82,11 @@ cluster:
 kubectl -n <namespace> run curl --rm -i --restart=Never --image=curlimages/curl:8.16.0 --command -- curl -sS http://hello-http.<namespace>.svc/hello
 ```
 
-The response is `Hello from Spin on KubeSwift`. On the KVM lab cluster the
-SpinApp became `Available` 19 to 26 seconds after it was created (see
-[docs/compatibility.md](../../docs/compatibility.md#kvm-e2e-lab-run-2026-10-05)).
+The response is `Hello from Spin on KubeSwift`. On the KVM lab cluster a
+new replica that booted a microVM returned its first direct response 9.9
+seconds after creation, the SpinApp became `Available` after 11.9 seconds
+and the replica answered through the Service after 13.0 seconds (medians;
+see [docs/performance.md](../../docs/performance.md)).
 
 The manifest uses `/healthz` as the readiness check. `httpHeaders: []` is
 required by Spin Operator v0.6.1, which otherwise rejects the SpinApp at

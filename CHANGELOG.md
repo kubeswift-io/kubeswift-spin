@@ -7,6 +7,45 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## Unreleased
+
+No controller, runtime or translation change: the rendered SwiftSandbox
+spec is unchanged. kubeswift-spin still passes user readiness checks
+through as written.
+
+### Changed
+
+- The hello-http example and the KVM e2e test set
+  `initialDelaySeconds: 1` on their readiness checks. When the field is
+  omitted Spin Operator applies 10 seconds, and a hello-http replica that
+  could already answer was not `Available` until about 8.6 to 8.9 seconds
+  after its first direct response. On
+  the lab cluster the median time to `Available` went from 18.9 to
+  11.9 seconds cold and from 11.4 to 4.2 seconds
+  from a warm pool; the time to the first direct response did not change.
+- The KVM e2e test waits for `Available` with `kubectl wait`, which
+  watches the SpinApp, and prints durations to 0.1 seconds; its other timed
+  steps poll every 0.5 seconds instead of every 3 seconds.
+
+### Added
+
+- `startupbench` (`test/perf/startupbench`) and `make perf-startup`: a
+  startup benchmark for KVM clusters that measures, from one clock and with
+  watches, the time from SpinApp creation to the first direct and Service
+  responses, `Available`, pod `Ready`, the EndpointSlice and the warm-pool
+  slot claim, and compares results with a baseline.
+- docs/performance.md: the four startup measures (first-response,
+  control-plane availability, warm-pool slot-claim and Spin runtime startup
+  latency), current results, where the time goes, the effect of the
+  readiness configuration and the release-time benchmark policy.
+
+### Documentation
+
+- compatibility.md, why-kubeswift-spin.md, executor-contract.md and the
+  hello-http README no longer present "19 to 26 seconds" as startup
+  latency. That figure was the time to `Available` measured by the e2e
+  test with 3-second polling and the 10-second readiness default.
+
 ## v0.1.0-rc3 (2026-10-06)
 
 Release candidate with no controller, runtime or translation change since

@@ -170,6 +170,13 @@ launcher:
 | `httpGet.scheme` | `HTTP` |
 | `initialDelaySeconds`, `timeoutSeconds`, `periodSeconds`, `successThreshold`, `failureThreshold` | copied from the check |
 
+When a check omits `initialDelaySeconds`, the Spin Operator CRD defaults it
+to 10, so
+the first probe runs 10 seconds after KubeSwift starts probing the guest,
+even when the application answers well before that. The project's examples
+set `initialDelaySeconds: 1`; see
+[performance.md](performance.md#readiness-configuration).
+
 Without `spec.checks.readiness`, the readiness probe is a TCP check on
 `http-app` with `periodSeconds: 2`, `timeoutSeconds: 1` and
 `failureThreshold: 3`: the replica is ready once Spin accepts connections.
@@ -361,9 +368,12 @@ sandboxes; every transition below is covered by unit and envtest tests.
   [compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05)).
   **A SpinApp with one replica is unavailable during every replacement**
   (any spec change, including a runtime image change on upgrade), for the
-  sandbox deletion plus a boot (a cold boot to `Available` took 19 to 26
-  seconds on the lab cluster). Use at least two replicas for applications
-  that must stay reachable.
+  sandbox deletion plus a boot (on the lab cluster, with
+  `initialDelaySeconds: 1`, a cold boot returned its first direct response
+  after about 10 seconds, was `Available` after about 12 and served through
+  the Service after about 13 seconds; see
+  [performance.md](performance.md#current-results)). Use at least two
+  replicas for applications that must stay reachable.
 - **Failure**: KubeSwift launcher pods never restart, so when Spin exits the
   sandbox becomes `Completed` or `Failed`. kubeswift-spin replaces it after a
   backoff of 10 seconds, doubling per consecutive failure up to 5 minutes.
