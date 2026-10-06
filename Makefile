@@ -23,6 +23,11 @@ CONTAINER_TOOL ?= docker
 # Pinned tool versions.
 GOLANGCI_LINT_VERSION ?= v2.14.0
 GOVULNCHECK_VERSION ?= v1.8.0
+# Keep in step with the google/osv-scanner-action release used in
+# .github/workflows/osv-scanner*.yaml and release.yaml.
+OSV_SCANNER_VERSION ?= v2.6.0
+# Every tracked dependency manifest; hack/check-osv-inputs.sh enforces it.
+OSV_LOCKFILES := go.mod examples/Cargo.lock
 SETUP_ENVTEST_VERSION ?= v0.25.2
 KUBECONFORM_VERSION ?= v0.8.0
 ACTIONLINT_VERSION ?= v1.7.12
@@ -33,6 +38,7 @@ WITH_SPIN_OPERATOR ?=
 
 GOLANGCI_LINT := $(BIN)/golangci-lint
 GOVULNCHECK := $(BIN)/govulncheck
+OSV_SCANNER := $(BIN)/osv-scanner
 SETUP_ENVTEST := $(BIN)/setup-envtest
 KUBECONFORM := $(BIN)/kubeconform
 ACTIONLINT := $(BIN)/actionlint
@@ -101,6 +107,14 @@ lint-shell: ## Run shellcheck (warnings and errors) on the repository's shell sc
 .PHONY: vulncheck
 vulncheck: $(GOVULNCHECK) ## Scan Go dependencies for known vulnerabilities.
 	$(GOVULNCHECK) ./...
+
+.PHONY: osv-scan
+osv-scan: $(OSV_SCANNER) ## Scan go.mod and examples/Cargo.lock with OSV-Scanner (needs network), as CI does.
+	$(OSV_SCANNER) scan source $(addprefix --lockfile=,$(OSV_LOCKFILES))
+
+.PHONY: check-osv-inputs
+check-osv-inputs: ## Check that every OSV scan covers all dependency manifests and that exceptions follow the policy.
+	hack/check-osv-inputs.sh $(OSV_LOCKFILES)
 
 ##@ Test
 
@@ -184,10 +198,10 @@ example-deploy: ## Apply one example SpinApp: make example-deploy EXAMPLE=hello-
 ##@ Quality gate
 
 .PHONY: verify
-verify: fmt-check vet lint lint-workflows verify-generated check-deps check-prose test helm-lint ## Pre-commit gate: formatting, vet, lint, prose, tests, chart.
+verify: fmt-check vet lint lint-workflows verify-generated check-deps check-prose check-osv-inputs test helm-lint ## Pre-commit gate: formatting, vet, lint, prose, tests, chart.
 
 .PHONY: verify-all
-verify-all: verify vulncheck example-test runtime-test ## verify plus vulnerability scan, example tests and runtime image tests.
+verify-all: verify vulncheck osv-scan example-test runtime-test ## verify plus vulnerability scans (govulncheck, OSV-Scanner), example tests and runtime image tests.
 
 ##@ Tools
 
@@ -196,6 +210,9 @@ $(GOLANGCI_LINT):
 
 $(GOVULNCHECK):
 	GOBIN=$(BIN) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+
+$(OSV_SCANNER):
+	GOBIN=$(BIN) go install github.com/google/osv-scanner/v2/cmd/osv-scanner@$(OSV_SCANNER_VERSION)
 
 $(SETUP_ENVTEST):
 	GOBIN=$(BIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)

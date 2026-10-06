@@ -7,7 +7,7 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.1.0-rc2 | all tests below; the KVM run below used a development build of the commit before the version change |
+| kubeswift-spin | v0.1.0-rc2 | all tests below; the first KVM run used a development build of the commit before the version change, the second the published v0.1.0-rc2 artifacts |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
@@ -78,12 +78,13 @@ the published example artifacts.
   and answered through the Service. Scaled to 3 replicas on both kernel
   nodes, each replica answered directly and 9 of 9 requests through the
   Service succeeded; scaling back to 1 and deleting left no sandbox,
-  Service or policy.
+  Service or sandbox NetworkPolicy.
 - `test/e2e/kvm-e2e.sh` from the tag, with all nine phases and the default
   (published) example artifacts, passed all 75 checks: cold start 19
   seconds, warm pool 6 seconds, rolling update with 0 failed requests out
   of 504, private registry `Available` in 31 seconds, no Secret value found
-  outside Secrets, liveness replacement with the same timings as above.
+  outside Secrets, liveness replacement with the same timings as in the
+  development-build run above.
 - The controller logged no error or warning during the run, except one
   rejected LeaderElection Event at startup (the chart did not allow core
   Events in its namespace; fixed after rc2).

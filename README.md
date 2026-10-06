@@ -219,8 +219,9 @@ make verify
 
 runs the format check, vet, lint, the workflow lint, the generated-code and
 dependency-license checks, the prose check, unit and envtest tests, and the
-chart checks. `make verify-all` adds the vulnerability scan, the example
-tests and the runtime image tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
+chart checks. `make verify-all` adds the vulnerability scans (`govulncheck`
+and OSV-Scanner, both need network access), the example tests and the
+runtime image tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

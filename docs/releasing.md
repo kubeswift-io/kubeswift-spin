@@ -3,7 +3,9 @@
 Releases are cut from `main` by pushing a signed semver tag. The release
 workflow (`.github/workflows/release.yaml`) runs only for tags in
 `kubeswift-io/kubeswift-spin`. Every job that publishes or holds a write
-token uses the `release` environment and waits for its approval.
+token uses the `release` environment and waits for its approval, except
+the OSV-Scanner job, whose only write permission is
+`security-events: write` for the code scanning upload.
 
 The first run, for v0.1.0-rc1, published the images and the chart but
 failed at the last example push (a path error in the workflow), so rc1 has
@@ -23,6 +25,10 @@ Configure these before the first release:
   workflow omits it would publish and sign without approval.
 - Workflows from fork pull requests need approval for all outside
   collaborators.
+- The `main` branch ruleset requires pull requests and lists the CI checks
+  as required status checks, including `DCO sign-off` and the OSV pull
+  request scan, `OSV-Scanner / osv-scan`
+  (`.github/workflows/osv-scanner-pr.yaml`).
 - No self-hosted runner outside a runner group restricted to
   `.github/workflows/kvm-e2e.yaml` on `main` (see
   [test/e2e](../test/e2e/README.md#ci)).
@@ -65,7 +71,11 @@ Configure these before the first release:
    git push origin v0.1.0-rc2
    ```
 
-7. Approve the `release` deployments, wait for every job, check the
+7. The release workflow first runs a full OSV-Scanner scan of the tagged
+   commit; every publishing job waits for it, and a finding that fails
+   the scan stops the release before anything is published (see
+   [security-model.md](security-model.md#vulnerability-scanning)).
+8. Approve the `release` deployments, wait for every job, check the
    artifacts (below), then publish the draft GitHub release.
 
 ## What the workflow publishes
@@ -88,10 +98,11 @@ provenance attestations.
 
 ## Verifying a release
 
-Signatures need cosign v3 or later: the release workflow signs with the
-Sigstore bundle format, which cosign v2 reports as "no matching
-signatures". Check the exact workflow identity of the release tag, not a
-pattern:
+The release workflow signs with cosign v3, which stores signatures as
+Sigstore bundles attached as OCI referrers. Verify with cosign v3: on the
+v0.1.0-rc2 controller image, cosign v2.6.3 also verified, while cosign
+v2.2.2 reported "no matching signatures". Check the exact workflow
+identity of the release tag, not a pattern:
 
 ```bash
 cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc2 \

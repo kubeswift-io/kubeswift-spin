@@ -9,6 +9,19 @@ running replicas on upgrade) say so under "Upgrade notes".
 
 ## Unreleased
 
+### Added
+
+- OSV-Scanner (google/osv-scanner-action v2.6.0, pinned by commit): a
+  differential scan on pull requests that fails on newly introduced
+  vulnerabilities, a full scan daily and on every push to `main` reported in
+  code scanning, and a full scan of the tagged commit that gates every
+  publishing job of the release workflow. `make osv-scan` runs the same
+  CLI version locally and is part of `make verify-all`. Scans name their
+  lockfiles explicitly; `make verify` checks that list against the tracked
+  dependency manifests and checks `osv-scanner.toml` exceptions.
+- The chart policy check also requires the leader-election rules to be a
+  namespaced Role and the other rule sets to be ClusterRoles.
+
 ### Fixed
 
 - The chart's leader-election Role allows core `events` create and patch in
@@ -16,7 +29,9 @@ running replicas on upgrade) say so under "Upgrade notes".
   Event through the core/v1 API, and without it every leader acquisition
   logged "events is forbidden". The kind integration test now fails on any
   RBAC denial in the controller log.
-- docs/releasing.md: verifying signatures needs cosign v3.
+- docs/releasing.md: release signatures are Sigstore bundles stored as OCI
+  referrers; verify them with cosign v3 (cosign v2.2.2 reports "no
+  matching signatures").
 
 ## v0.1.0-rc2 (2026-10-05)
 

@@ -56,7 +56,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Format, vet, generated code, dependencies, prose
-        run: make fmt-check vet verify-generated check-deps check-prose
+        run: make fmt-check vet verify-generated check-deps check-prose check-osv-inputs
       - name: Lint
         run: make lint lint-workflows lint-shell
       - name: Unit and envtest

@@ -48,6 +48,10 @@ EXPECTED = {
     ]),
 }
 
+# The kind each approved rule set must have: leader election is confined to
+# the release namespace; everything else is cluster-wide by design.
+EXPECTED_KIND = {"controller": "ClusterRole", "leader-election": "Role", "metrics-auth": "ClusterRole", "metrics-reader": "ClusterRole"}
+
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
 errors = []
 # Bindings may only grant the chart's own roles to the chart's own
@@ -62,10 +66,20 @@ for d in docs:
         if rules not in EXPECTED.values():
             extra = sorted(str(x) for x in rules - frozenset().union(*EXPECTED.values()))
             errors.append(f"{kind}/{name}: rules are not an approved set; unexpected: {extra or 'combination'}")
+        else:
+            role_set = next(k for k, v in EXPECTED.items() if v == rules)
+            if kind != EXPECTED_KIND[role_set]:
+                errors.append(f"{kind}/{name}: the {role_set} rules must be a {EXPECTED_KIND[role_set]}")
+            if kind == "Role" and d["metadata"].get("namespace") not in {ns for _, ns in accounts}:
+                errors.append(f"{kind}/{name}: must be in the controller ServiceAccount's namespace")
         if d.get("aggregationRule"):
             errors.append(f"{kind}/{name}: aggregationRule is not allowed")
     if kind in ("ClusterRoleBinding", "RoleBinding"):
         ref = (d["roleRef"].get("kind"), d["roleRef"].get("name"))
+        if kind == "ClusterRoleBinding" and ref[0] != "ClusterRole":
+            errors.append(f"{kind}/{name}: must reference a ClusterRole")
+        if kind == "RoleBinding" and d["metadata"].get("namespace") not in {ns for _, ns in accounts}:
+            errors.append(f"{kind}/{name}: must be in the controller ServiceAccount's namespace")
         if ref not in roles:
             errors.append(f"{kind}/{name}: roleRef {ref[0]}/{ref[1]} is not a role rendered by the chart")
         for sub in d.get("subjects") or []:
