@@ -23,6 +23,8 @@ type Result struct {
 	CheckedOut bool               `json:"checkedOut"`
 	Marks      map[string]float64 `json:"marks"`
 	Metrics    map[string]float64 `json:"metrics"`
+	// LauncherLines counts launcher log lines per pattern (-launcher-logs).
+	LauncherLines map[string]int `json:"launcherLines,omitempty"`
 }
 
 // Mark names. Every mark is the first time the benchmark observed the
@@ -36,6 +38,7 @@ const (
 	markAvailable      = "spinapp.Available=True"
 	markPodReady       = "pod.Ready"
 	markEndpointsReady = "endpointslice.ready"
+	markDispatch       = "launcher.dispatch"
 )
 
 // metric is the time from one mark to another; an empty From means Start.
@@ -53,6 +56,10 @@ var metrics = []metric{
 	{"pod_ready", "", markPodReady, "SpinApp create -> sandbox pod Ready"},
 	{"endpointslice_ready", "", markEndpointsReady, "SpinApp create -> pod listed ready in the Service's EndpointSlice"},
 	{"slot_claim", markSandboxAdded, markCheckedOut, "SwiftSandbox created -> warm slot checked out (warm only)"},
+	{"create_to_claim", "", markCheckedOut, "SpinApp create -> warm slot checked out (warm only)"},
+	{"claim_to_dispatch", markCheckedOut, markDispatch, "warm slot checked out -> workload handed to the guest agent (warm, -launcher-logs)"},
+	{"claim_to_direct_http", markCheckedOut, markDirectOK, "warm slot checked out -> first direct response (warm only)"},
+	{"dispatch_to_direct_http", markDispatch, markDirectOK, "workload handed to the guest agent -> first direct response (warm, -launcher-logs)"},
 	{"sandbox_workload_ready", markSandboxAdded, markWorkloadReady, "SwiftSandbox created -> SwiftSandbox WorkloadReady=True"},
 	{"direct_to_available", markDirectOK, markAvailable, "first direct HTTP response -> SpinApp Available"},
 	{"available_to_pod_ready", markAvailable, markPodReady, "SpinApp Available -> pod Ready"},

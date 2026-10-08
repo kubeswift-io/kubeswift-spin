@@ -353,10 +353,11 @@ func (b *bench) once(parent context.Context, run string) (*Result, error) {
 	wg.Wait()
 	stopWatches()
 
+	var lines map[string]int
 	if b.c.launcherLogs {
 		pod, _ := tg.pod()
 		lctx, lcancel := context.WithTimeout(parent, 30*time.Second)
-		launcherMarks(lctx, b.kc, ns, pod, rec)
+		lines = launcherMarks(lctx, b.kc, ns, pod, rec)
 		lcancel()
 	}
 
@@ -369,7 +370,7 @@ func (b *bench) once(parent context.Context, run string) (*Result, error) {
 	_, checkedOut := marks[markCheckedOut]
 	return &Result{
 		Run: run, Mode: b.c.mode, SpinApp: b.name(), Start: t0.UTC(), TimedOut: timedOut,
-		CheckedOut: checkedOut, Marks: marks, Metrics: computeMetrics(marks),
+		CheckedOut: checkedOut, Marks: marks, Metrics: computeMetrics(marks), LauncherLines: lines,
 	}, nil
 }
 
