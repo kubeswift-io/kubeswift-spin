@@ -9,9 +9,9 @@ running replicas on upgrade) say so under "Upgrade notes".
 
 ## Unreleased
 
-No controller, runtime or translation change: the rendered SwiftSandbox
-spec is unchanged. kubeswift-spin still passes user readiness checks
-through as written.
+The controller and runtime entrypoint are rebuilt with Go 1.26.9 (see
+Security); their behavior and the rendered SwiftSandbox spec are unchanged.
+kubeswift-spin still passes user readiness checks through as written.
 
 ### Changed
 
@@ -38,6 +38,18 @@ through as written.
   control-plane availability, warm-pool slot-claim and Spin runtime startup
   latency), current results, where the time goes, the effect of the
   readiness configuration and the release-time benchmark policy.
+
+### Security
+
+- Go 1.26.9 and `golang.org/x/net` v0.60.0. Go 1.26.8, which built the
+  v0.1.0-rc3 controller and runtime entrypoint, has standard-library
+  vulnerabilities in `net/http` (HTTP/1 and HTTP/2), `crypto/tls`,
+  `mime/multipart` and `html/template` that `govulncheck` reports as
+  reachable from the controller or the entrypoint (GO-2026-6599, GO-2026-6600, GO-2026-6603,
+  GO-2026-6605, GO-2026-6607, GO-2026-6608, GO-2026-6610, GO-2026-6611,
+  GO-2026-6612, GO-2026-6613, GO-2026-6617); five of them also affect
+  `golang.org/x/net` v0.59.0. `go.mod` now names the toolchain, so CI
+  builds with the same Go version as the images.
 
 ### Documentation
 

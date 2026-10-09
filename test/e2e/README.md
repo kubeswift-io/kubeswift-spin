@@ -77,7 +77,7 @@ make example-push EXAMPLE=serverless-ai EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-spin-examples EXAMPLE_TAG=<tag>
 ```
 
-- nodes that can pull `curlimages/curl:8.16.0`, `golang:1.26.8-bookworm`,
+- nodes that can pull `curlimages/curl:8.16.0`, `golang:1.26.9-bookworm`,
   `registry:2`, `gcr.io/go-containerregistry/crane:v0.22.1` and
   `busybox:1.37.0` (all pinned by digest in the script)
 - a Calico or other CNI that enforces NetworkPolicy, for phase 7
