@@ -11,6 +11,7 @@ that ran; nothing else is implied.
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
+| KubeSwift | v0.16.1 | KVM e2e, startup benchmark and warm-pool functional checks on the lab cluster (below); its sandbox API types and CRDs are unchanged from v0.16.0 (release diff), and the contract test still runs against v0.16.0 |
 | KubeSwift | v0.16.0 | KVM e2e on a lab cluster (below); contract test of `internal/sandboxapi` against the v0.16.0 Go types and CRDs; v0.16.0 sandbox CRDs in envtest |
 | KubeSwift | v0.15.1 | legacy mode only: unit and envtest tests with a feature detector that reports no optional features. Legacy mode uses only the API subset that was contract-tested against v0.15.1 before the module moved to v0.16.0. Not run on a v0.15.1 cluster since the v0.16.0 integration. |
 | cert-manager | v1.21.1 | KVM e2e cluster (the kind integration test pins v1.21.2) |
@@ -19,27 +20,30 @@ that ran; nothing else is implied.
 | Architecture | linux/amd64 | everything above; arm64 images are built and published but not validated (never run) |
 | Kubernetes (kind) | v1.34.0 | kind integration test |
 
-### Startup latency (2026-10-06)
+### Startup latency
 
 Measured with `make perf-startup` on the lab cluster below, with the
 v0.1.0-rc3 controller and runtime image and the canonical hello-http
-SpinApp (readiness check with `initialDelaySeconds: 1`; 20 runs per mode;
-seconds from SpinApp creation; terms and method in
-[performance.md](performance.md)):
+SpinApp (readiness check with `initialDelaySeconds: 1`; seconds from
+SpinApp creation; terms and method in [performance.md](performance.md)):
 
-Cold (the sandbox boots a microVM; runtime image cached on the node):
+Cold, KubeSwift v0.16.0, 2026-10-06, 20 runs (the sandbox boots a microVM;
+runtime image cached on the node; five cold runs on v0.16.1 had p50s within
+0.04 seconds of these):
 
 - first direct response: p50 9.92, p95 10.41
 - first Service response: p50 12.99, p95 13.07
 - SpinApp `Available`: p50 11.86, p95 12.11
 
-Warm pool:
+Warm pool, KubeSwift v0.16.1, 2026-10-08, 20 runs:
 
 - slot claim (from SwiftSandbox creation; not workload readiness): p50
-  25 ms, p95 53 ms
-- first direct response: p50 2.81, p95 3.53
-- first Service response: p50 5.18, p95 5.94
-- SpinApp `Available`: p50 4.16, p95 4.89
+  26 ms, p95 50 ms
+- slot claim to workload start: p50 30 ms, p95 36 ms (1,034 ms p50 with
+  v0.16.0)
+- first direct response: p50 1.58, p95 2.35 (2.81 and 3.53 with v0.16.0)
+- first Service response: p50 3.68, p95 4.59 (5.18 and 5.94 with v0.16.0)
+- SpinApp `Available`: p50 3.19, p95 3.74 (4.16 and 4.89 with v0.16.0)
 
 The `Available` durations in the run records below were measured by the
 KVM e2e test (and, for the release-tag checks, by hand) with 3-second
@@ -63,7 +67,7 @@ the example artifacts tagged `v0.1.0-dev.49ded6b`.
 - hello-http became `Available` 26 seconds after the SpinApp was created
   (19 to 26 seconds over several runs, with the 10-second readiness
   default and 3-second polling; see
-  [Startup latency](#startup-latency-2026-10-06)) and answered through the
+  [Startup latency](#startup-latency)) and answered through the
   SpinApp Service from a client pod. Scaling to 3, 2 and 1 replicas updated
   `readyReplicas` and the Service endpoints.
 - A rolling update of two replicas took 104 seconds, with 0 failed
@@ -152,6 +156,34 @@ rc2, so nodes may have had it cached.
   replaced the sandbox. The private registry phase took 51 seconds, of
   which 27 were KubeSwift materializing the test runtime image that the
   test builds and pushes for every run.
+
+### KubeSwift v0.16.1 (2026-10-08 and 2026-10-09)
+
+Same cluster with KubeSwift v0.16.1 (release images, controller
+`sha256:a9171962...`, swiftletd `sha256:9ff64351...`), v0.1.0-rc3 of
+kubeswift-spin and Spin Operator v0.6.1. No warm pool existed before the
+runs, so every launcher was created by v0.16.1.
+
+- `test/e2e/kvm-e2e.sh` (2026-10-09) with all nine phases passed all 75
+  checks. In phase
+  4 the first checkout of the newly created pool failed with `ExecFailed`
+  and kubeswift-spin replaced the sandbox, so `Available` took 35.7 seconds
+  (see the warm-pool issue under
+  [Known upstream issues](#known-upstream-issues)).
+- Startup benchmark: see [Startup latency](#startup-latency). In all 20 warm
+  runs the launcher started the workload 16 to 53 ms after the slot claim,
+  exactly one workload action was accepted and dispatched per checkout, and
+  no launcher logged a pod watch failure or a fallback to polling.
+- Warm-pool checks with a SpinApp on a pool executor: scaling from 1 to 3
+  replicas (two from warm slots, one booted cold when no slot was free) and
+  back to 1, 12 of 12 requests through the Service, a rolling update served
+  from a refilled slot, a new slot running about 2 seconds after a checkout
+  (timed once), deleting the pool while a replica it had served kept running
+  (the SpinApp reported `WarmPoolIncompatible` until the pool was recreated),
+  and a new SpinApp served from the recreated pool. Launcher logs read after
+  more than two watch resyncs showed no repeated action. Deleting the SpinApps
+  left no sandbox, pod, Service, NetworkPolicy, Role or ServiceAccount.
+- The kubeswift-spin controller logged no warning or error.
 
 ### Not tested
 
@@ -271,16 +303,18 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
           httpHeaders: []
   ```
 
-- **KubeSwift v0.16.0 can hand out a warm-pool slot before its guest is
-  ready.** A slot counts as warm, and can be checked out, as soon as its
-  launcher container is running. A checkout in the first seconds after a
-  slot is created can fail with `ExecFailed`; kubeswift-spin then replaces
-  the sandbox after the failure backoff, and the replacement is usually
-  served by the same pool. Observed once, right after a pool was created,
-  during the v0.1.0-rc3 validation. Create pools some time before relying
-  on warm starts.
-- **KubeSwift v0.16.0 logs write conflicts as `Reconciler error`** at error
-  level, although it retries them and converges
+- **KubeSwift v0.16.0 and v0.16.1 can hand out a warm-pool slot before its
+  guest is ready.** A slot counts as warm, and can be checked out, as soon as
+  its launcher container is running. A checkout in the first seconds after a
+  slot is created can fail with `ExecFailed`; kubeswift-spin then replaces the
+  sandbox after the failure backoff, and the replacement is usually served by
+  the same pool. Observed twice, each time on the first checkout of a newly
+  created pool: during the v0.1.0-rc3 validation (v0.16.0) and in the KVM e2e
+  run of 2026-10-09 (v0.16.1). Create pools some time before relying on warm
+  starts.
+- **KubeSwift v0.16.0 and v0.16.1 log write conflicts as `Reconciler
+  error`** at error level, although they retry them and converge (seen
+  during the v0.16.1 benchmark runs)
   ([kubeswift-io/kubeswift#758](https://github.com/kubeswift-io/kubeswift/issues/758)).
   Do not alert on those lines alone.
 

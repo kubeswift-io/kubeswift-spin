@@ -11,10 +11,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// launcherPatterns map KubeSwift v0.16.0 launcher pod log lines to marks.
-// They are diagnostics for KubeSwift's own stages (cold boot only; a warm
-// slot's pod started before the run) and depend on log output that is not
-// an API, so a pattern that stops matching just leaves its mark out.
+// launcherPatterns map KubeSwift v0.16.0 and v0.16.1 launcher pod log lines
+// to marks. They are diagnostics for KubeSwift's own stages: the boot stages
+// of a cold run, and for a warm run (whose slot pod started before the run)
+// the dispatch and probe lines. They depend on log output that is not an
+// API, so a pattern that stops matching just leaves its mark out.
 var launcherPatterns = []struct {
 	key string
 	re  *regexp.Regexp

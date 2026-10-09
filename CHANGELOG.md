@@ -34,6 +34,15 @@ kubeswift-spin still passes user readiness checks through as written.
   watches, the time from SpinApp creation to the first direct and Service
   responses, `Available`, pod `Ready`, the EndpointSlice and the warm-pool
   slot claim, and compares results with a baseline.
+- `startupbench` reports, for warm runs, `create_to_claim` and
+  `claim_to_direct_http`; with `-launcher-logs` it also reports
+  `claim_to_dispatch` and `dispatch_to_direct_http` from the launcher's
+  `dispatch_sandbox_exec` log line, and counts per pattern the launcher
+  pod's log lines (`launcherLines`), including workload actions and pod
+  watch warnings, which show whether KubeSwift v0.16.1 dispatched by watch
+  or fell back to polling.
+- docs/performance-results/2026-10-08-kubeswift-v0.16.1: the warm-pool
+  baseline on KubeSwift v0.16.1 (20 warm runs, 5 cold runs).
 - docs/performance.md: the four startup measures (first-response,
   control-plane availability, warm-pool slot-claim and Spin runtime startup
   latency), current results, where the time goes, the effect of the
@@ -53,6 +62,12 @@ kubeswift-spin still passes user readiness checks through as written.
 
 ### Documentation
 
+- KubeSwift v0.16.1 is listed as tested. It starts the workload in a
+  checked-out warm slot when the API server delivers the checkout instead of
+  on a 2-second check: slot claim to workload start went from 1,034 ms to
+  30 ms (p50) and the first direct response from a warm pool from 2.81 to
+  1.58 seconds (p50). performance.md, compatibility.md and
+  why-kubeswift-spin.md give the v0.16.1 numbers.
 - compatibility.md, why-kubeswift-spin.md, executor-contract.md and the
   hello-http README no longer present "19 to 26 seconds" as startup
   latency. That figure was the time to `Available` measured by the e2e

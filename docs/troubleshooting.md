@@ -183,10 +183,10 @@ runs.
 ## A replica from a warm pool fails with ExecFailed
 
 `SandboxFailed` Events with `(ExecFailed)` for a SpinApp on a pool-backed
-executor, right after the pool was created, mean that KubeSwift v0.16.0
-checked out a slot whose guest was not ready yet. kubeswift-spin replaces
-the sandbox after the failure backoff (10 seconds for the first failure),
-so the SpinApp recovers on its own. See
+executor, right after the pool was created, mean that KubeSwift (v0.16.0 or
+v0.16.1) checked out a slot whose guest was not ready yet. kubeswift-spin
+replaces the sandbox after the failure backoff (10 seconds for the first
+failure), so the SpinApp recovers on its own. See
 [compatibility.md](compatibility.md#known-upstream-issues).
 
 ## Deleting a SpinApp leaves sandboxes

@@ -23,9 +23,10 @@ the Spin runtime in a container) when:
   Spin without booting a virtual machine, while a kubeswift-spin replica
   boots a microVM first, or takes one from a warm pool. On the lab cluster
   a new replica returned its first direct response (to the pod IP) 9.9
-  seconds after SpinApp creation when it booted a microVM and 2.8 seconds
+  seconds after SpinApp creation when it booted a microVM and 1.6 seconds
   from a warm pool, and its first response through the Service after 13.0
-  and 5.2 seconds (medians, see [performance.md](performance.md));
+  and 3.7 seconds (medians; cold on KubeSwift v0.16.0, warm on v0.16.1; see
+  [performance.md](performance.md));
 - a microVM adds no meaningful protection for what you run.
 
 ## Startup time is not request latency
@@ -37,8 +38,9 @@ request from them; no microVM is booted per request.
 
 kubeswift-spin is built for strong isolation first. The project's goal is
 a first direct response from a warm pool in under one second; on the lab
-cluster it is 2.81 seconds (p50) today. The measured stages, and which of them are
-fixed waits rather than work, are in [performance.md](performance.md).
+cluster it is 1.58 seconds (p50, KubeSwift v0.16.1) today. The measured
+stages, and which of them are fixed waits rather than work, are in
+[performance.md](performance.md).
 
 ## When kubeswift-spin is useful
 

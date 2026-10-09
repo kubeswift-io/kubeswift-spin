@@ -1,0 +1,29 @@
+runs started (UTC, 2026-10-08): warm.jsonl 07:51 to 08:03 (20 runs),
+  cold.jsonl 08:04 to 08:07 (5 runs, a sanity check, not a cold baseline)
+commit: 64aca93 (startupbench with the dispatch marks)
+node: one KVM node; benchmark pod and all sandboxes on it, about 5% CPU in use
+  before the runs
+kubelet: v1.34.3+k0s
+kernel: 6.8.0-137-generic
+os: Ubuntu 24.04.4 LTS
+runtime: containerd://1.7.30
+cpu: 8
+memory: 64 GiB
+cni: Calico
+KubeSwift v0.16.1 (tag object 29f288b, commit e023005), images by digest as running:
+  controller-manager sha256:a9171962753ab035af5069f516727757f59c03f424354f200a5a51f86b4d4dde
+  swiftletd (launcher, network-init) sha256:9ff64351cd6cc83c655fe668b7abba6bfaf8e07a2b61e77c62576d5e1860994b
+  sandbox-materialize sha256:f09074dee4ac3655d79be81066dce8cb51a3288da58dedfc7df8c8485eecdf13
+  every launcher was created after the upgrade (no pool existed before the runs)
+kubeswift-spin: v0.1.0-rc3, controller sha256:7e9f65eb2d83a07190137dd5be28f8c1d58f45a3e3112c62f54f56d8673616ca
+runtime image: ghcr.io/kubeswift-io/kubeswift-spin-runtime@sha256:29e515d9ca721c99d8efbbebb927dd6fa52d2a6b61683fc9c9b3c78fe91f7e8b (spin-4.2.1-r1), cached on the node
+Spin Operator: v0.6.1, sha256:a9328fbd192170adf058c6f7d31bddc233850d51b02cbe34cccfb702104064ff
+application: ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http@sha256:5016dcb77b6c828b012f89e857d70f0f9789edb136f3f3f1ba31f5601096df88,
+  pulled by Spin at every start
+manifest: examples/hello-http/spinapp.yaml (initialDelaySeconds: 1), image
+  overridden with the digest above
+warm: one-slot pool (1 vCPU, 256Mi), slot at least 30 s old, start jitter
+  below 2 s, launcher logs read (PERF_LAUNCHER_LOGS=1)
+cold: launcher logs read
+note: condensed by hand from the environment.txt files of the two
+  hack/perf-startup.sh runs
