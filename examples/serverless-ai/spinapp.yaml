@@ -7,7 +7,7 @@ kind: SpinApp
 metadata:
   name: serverless-ai
 spec:
-  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/serverless-ai:v0.1.0-rc3
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/serverless-ai:v0.1.0-rc4
   executor: kubeswift-egress
   replicas: 1
   variables:

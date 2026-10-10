@@ -3,7 +3,7 @@ kind: SpinApp
 metadata:
   name: request-info
 spec:
-  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/request-info:v0.1.0-rc3
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/request-info:v0.1.0-rc4
   executor: kubeswift
   replicas: 2
   variables:

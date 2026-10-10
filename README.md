@@ -16,9 +16,9 @@ KubeSwift.
 
 ## Status
 
-v0.1.0-rc3 is a release candidate. It differs from v0.1.0-rc2 only in a
-chart permission for leader-election Events and in CI (the v0.1.0-rc1
-release run failed before it finished). It validates the initial
+v0.1.0-rc4 is a release candidate. It differs from v0.1.0-rc3 in being
+built with Go 1.26.9 (standard-library security fixes) and in a new runtime
+image, `spin-4.2.1-r2`, whose only change is that build. It validates the initial
 architecture and the core execution path on real KVM hardware and is meant
 for evaluation and integration testing while the project builds broader
 compatibility and operational experience. It is not production-ready.
@@ -112,7 +112,7 @@ kubectl create namespace demo
 Install the chart with a `kubeswift` executor in `demo`:
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc3 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc4 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -127,7 +127,7 @@ Chart values are documented in
 ## Run hello-http
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc3/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc4/examples/hello-http/spinapp.yaml
 ```
 
 ```bash
@@ -161,7 +161,7 @@ experimental MCP server, are in [examples](examples/).
 Build both images from the same commit and push them to a registry your
 cluster can pull from (`make help` lists the targets). The runtime image
 has its own version, read from `runtime/VERSION` (currently
-`spin-4.2.1-r1`), so that controller upgrades do not replace running
+`spin-4.2.1-r2`), so that controller upgrades do not replace running
 replicas:
 
 ```bash
@@ -173,7 +173,7 @@ docker push <registry>/kubeswift-spin:v0.1.0-dev
 ```
 
 ```bash
-docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r1
+docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r2
 ```
 
 Then install from the source tree:

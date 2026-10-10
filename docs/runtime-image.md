@@ -7,7 +7,7 @@ every SpinApp: the application is not baked in, Spin pulls it at start.
 ## Versioning
 
 The runtime image is versioned independently of the controller. Its tag is
-in `runtime/VERSION` (currently `spin-4.2.1-r1`: the Spin version and a
+in `runtime/VERSION` (currently `spin-4.2.1-r2`: the Spin version and a
 revision for entrypoint or base image changes), and the chart's
 `runtimeImage.tag` must match it (`make helm-lint` checks this). The release
 workflow builds and pushes the runtime image only when that tag does not

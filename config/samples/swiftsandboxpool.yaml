@@ -8,7 +8,7 @@ kind: SwiftSandboxPool
 metadata:
   name: spin-warm
 spec:
-  image: ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r1
+  image: ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r2
   cpu: 1
   memory: 512Mi
   network:

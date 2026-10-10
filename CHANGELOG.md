@@ -7,11 +7,28 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## Unreleased
+## v0.1.0-rc4 (2026-10-10)
 
-The controller and runtime entrypoint are rebuilt with Go 1.26.9 (see
-Security); their behavior and the rendered SwiftSandbox spec are unchanged.
-kubeswift-spin still passes user readiness checks through as written.
+Release candidate built with Go 1.26.9, which fixes standard-library
+vulnerabilities reachable from the controller and the runtime entrypoint
+(see Security). The runtime image is rebuilt as `spin-4.2.1-r2`; Spin and
+the entrypoint's behavior are unchanged. kubeswift-spin still passes user
+readiness checks through as written.
+
+### Upgrade notes
+
+- The default runtime image changes from `spin-4.2.1-r1` to
+  `spin-4.2.1-r2`, which changes the rendered sandbox spec: every replica
+  that uses the default runtime image is replaced once, one at a time. A
+  SpinApp with one replica is unavailable during its replacement. Replicas
+  of an executor with its own `spin.kubeswift.io/runtime-image` are not
+  affected.
+- A SwiftSandboxPool used with the default runtime image must be updated to
+  the new image reference (the chart passes it by digest; see the
+  `--runtime-image` argument or `images.txt` in the release). Until then,
+  SpinApps on that pool's executor keep their running replicas but are not
+  rolled out (`Progressing=False`, `WarmPoolIncompatible`); the rollout
+  proceeds once the pool matches.
 
 ### Changed
 
