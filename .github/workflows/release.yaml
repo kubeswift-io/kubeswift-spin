@@ -244,7 +244,7 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/charts/kubeswift-spin
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: chart
           path: dist/*.tgz
@@ -275,7 +275,7 @@ jobs:
       # Only the Wasm binaries cross to the publishing job; it uses the
       # spin.toml files from its own checkout, so build scripts cannot change
       # what is pushed and signed beyond the binaries.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: examples
           path: examples/target/wasm32-wasip2/release/*.wasm
@@ -326,7 +326,7 @@ jobs:
             cosign sign --yes "${ref}@${digest}"
             echo "${ref}:${TAG}@${digest}" >> dist/examples.txt
           done
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: example-digests
           path: dist/examples.txt
