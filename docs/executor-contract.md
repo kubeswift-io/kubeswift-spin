@@ -473,7 +473,7 @@ The image is compared as an exact string. The released chart passes the
 runtime image to the controller by digest
 (`ghcr.io/kubeswift-io/kubeswift-spin-runtime@sha256:...`, listed in the
 release's `images.txt` and in the chart's `runtimeImage.digest` value), so
-a pool must use that same reference, not the `spin-4.2.1-r1` tag. The
+a pool must use that same reference, not the `spin-4.2.1-r2` tag. The
 controller's reference is in its arguments:
 
 ```bash

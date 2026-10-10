@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubeswift-spin
 description: SpinKube executor that runs SpinApps in KubeSwift microVM sandboxes
 type: application
-version: 0.1.0-rc3
-appVersion: v0.1.0-rc3
+version: 0.1.0-rc4
+appVersion: v0.1.0-rc4
 kubeVersion: ">=1.31.0-0"
 home: https://github.com/kubeswift-io/kubeswift-spin
 sources:

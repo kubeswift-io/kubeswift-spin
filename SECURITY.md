@@ -23,7 +23,7 @@ issue belongs, report it here and we will help route it.
 
 ## Supported versions
 
-The latest release is v0.1.0-rc3, a release candidate that is not
+The latest release is v0.1.0-rc4, a release candidate that is not
 production-ready. Until v1.0, security fixes are made on `main` and in the
 latest release only.
 

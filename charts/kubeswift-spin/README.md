@@ -8,7 +8,7 @@ The released chart is published as an OCI artifact and pins both images by
 digest:
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc3 --namespace kubeswift-spin-system --create-namespace
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc4 --namespace kubeswift-spin-system --create-namespace
 ```
 
 From a source checkout, at the repository root (the images must exist in
@@ -29,7 +29,7 @@ see [Executors](#executors) to change that.
 | `image.tag` | chart appVersion | controller image tag |
 | `image.digest` | `""` (the released chart sets the release digest) | pull by digest (`sha256:...`); overrides the tag |
 | `runtimeImage.repository` | `ghcr.io/kubeswift-io/kubeswift-spin-runtime` | runtime rootfs booted by every sandbox |
-| `runtimeImage.tag` / `runtimeImage.digest` | `spin-4.2.1-r1` / `""` (the released chart sets the digest) | versioned independently of the controller (`runtime/VERSION`); changing it replaces every replica using it. A digest takes precedence over the tag. Its entrypoint must implement the runtime contract the controller renders (Secret placeholders, secret files): use the runtime image of the same release, or for a source build, one built from the same commit as the controller |
+| `runtimeImage.tag` / `runtimeImage.digest` | `spin-4.2.1-r2` / `""` (the released chart sets the digest) | versioned independently of the controller (`runtime/VERSION`); changing it replaces every replica using it. A digest takes precedence over the tag. Its entrypoint must implement the runtime contract the controller renders (Secret placeholders, secret files): use the runtime image of the same release, or for a source build, one built from the same commit as the controller |
 | `imagePullSecrets` | `[]` | pull secrets for the controller image (`- name: <secret>`), not for sandboxes |
 | `replicaCount` | `1` | controller replicas; leader election is always on |
 | `controller.defaultCPU` | `"1"` | CPU when a SpinApp sets none |

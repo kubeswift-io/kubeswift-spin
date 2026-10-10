@@ -5,7 +5,7 @@ kind: SpinApp
 metadata:
   name: outbound-http-open
 spec:
-  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/outbound-http:v0.1.0-rc3
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/outbound-http:v0.1.0-rc4
   executor: kubeswift-open
   replicas: 1
   variables:
