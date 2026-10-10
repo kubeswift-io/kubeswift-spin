@@ -61,22 +61,64 @@ Spin's own tracing; that build is not part of the repository.
 
 ## Current results
 
-Measured on 2026-10-06 with 20 cold and 20 warm runs:
+Environment for both result sets below:
 
 - cluster: k0s Kubernetes v1.34.3, Calico, containerd 1.7.30, Ubuntu 24.04
   with kernel 6.8; benchmark and sandboxes on one KVM node with 8 CPUs
   and 64 GiB
-- KubeSwift v0.16.0, Spin Operator v0.6.1, kubeswift-spin v0.1.0-rc3
-  (controller and runtime image, Spin 4.2.1)
+- Spin Operator v0.6.1, kubeswift-spin v0.1.0-rc3 (controller and runtime
+  image, Spin 4.2.1)
 - the canonical [hello-http SpinApp](../examples/hello-http/spinapp.yaml):
   1 vCPU, 256Mi, readiness check on `/healthz` with
   `initialDelaySeconds: 1` and `periodSeconds: 2`, application artifact
-  `v0.1.0-rc3` pulled from `ghcr.io` by Spin at every start
+  `v0.1.0-rc3` pulled from `ghcr.io` by Spin at every start (by tag for
+  KubeSwift v0.16.0; by that tag's digest, `sha256:5016dcb7...`, for
+  v0.16.1)
 - cold: the sandbox boots a microVM; the runtime image is already cached
   on the node
 - warm: a one-slot SwiftSandboxPool with a slot started at least 30 seconds
   earlier, and a random start delay below 2 seconds (see the
   [startupbench README](../test/perf/startupbench/README.md#running-the-benchmark))
+
+### Warm pool, KubeSwift v0.16.1 (2026-10-08)
+
+KubeSwift v0.16.1 starts the workload in a checked-out slot as soon as the
+API server delivers the checkout, instead of on the launcher's next 2-second
+check (slots booted before an upgrade keep the 2-second check until they
+are replaced). 20 warm runs, every launcher created by v0.16.1:
+
+| Seconds from SpinApp creation | Min | p50 | p95 | Max |
+|---|---:|---:|---:|---:|
+| first direct response | 1.51 | 1.58 | 2.35 | 11.46 |
+| first Service response | 3.30 | 3.68 | 4.59 | 14.11 |
+| `Available` | 3.12 | 3.19 | 3.74 | 13.23 |
+
+| Warm stage | Min | p50 | p95 | Max |
+|---|---:|---:|---:|---:|
+| slot claim (SwiftSandbox created to `CheckedOut`) | 16 ms | 26 ms | 50 ms | 55 ms |
+| SpinApp creation to slot claim | 40 ms | 65 ms | 100 ms | 108 ms |
+| slot claim to workload start (dispatch) | 16 ms | 30 ms | 36 ms | 53 ms |
+| workload start to first direct response | 1,418 ms | 1,480 ms | 2,222 ms | 11,376 ms |
+
+The maxima of the response, `Available` and post-dispatch rows come from one
+run, whose slot claim to dispatch was 20 ms and whose time after dispatch,
+inside the guest, was 11.4 seconds; the benchmark cannot see
+which part of the guest path (Spin, the application pull) caused it.
+Without that run, the first direct response is 1.57 seconds p50 and 1.81
+seconds p95. "Dispatch" is the launcher's `dispatch_sandbox_exec` log line
+(`-launcher-logs`); slot claim is when startupbench observed `CheckedOut`.
+On v0.16.0, workload start is the launcher's `probe_runner_started` line
+(the dispatch line was not recorded); on v0.16.1 that line follows dispatch
+by under 2 ms, so the two are comparable.
+
+Five cold runs on KubeSwift v0.16.1, a sanity check rather than a baseline,
+had p50s within 0.04 seconds of the v0.16.0 cold results below (first direct
+response 9.90 seconds p50).
+
+### KubeSwift v0.16.0 (2026-10-06)
+
+The cold results below are the current cold baseline; the warm results are
+superseded by the v0.16.1 results above. 20 cold and 20 warm runs:
 
 | Seconds from SpinApp creation | Cold min | Cold p50 | Cold p95 | Cold max | Warm min | Warm p50 | Warm p95 | Warm max |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -85,23 +127,30 @@ Measured on 2026-10-06 with 20 cold and 20 warm runs:
 | `Available` | 9.92 | 11.86 | 12.11 | 13.03 | 3.22 | 4.16 | 4.89 | 5.00 |
 
 Warm-pool slot claim (SwiftSandbox created to `CheckedOut`): 25 ms p50, 53 ms
-p95 (17 to 58 ms).
+p95 (17 to 58 ms). With v0.16.0 the workload started 1,034 ms p50 after the
+slot claim (60 to 1,899 ms), because the launcher checked for new work every
+2 seconds.
 
-From the first direct response to Service traffic (p50, milliseconds):
+### From the first direct response to Service traffic
 
-| Stage | Cold | Warm |
-|---|---:|---:|
-| first direct response to `Available` | 1,882 | 1,577 |
-| `Available` to pod `Ready` | 802 | 841 |
-| pod `Ready` to EndpointSlice ready | 12 | 9 |
-| EndpointSlice ready to first Service response | 275 | 215 |
+p50, milliseconds:
+
+| Stage | Cold (v0.16.0) | Warm (v0.16.0) | Warm (v0.16.1) |
+|---|---:|---:|---:|
+| first direct response to `Available` | 1,882 | 1,577 | 1,617 |
+| `Available` to pod `Ready` | 802 | 841 | 299 |
+| pod `Ready` to EndpointSlice ready | 12 | 9 | 6 |
+| EndpointSlice ready to first Service response | 275 | 215 | 134 |
+
+Why `Available` to pod `Ready` was shorter in the v0.16.1 runs has not been
+investigated.
 
 `Available` follows the first direct response by the readiness probe
 schedule: the probe starts when the guest has an address (cold) or the
 workload starts (warm), the first probe runs after `initialDelaySeconds`
 and then every `periodSeconds`. Cold, the application is usually not yet
 listening at the first probe (1 second), so the second probe (3 seconds)
-passes. In 2 of the 20 cold runs the first probe passed and `Available`
+passes. In 2 of the 20 v0.16.0 cold runs the first probe passed and `Available`
 came within 0.12 seconds of the first response. The pod becomes `Ready`
 after the kubelet sees KubeSwift's readiness gate. Service traffic then
 needs the EndpointSlice and the node's Service rules to be updated.
@@ -109,9 +158,8 @@ needs the EndpointSlice and the node's Service rules to be updated.
 ## Readiness configuration
 
 When a check omits `initialDelaySeconds`, the Spin Operator CRD defaults it
-to 10. The
-same startupbench, cluster and day, with only that field changed (10 runs
-per mode without the field, 20 with it):
+to 10. The same startupbench, cluster and day (KubeSwift v0.16.0), with only
+that field changed (10 runs per mode without the field, 20 with it):
 
 | p50, seconds from SpinApp creation | Cold, no `initialDelaySeconds` (10) | Cold, `initialDelaySeconds: 1` | Warm, no `initialDelaySeconds` (10) | Warm, `initialDelaySeconds: 1` |
 |---|---:|---:|---:|---:|
@@ -172,6 +220,8 @@ TCP 9 ms, four connections).
 
 ### Warm path
 
+With KubeSwift v0.16.0:
+
 | Stage | p50 |
 |---|---:|
 | kubeswift-spin creates the SwiftSandbox | 23 |
@@ -187,11 +237,16 @@ workload start (the launcher's `probe_runner_started` line) 1,034 ms p50,
 spread from 60 to 1,899 ms, and from workload start to the first direct
 response 1,518 ms p50.
 
-The warm path to the first response is mostly two items: the launcher's
-2-second check for new work and the application pull. With the
-application in the guest instead of in a registry, the same warm path
-answered 0.94 seconds sooner (10 runs each, investigation data); that
-configuration is not supported by kubeswift-spin today.
+With KubeSwift v0.16.0 the warm path to the first response was mostly two
+items: the launcher's 2-second check for new work and the application pull.
+KubeSwift v0.16.1 removed the first: slot claim to workload start is 30 ms p50
+(see [Current results](#warm-pool-kubeswift-v0161-2026-10-08)). What remains
+is in the guest: workload start to the first direct response is 1,480 ms p50;
+in the v0.16.0 investigation the application pull alone took about 0.95
+seconds of the guest path. With the application in the guest instead of in a
+registry, the same warm path answered 0.94 seconds sooner (10 runs each,
+investigation data); that configuration is not supported by kubeswift-spin
+today.
 
 ### Spin runtime startup baseline
 
@@ -237,5 +292,7 @@ make perf-startup PERF_NODE=<node> PERF_REGISTRY=ttl.sh PERF_BASELINE=docs/perfo
 - Keep each release's `environment.txt`, `summary.txt` and JSONL results in
   a directory under `docs/performance-results/`, named by date or version.
 
-The results above, and the runs without `initialDelaySeconds`, are in
-[performance-results/2026-10-06](performance-results/2026-10-06/).
+The KubeSwift v0.16.1 results are in
+[performance-results/2026-10-08-kubeswift-v0.16.1](performance-results/2026-10-08-kubeswift-v0.16.1/);
+the KubeSwift v0.16.0 results, and the runs without `initialDelaySeconds`,
+are in [performance-results/2026-10-06](performance-results/2026-10-06/).

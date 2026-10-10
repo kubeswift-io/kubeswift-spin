@@ -123,6 +123,9 @@ and Calico, KubeSwift v0.16.0, cert-manager v1.21.1 and Spin Operator
 v0.6.1, with a kubeswift-spin development build from `charts/kubeswift-spin`.
 The timings are in
 [compatibility.md](../../docs/compatibility.md#kvm-e2e-lab-run-2026-10-05).
+On 2026-10-09 it passed all 75 checks again on the same cluster with
+KubeSwift v0.16.1 and the published v0.1.0-rc3 artifacts (see
+[compatibility.md](../../docs/compatibility.md#kubeswift-v0161-2026-10-08-and-2026-10-09)).
 Not covered: arm64.
 
 ## CI

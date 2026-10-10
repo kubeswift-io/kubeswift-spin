@@ -70,9 +70,9 @@ func runMain(args []string) int {
 	fs.StringVar(&c.executor, "executor", "", "override spec.executor")
 	fs.StringVar(&c.image, "image", "", "override spec.image")
 	fs.StringVar(&c.warmPool, "warm-pool", "", "SwiftSandboxPool to wait for before each warm run")
-	fs.DurationVar(&c.minSlotAge, "min-slot-age", 30*time.Second, "with -warm-pool, wait until a warm slot's pod is this old (KubeSwift v0.16.0 can hand out a slot whose guest is not ready yet)")
+	fs.DurationVar(&c.minSlotAge, "min-slot-age", 30*time.Second, "with -warm-pool, wait until a warm slot's pod is this old (KubeSwift v0.16.0 and v0.16.1 can hand out a slot whose guest is not ready yet)")
 	fs.IntVar(&c.runs, "runs", 1, "number of runs")
-	fs.DurationVar(&c.startJitter, "start-jitter", 0, "wait a uniformly random time below this before each run (use 2s for warm runs: KubeSwift checks a slot for new work every 2 seconds, and runs started at a fixed offset would always hit the same point of that cycle)")
+	fs.DurationVar(&c.startJitter, "start-jitter", 0, "wait a uniformly random time below this before each run (use 2s for warm runs: KubeSwift v0.16.0 checks a slot for new work every 2 seconds, and runs started at a fixed offset would always hit the same point of that cycle)")
 	fs.StringVar(&c.runPrefix, "run-prefix", "", "prefix for run identifiers (default: the mode)")
 	fs.StringVar(&c.path, "path", "/hello", "HTTP path to request")
 	fs.StringVar(&c.expect, "expect", "", "substring the response body must contain (default: any non-empty 200 response)")
@@ -81,7 +81,7 @@ func runMain(args []string) int {
 	fs.DurationVar(&c.interval, "interval", 50*time.Millisecond, "HTTP probe interval")
 	fs.DurationVar(&c.timeout, "timeout", 3*time.Minute, "per-run limit")
 	fs.DurationVar(&c.settle, "settle", time.Second, "keep watching this long after the last required transition")
-	fs.BoolVar(&c.launcherLogs, "launcher-logs", false, "also read KubeSwift launcher pod logs for stage timings (needs pods/log; the patterns match KubeSwift v0.16.0 output, which is not an API)")
+	fs.BoolVar(&c.launcherLogs, "launcher-logs", false, "also read KubeSwift launcher pod logs for stage timings, warm-pool dispatch and pod watch warnings (needs pods/log; the patterns match KubeSwift v0.16.0 and v0.16.1 output, which is not an API)")
 	fs.BoolVar(&c.keep, "keep", false, "keep the SpinApp after a single run")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -353,10 +353,11 @@ func (b *bench) once(parent context.Context, run string) (*Result, error) {
 	wg.Wait()
 	stopWatches()
 
+	var lines map[string]int
 	if b.c.launcherLogs {
 		pod, _ := tg.pod()
 		lctx, lcancel := context.WithTimeout(parent, 30*time.Second)
-		launcherMarks(lctx, b.kc, ns, pod, rec)
+		lines = launcherMarks(lctx, b.kc, ns, pod, rec)
 		lcancel()
 	}
 
@@ -369,7 +370,7 @@ func (b *bench) once(parent context.Context, run string) (*Result, error) {
 	_, checkedOut := marks[markCheckedOut]
 	return &Result{
 		Run: run, Mode: b.c.mode, SpinApp: b.name(), Start: t0.UTC(), TimedOut: timedOut,
-		CheckedOut: checkedOut, Marks: marks, Metrics: computeMetrics(marks),
+		CheckedOut: checkedOut, Marks: marks, Metrics: computeMetrics(marks), LauncherLines: lines,
 	}, nil
 }
 

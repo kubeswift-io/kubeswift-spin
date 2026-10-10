@@ -210,3 +210,21 @@ func TestReplicaOf(t *testing.T) {
 		}
 	}
 }
+
+func TestDispatchPatternsAndMetrics(t *testing.T) {
+	for line, want := range map[string]string{
+		"2026-10-08T09:00:00.100000000Z [2026-10-08T09:00:00.100Z INFO  swiftletd::action] action_accept namespace=sandbox-exec kind=SandboxExec id=abc slot=Main":  "launcher.action-accept",
+		"2026-10-08T09:00:00.120000000Z [2026-10-08T09:00:00.120Z INFO  swiftletd::action] dispatch_sandbox_exec id=abc socket=/var/lib/kubeswift/run/x/vsock.sock": "launcher.dispatch",
+		"2026-10-08T09:00:00.000000000Z [2026-10-08T09:00:00.000Z WARN  swiftletd::podwatch] action_loop_watch_unavailable: refused; polling every 2s":              "launcher.watch-unavailable",
+	} {
+		if key, _, ok := matchLauncherLine("launcher", line); !ok || key != want {
+			t.Errorf("%q: got %q %v, want %q", line, key, ok, want)
+		}
+	}
+	m := computeMetrics(map[string]float64{markSandboxAdded: 30, markCheckedOut: 60, markDispatch: 110, markDirectOK: 1700})
+	for k, v := range map[string]float64{"create_to_claim": 60, "claim_to_dispatch": 50, "claim_to_direct_http": 1640, "dispatch_to_direct_http": 1590} {
+		if got := m[k]; !near(got, v) {
+			t.Errorf("%s = %v, want %v", k, got, v)
+		}
+	}
+}

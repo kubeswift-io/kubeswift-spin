@@ -5,8 +5,10 @@ to start, on a real KubeSwift cluster with KVM. It is the tool behind the
 numbers in [docs/performance.md](../../../docs/performance.md) and the
 release-time benchmark described there.
 
-It does not need log scraping or guest instrumentation: every metric comes
-from Kubernetes watches and from HTTP requests that the tool sends itself.
+Without `-launcher-logs` it needs no log scraping or guest instrumentation:
+every metric comes from Kubernetes watches and from HTTP requests that the
+tool sends itself. `claim_to_dispatch` and `dispatch_to_direct_http` need
+`-launcher-logs`.
 
 ## What it measures
 
@@ -41,6 +43,10 @@ The expected response is HTTP 200 with a non-empty body that contains
 | `endpointslice_ready` | SpinApp create | the pod listed as ready in the Service's EndpointSlice |
 | `slot_claim` | SwiftSandbox created | KubeSwift reports the warm slot checked out (warm runs only) |
 | `sandbox_workload_ready` | SwiftSandbox created | SwiftSandbox `WorkloadReady=True` |
+| `create_to_claim` | SpinApp create | warm slot checked out (warm runs only) |
+| `claim_to_dispatch` | warm slot checked out | the launcher hands the workload to the guest (warm runs, `-launcher-logs`) |
+| `claim_to_direct_http` | warm slot checked out | first direct response (warm runs only) |
+| `dispatch_to_direct_http` | the launcher hands the workload to the guest | first direct response (warm runs, `-launcher-logs`) |
 | `direct_to_available` | first direct response | SpinApp `Available` |
 | `available_to_pod_ready` | SpinApp `Available` | pod `Ready` |
 | `pod_ready_to_endpointslice` | pod `Ready` | EndpointSlice ready |
@@ -66,17 +72,34 @@ Not measured: anything inside the guest (kernel boot, Spin startup, the
 application pull). `-launcher-logs` adds marks parsed from the KubeSwift
 launcher pod's logs: network setup, VM spawn, DHCP and probe start for
 cold runs; for warm runs, whose slot pod started before the run, only the
-lines after the run start (probe start, which is when the workload
-starts, and workload ready). The patterns match KubeSwift v0.16.0 output, which is not an API, and
-the option needs `pods/log` permission.
+lines after the run start: the action loop accepting the checkout's
+workload (`action_accept`), handing it to the guest (`dispatch_sandbox_exec`,
+the `launcher.dispatch` mark), probe start and workload ready. A launcher
+log line carries the container runtime's timestamp, while slot claim is when
+startupbench received `CheckedOut`, so `claim_to_dispatch` can be a few
+milliseconds short.
+
+With `-launcher-logs` each result also has `launcherLines`: for each
+pattern, keyed by mark name, how many lines of the launcher pod's logs (the
+`network-init`, `sandbox-materialize` and `launcher` containers, since the
+pod started) matched. A warm slot serves one checkout, so a normal warm run
+has `launcher.action-accept: 1` and `launcher.dispatch: 1`. KubeSwift
+v0.16.1's pod watch messages are counted as `launcher.watch-unavailable`,
+`launcher.watch-retry-failed`, `launcher.watch-unordered`,
+`launcher.get-pod-error` and `launcher.watch-restored`, and action
+rejections as `launcher.action-reject`. Any of the first four shows that the
+watch failed and the launcher fell back to reading its pod every 2 seconds.
+The patterns match KubeSwift v0.16.0 and v0.16.1 output, which is not an
+API, and the option needs `pods/log` permission.
 
 ## Running the benchmark
 
 `make perf-startup` runs [hack/perf-startup.sh](../../../hack/perf-startup.sh)
 against the current kubeconfig context. It needs a cluster prepared as for
-the [KVM e2e test](../../e2e/README.md) (KubeSwift v0.16.0, the only version tested: the warm-slot labels and
-launcher patterns are v0.16.0 specific; Spin
-Operator, kubeswift-spin, a Ready SwiftKernel `sandbox` in the namespace),
+the [KVM e2e test](../../e2e/README.md) (KubeSwift v0.16.0 or v0.16.1, the
+versions tested, because the warm-slot labels and launcher patterns are
+specific to them; Spin Operator, kubeswift-spin, a Ready SwiftKernel
+`sandbox` in the namespace),
 `kubectl`, and either a startupbench image the node can pull or `docker`
 and a registry to push one to:
 
@@ -100,14 +123,16 @@ The comment at the top of the script lists every variable.
   `startupbench-warm` (the controller's runtime image, 1 vCPU, 256Mi, the
   same node), created after the cold runs. Before each warm run
   startupbench waits until the slot's pod is at least 30 seconds old,
-  because KubeSwift v0.16.0 can hand out a slot whose guest is not ready
-  yet (see
+  because KubeSwift v0.16.0 and v0.16.1 can hand out a slot whose guest is
+  not ready yet (see
   [compatibility.md](../../../docs/compatibility.md#known-upstream-issues)),
-  and then a random time below 2 seconds (`-start-jitter`). KubeSwift checks
-  a slot for new work every 2 seconds; without the jitter every run would
-  start at about the same point of that cycle and the warm results would
-  be biased. A warm run that did not check out a slot is reported but
-  excluded from the summary.
+  and then a random time below 2 seconds
+  (`-start-jitter`). KubeSwift v0.16.0 checks a slot for new work every 2
+  seconds; without the jitter every run would start at about the same point
+  of that cycle and the warm results would be biased. KubeSwift v0.16.1
+  starts the work as soon as the API server delivers it; the jitter is kept
+  so that results stay comparable across versions. A warm run that did not
+  check out a slot is reported but excluded from the summary.
 
 Cold runs measure a cold boot with the runtime image already cached on the
 node; the first cold run after a runtime image change also includes the

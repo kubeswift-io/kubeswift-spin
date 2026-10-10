@@ -23,13 +23,13 @@ architecture and the core execution path on real KVM hardware and is meant
 for evaluation and integration testing while the project builds broader
 compatibility and operational experience. It is not production-ready.
 
-Tested on linux/amd64 only, with KubeSwift v0.16.0, Spin Operator v0.6.1
-and Kubernetes 1.34 (one k0s lab cluster with Calico). arm64 images are
-built and published but not validated.
+Tested on linux/amd64 only, with KubeSwift v0.16.0 and v0.16.1, Spin
+Operator v0.6.1 and Kubernetes 1.34 (one k0s lab cluster with Calico).
+arm64 images are built and published but not validated.
 [docs/compatibility.md](docs/compatibility.md) lists what was tested and the support status of every SpinApp field.
 
-What works on KubeSwift v0.16.0, exercised by the KVM end-to-end test
-([test/e2e](test/e2e/README.md)):
+What works on KubeSwift v0.16.0 and v0.16.1, exercised by the KVM
+end-to-end test ([test/e2e](test/e2e/README.md)):
 
 - HTTP SpinApps become `Available` and are reached through the Service
   Spin Operator creates; `readyReplicas` follows KubeSwift's readiness
