@@ -63,11 +63,16 @@ func TestCreateTranslatesSpinApp(t *testing.T) {
 	if len(sb.Spec.Env) != 1 || sb.Spec.Env[0].Name != "SPIN_VARIABLE_GREETING" {
 		t.Fatalf("env %+v", sb.Spec.Env)
 	}
-	// The envtest API server serves the KubeSwift v0.16.0 CRDs, so the
+	// The envtest API server serves the KubeSwift v0.16.2 CRDs, so the
 	// detector finds exposure and the sandbox is built for a Service.
 	if len(sb.Spec.Network.Ports) != 1 || sb.Spec.Network.Ports[0].Name != "http-app" || sb.Spec.ReadinessProbe == nil ||
 		sb.Spec.PodMetadata == nil || sb.Spec.PodMetadata.Labels["core.spinkube.dev/app.hello.status"] != "ready" {
 		t.Fatalf("sandbox not exposed: ports %+v probe %+v pod metadata %+v", sb.Spec.Network.Ports, sb.Spec.ReadinessProbe, sb.Spec.PodMetadata)
+	}
+	// The SpinApp sets no readiness check, so the check kubeswift-spin adds
+	// is retried quickly until it first passes (KubeSwift defaults).
+	if rs := sb.Spec.ReadinessStartup; rs == nil || rs.Interval != nil || rs.Window != nil {
+		t.Fatalf("readinessStartup %+v", rs)
 	}
 	for k, v := range map[string]string{
 		translate.LabelManagedBy: translate.ManagedByValue, translate.LabelApp: "hello",
@@ -120,7 +125,7 @@ func TestLegacyKubeSwiftReportsNetworkUnavailable(t *testing.T) {
 	ns := newNamespace(t)
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
 	expectSandboxes(t, ns, "hello-0")
-	if sb := getSandbox(t, ns, "hello-0"); sb.Spec.Network.Ports != nil || sb.Spec.ReadinessProbe != nil || sb.Spec.PodMetadata != nil {
+	if sb := getSandbox(t, ns, "hello-0"); sb.Spec.Network.Ports != nil || sb.Spec.ReadinessProbe != nil || sb.Spec.PodMetadata != nil || sb.Spec.ReadinessStartup != nil {
 		t.Fatalf("v0.16.0 fields used without the feature: %+v", sb.Spec)
 	}
 	setReady(t, ns, "hello-0")

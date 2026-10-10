@@ -214,3 +214,43 @@ func TestParseEgressAndIngress(t *testing.T) {
 		}
 	}
 }
+
+func TestParseReadinessStartup(t *testing.T) {
+	p, err := Parse(managed("kubeswift", nil), defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ReadinessStartup != ReadinessStartupAuto {
+		t.Fatalf("default %q, want %q", p.ReadinessStartup, ReadinessStartupAuto)
+	}
+	for _, v := range []string{ReadinessStartupAuto, ReadinessStartupOn, ReadinessStartupOff} {
+		p, err := Parse(managed("kubeswift", map[string]string{AnnReadinessStartup: v}), defaults())
+		if err != nil || p.ReadinessStartup != v {
+			t.Fatalf("%q: %v %+v", v, err, p)
+		}
+	}
+	for _, v := range []string{"", "true", "ON", "100ms"} {
+		if _, err := Parse(managed("kubeswift", map[string]string{AnnReadinessStartup: v}), defaults()); err == nil {
+			t.Errorf("%q accepted", v)
+		}
+	}
+
+	on, err := Parse(managed("kubeswift", map[string]string{AnnReadinessStartup: ReadinessStartupOn}), defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	v0161 := capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true}
+	if err := on.CheckFeatures(v0161); err == nil || !strings.Contains(err.Error(), "v0.16.2") {
+		t.Fatalf("on without spec.readinessStartup: %v", err)
+	}
+	v0162 := v0161
+	v0162.ReadinessStartup = true
+	if err := on.CheckFeatures(v0162); err != nil {
+		t.Fatal(err)
+	}
+	// "auto" falls back to whole-second checks on an older KubeSwift.
+	auto, _ := Parse(managed("kubeswift", nil), defaults())
+	if err := auto.CheckFeatures(v0161); err != nil {
+		t.Fatal(err)
+	}
+}

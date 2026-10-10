@@ -13,6 +13,8 @@ import (
 
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
+	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 )
@@ -254,5 +256,61 @@ func TestPoolComparesPortsAndEgress(t *testing.T) {
 	pool.Spec.Network.Ingress = nil
 	if mm := PoolMismatches(spec, "apps", pool); len(mm) != 0 {
 		t.Fatalf("empty ingress and no ingress reported %v", mm)
+	}
+}
+
+func TestReadinessStartup(t *testing.T) {
+	v162 := v16
+	v162.ReadinessStartup = true
+	withCheck := func() *spinv1alpha1.SpinApp {
+		a := testApp()
+		a.Spec.Checks.Readiness = &spinv1alpha1.HealthProbe{
+			HTTPGet:             &spinv1alpha1.HTTPHealthProbe{Path: "/healthz"},
+			InitialDelaySeconds: 10, PeriodSeconds: 2,
+		}
+		return a
+	}
+	cases := []struct {
+		name   string
+		app    *spinv1alpha1.SpinApp
+		policy string
+		caps   capabilities.Sandbox
+		want   bool
+	}{
+		{"auto, own check", testApp(), "", v162, true},
+		{"auto explicit, own check", testApp(), executor.ReadinessStartupAuto, v162, true},
+		{"auto, SpinApp check keeps its initialDelaySeconds", withCheck(), executor.ReadinessStartupAuto, v162, false},
+		{"on, SpinApp check", withCheck(), executor.ReadinessStartupOn, v162, true},
+		{"off, own check", testApp(), executor.ReadinessStartupOff, v162, false},
+		{"auto, KubeSwift without readinessStartup", testApp(), executor.ReadinessStartupAuto, v16, false},
+		{"on, KubeSwift without readinessStartup", withCheck(), executor.ReadinessStartupOn, v16, false},
+	}
+	for _, c := range cases {
+		p := testProfile()
+		p.ReadinessStartup = c.policy
+		tmpl, err := BuildTemplate(c.app, p, DefaultResourcePolicy(), c.caps)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		got := tmpl.Spec.ReadinessStartup != nil
+		if got != c.want {
+			t.Errorf("%s: readinessStartup %v, want %v", c.name, got, c.want)
+		}
+		if got && (tmpl.Spec.ReadinessStartup.Interval != nil || tmpl.Spec.ReadinessStartup.Window != nil) {
+			t.Errorf("%s: interval or window set; KubeSwift defaults are intended", c.name)
+		}
+		if tmpl.Spec.ReadinessProbe == nil {
+			t.Errorf("%s: no readiness probe", c.name)
+		}
+	}
+	// The user's check is passed through unchanged even when "on".
+	p := testProfile()
+	p.ReadinessStartup = executor.ReadinessStartupOn
+	tmpl, err := BuildTemplate(withCheck(), p, DefaultResourcePolicy(), v162)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rp := tmpl.Spec.ReadinessProbe; rp.InitialDelaySeconds != 10 || rp.PeriodSeconds != 2 || rp.HTTPGet == nil || rp.HTTPGet.Path != "/healthz" {
+		t.Fatalf("readiness probe changed: %+v", rp)
 	}
 }

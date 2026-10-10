@@ -103,6 +103,9 @@ type Sandbox struct {
 	// Egress is true when spec.network.egress exists (restricted-mode
 	// allowlist).
 	Egress bool
+	// ReadinessStartup is true when spec.readinessStartup exists: the
+	// readiness probe can run at a sub-second interval until its first pass.
+	ReadinessStartup bool
 }
 
 // Exposure reports whether every feature needed to put sandboxes behind a
@@ -203,7 +206,9 @@ func ParseSandboxSchema(raw []byte) (Sandbox, error) {
 	_, probe := spec.Properties["readinessProbe"]
 	_, podMeta := spec.Properties["podMetadata"]
 	_, secretFiles := spec.Properties["secretFiles"]
-	return Sandbox{Ports: ports, ReadinessProbe: probe, PodMetadata: podMeta, SecretFiles: secretFiles, Egress: egress}, nil
+	_, startup := spec.Properties["readinessStartup"]
+	return Sandbox{Ports: ports, ReadinessProbe: probe, PodMetadata: podMeta, SecretFiles: secretFiles, Egress: egress,
+		ReadinessStartup: startup}, nil
 }
 
 // Static is a SandboxDetector returning fixed features, for tests and for

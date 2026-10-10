@@ -65,6 +65,19 @@ const (
 	// the Spin HTTP port (SwiftSandbox spec.network.ingress.from). Without
 	// it any source may. KubeSwift v0.16.0.
 	AnnIngressFrom = Prefix + "ingress-from"
+	// AnnReadinessStartup selects when a replica's readiness check is
+	// retried quickly from the replica's start until it first passes
+	// (KubeSwift spec.readinessStartup, v0.16.2): "auto" (the default) for
+	// the check kubeswift-spin adds when a SpinApp sets none, "on" also for
+	// a SpinApp's own readiness check, "off" never.
+	AnnReadinessStartup = Prefix + "readiness-startup"
+)
+
+// ReadinessStartup values of AnnReadinessStartup.
+const (
+	ReadinessStartupAuto = "auto"
+	ReadinessStartupOn   = "on"
+	ReadinessStartupOff  = "off"
 )
 
 // knownAnnotations is the complete set of profile annotations. Any other
@@ -83,6 +96,7 @@ var knownAnnotations = map[string]bool{
 	AnnDefaultMemory:          true,
 	AnnEgressAllow:            true,
 	AnnIngressFrom:            true,
+	AnnReadinessStartup:       true,
 }
 
 // KnownAnnotations returns the supported profile annotation keys, sorted.
@@ -127,6 +141,10 @@ type Profile struct {
 	// EgressAllow and IngressFrom come from AnnEgressAllow and AnnIngressFrom.
 	EgressAllow []sandboxv1alpha1.SandboxEgressRule
 	IngressFrom []networkingv1.NetworkPolicyPeer
+
+	// ReadinessStartup is AnnReadinessStartup: ReadinessStartupAuto,
+	// ReadinessStartupOn or ReadinessStartupOff.
+	ReadinessStartup string
 }
 
 // CheckFeatures reports profile settings the installed KubeSwift cannot
@@ -138,6 +156,9 @@ func (p *Profile) CheckFeatures(f capabilities.Sandbox) error {
 	}
 	if len(p.IngressFrom) > 0 && !f.Exposure() {
 		problems = append(problems, fmt.Sprintf("annotation %s needs sandbox port exposure, KubeSwift v0.16.0 or later", AnnIngressFrom))
+	}
+	if p.ReadinessStartup == ReadinessStartupOn && !f.ReadinessStartup {
+		problems = append(problems, fmt.Sprintf("annotation %s=%s needs spec.readinessStartup, KubeSwift v0.16.2 or later", AnnReadinessStartup, ReadinessStartupOn))
 	}
 	if len(problems) > 0 {
 		return &ValidationError{Executor: p.ExecutorName, Problems: problems}
@@ -274,6 +295,17 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 			add("annotation %s must list between 1 and 16 peers", AnnIngressFrom)
 		} else {
 			p.IngressFrom = peers
+		}
+	}
+
+	p.ReadinessStartup = ReadinessStartupAuto
+	if v, ok := ann[AnnReadinessStartup]; ok {
+		switch v {
+		case ReadinessStartupAuto, ReadinessStartupOn, ReadinessStartupOff:
+			p.ReadinessStartup = v
+		default:
+			add("annotation %s must be %q, %q or %q, got %q", AnnReadinessStartup,
+				ReadinessStartupAuto, ReadinessStartupOn, ReadinessStartupOff, v)
 		}
 	}
 
