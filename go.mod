@@ -6,7 +6,7 @@ toolchain go1.26.9
 
 require (
 	github.com/google/go-containerregistry v0.22.1
-	github.com/kubeswift-io/kubeswift v0.16.0
+	github.com/kubeswift-io/kubeswift v0.16.1
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spinkube/spin-operator v0.6.1
