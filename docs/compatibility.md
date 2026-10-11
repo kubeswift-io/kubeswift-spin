@@ -7,7 +7,7 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.1.0-rc5, v0.1.0-rc3, v0.1.0-rc2 | all tests below; KVM runs used a development build before rc2, then the published v0.1.0-rc2, v0.1.0-rc3 and v0.1.0-rc5 artifacts; the other KubeSwift v0.16.2 runs used a development build of v0.1.0-rc5 (commit 7cb6d55); the KubeSwift v0.16.3 runs used the published v0.1.0-rc5 and a development build of v0.1.0-rc6 (commit 29d8bed) |
+| kubeswift-spin | v0.1.0-rc6, v0.1.0-rc5, v0.1.0-rc3, v0.1.0-rc2 | all tests below; KVM runs used a development build before rc2, then the published v0.1.0-rc2, v0.1.0-rc3, v0.1.0-rc5 and v0.1.0-rc6 artifacts; the other KubeSwift v0.16.2 runs used a development build of v0.1.0-rc5 (commit 7cb6d55); the KubeSwift v0.16.3 runs used the published v0.1.0-rc5 and a development build of v0.1.0-rc6 (commit 29d8bed) |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
@@ -295,6 +295,39 @@ isolation in [security-model.md](security-model.md#network-isolation)); the
 re-created SpinApp waited for its predecessor's sandbox without reporting
 `SandboxConflict`. `make verify-all` and `make kind-test WITH_SPIN_OPERATOR=1`
 passed.
+
+### v0.1.0-rc6 from published artifacts (2026-10-11)
+
+Same cluster with KubeSwift v0.16.3. The v0.1.0-rc6 controller image
+(`sha256:6338a8f0...`), the chart (`sha256:8550217f...`) and the hello-http
+example verified with cosign v3.0.6 against the release workflow identity of
+the tag; the runtime image is the `spin-4.2.1-r2` digest `sha256:5af1c06c...`,
+verified against the release that first built it. The previous Helm release
+was uninstalled (no cluster role, binding or executor was left) and v0.1.0-rc6
+installed with the README command from
+`oci://ghcr.io/kubeswift-io/charts/kubeswift-spin` version `0.1.0-rc6`; the
+controller ran the published digest, logged version v0.1.0-rc6 at commit
+e851a1f and detected exposure, secrets, egress, readiness startup and
+termination.
+
+- `test/e2e/kvm-e2e.sh` from the tag with phases 1, 2, 4 and 9 and the
+  published example artifacts passed all 29 checks: hello-http `Available`
+  in 11.7 seconds cold, scaling to 3 and to 2 replicas, a two-replica rolling
+  update with 0 failed requests out of 216, a Secret-backed variable, a
+  warm-pool checkout (12.0 seconds to `Available`, the first checkout of a
+  newly created pool) and teardown.
+- A single-replica rolling update of the hello-http example from the tag
+  under traffic through the Service: the surge replica was created first,
+  the rollout settled in 39 seconds, and no request failed out of 4,424.
+- `ingress-from` through a rolling update: a pod outside the peers got no
+  successful connection to the replica being replaced (0 of 132 attempts
+  during its drain, 0 of 36 before), while an allowed pod was served until
+  the drain ended.
+- A SpinApp deleted and created again at once under the same name waited for
+  its predecessor's terminating sandbox, without a `SandboxConflict` Event,
+  and its new sandbox ran its own launcher pod.
+- Afterwards no SpinApp, SwiftSandbox, pool or NetworkPolicy was left, and
+  the controller logged no error.
 
 ### Zero-loss rolling updates
 
