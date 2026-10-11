@@ -11,7 +11,7 @@ that ran; nothing else is implied.
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
-| KubeSwift | v0.16.2 | KVM e2e, rolling updates under traffic, startup benchmark and warm-pool functional checks on the lab cluster with the release images (below); contract test of `internal/sandboxapi` against the v0.16.2 Go types and CRDs; v0.16.2 sandbox CRDs in envtest. Required for readiness startup |
+| KubeSwift | v0.16.2 | KVM e2e, rolling updates under traffic, startup benchmark, readiness startup and warm-pool functional checks on the lab cluster with the release images (below); contract test of `internal/sandboxapi` against the v0.16.2 Go types and CRDs; v0.16.2 sandbox CRDs in envtest. Required for readiness startup |
 | KubeSwift | v0.16.1 | KVM e2e, startup benchmark and warm-pool functional checks on the lab cluster (below); its sandbox API types and CRDs are unchanged from v0.16.0 (release diff), and the contract test then ran against v0.16.0 |
 | KubeSwift | v0.16.0 | KVM e2e on a lab cluster (below); until v0.1.0-rc4, contract test of `internal/sandboxapi` and envtest CRDs at v0.16.0 |
 | KubeSwift | v0.15.1 | legacy mode only: unit and envtest tests with a feature detector that reports no optional features. Legacy mode uses only the API subset that was contract-tested against v0.15.1 before the module moved to v0.16.0. Not run on a v0.15.1 cluster since the v0.16.0 integration. |
@@ -190,6 +190,34 @@ runs, so every launcher was created by v0.16.1.
   more than two watch resyncs showed no repeated action. Deleting the SpinApps
   left no sandbox, pod, Service, NetworkPolicy, Role or ServiceAccount.
 - The kubeswift-spin controller logged no warning or error.
+
+### KubeSwift v0.16.2 (2026-10-11)
+
+Same cluster with KubeSwift v0.16.2 (release images, controller
+`sha256:ab9efa8f...`, swiftletd `sha256:6ea72a05...`), SwiftKernel
+`kernels/sandbox:6.6.16` (Linux 6.6.158), Spin Operator v0.6.1 and a
+development build of kubeswift-spin v0.1.0-rc5 (commit 7cb6d55), with the
+example artifacts of v0.1.0-rc4.
+
+- `test/e2e/kvm-e2e.sh` with all nine phases passed all 75 checks; phase 6
+  staged its test runtime image in a lab registry instead of a public
+  scratch registry. The two-replica rolling update in phase 1 had no failed
+  request (449 requests). In phase 4 the first checkout of the newly created
+  pool took 35.1 seconds to `Available`, as in the v0.16.1 run (see the
+  warm-pool issue under [Known upstream issues](#known-upstream-issues));
+  the cause was not recorded this time.
+- Examples beyond the e2e test: key-value (PUT and GET), outbound-http (an
+  in-cluster target refused in `restricted` mode) and the experimental MCP
+  server (`tools/list`) were `Available` and answered.
+- Warm pool with one slot and a two-replica SpinApp: one replica checked out
+  the slot, the other fell back to a cold sandbox, the Service answered, and
+  the pool refilled to one warm slot.
+- Readiness startup: see
+  [performance.md](performance.md#readiness-startup-kubeswift-v0162) for the
+  slow and never-ready application checks.
+- `ingress-from`: a pod outside the peers is refused while a replica runs,
+  but reaches a replica that is being deleted (see
+  [security-model.md](security-model.md#network-isolation)).
 
 ### Zero-loss rolling updates
 

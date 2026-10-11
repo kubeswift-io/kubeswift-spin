@@ -382,11 +382,15 @@ executor names a cosign key Secret.
   [compatibility.md](compatibility.md#known-upstream-issues)). In that
   window no sandbox policy selects the pod, so unless the namespace has its
   own default-deny ingress policy, any pod in the cluster can reach the Spin
-  port by pod IP and `ingress-from` is not enforced. Egress is not affected
-  (KubeSwift enforces it inside the pod). An administrator-managed
-  default-deny ingress NetworkPolicy in each SpinApp namespace, plus a
-  policy that admits the SpinApp's clients, closes the window. The upstream
-  proposal
+  port by pod IP and `ingress-from` is not enforced. Observed on the lab
+  cluster (KubeSwift v0.16.2, Calico): during a rolling update, a pod
+  outside the `ingress-from` peers, refused before, received HTTP 200 from
+  the replica being replaced for its whole 30-second termination. Egress is
+  not affected (KubeSwift enforces it inside the pod). An
+  administrator-managed default-deny ingress NetworkPolicy in each SpinApp
+  namespace, plus a policy that admits the SpinApp's clients to its launcher
+  pods (for example by the `core.spinkube.dev/app-name` label), should close
+  the window; that combination was not tested. The upstream proposal
   [kubeswift-sandbox-termination-drain.md](upstream/kubeswift-sandbox-termination-drain.md)
   asks KubeSwift to keep the policy until the pod is gone.
 - kubeswift-spin creates no NetworkPolicy, Service, EndpointSlice or proxy

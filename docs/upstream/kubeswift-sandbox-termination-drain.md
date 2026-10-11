@@ -52,7 +52,10 @@ The sandbox's NetworkPolicy must cover the whole drain. Today it is a
 controlled child of the SwiftSandbox, so deleting the sandbox removes it at
 once, while the launcher pod keeps serving for its grace period. In that
 window no sandbox policy selects the pod, and the port is reachable from
-any pod in the cluster (the `ingress` peers are not enforced). The policy
+any pod in the cluster (the `ingress` peers are not enforced). On the lab
+cluster (KubeSwift v0.16.2, Calico), a pod outside a sandbox's `ingress`
+peers received HTTP 200 from it for the whole 30-second termination after
+the sandbox was deleted. The policy
 should live as long as the launcher pod, for example by making the pod its
 owner, or by holding it with a finalizer until the pod is gone.
 
