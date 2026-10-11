@@ -577,8 +577,9 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   (v0.16.0) and in the KVM e2e run of 2026-10-09 (v0.16.1). The v0.16.2 and
   v0.16.3 release notes list no change for it. In the e2e runs the first
   checkout of a newly created pool took 35.1 and 35.3 seconds to
-  `Available` on v0.16.2 and 12.2 seconds on v0.16.3, against about 1.5
-  seconds from an established pool. Create pools some time before relying
+  `Available` on v0.16.2 and 12.2 seconds on v0.16.3, against about 3.1
+  seconds p50 to `Available` (1.6 without a readiness check) from an
+  established pool in the startup benchmark. Create pools some time before relying
   on warm starts.
 - **KubeSwift v0.16.0 and v0.16.1 log write conflicts as `Reconciler
   error`** at error level, although they retry them and converge (seen

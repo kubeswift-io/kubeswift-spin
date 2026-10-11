@@ -16,12 +16,15 @@ KubeSwift.
 
 ## Status
 
-v0.1.0 is the first release of kubeswift-spin. Its source is the validated
-v0.1.0-rc6 code; only documentation and version references changed. It requires KubeSwift
-v0.16.3 or later: KubeSwift drains a deleted replica and stops it
-explicitly, keeps its network isolation until it has stopped, and never
-gives a re-created sandbox the previous one's launcher, and the rolling
-updates and deletion below rely on that. Rolling updates keep
+v0.1.0 is the first release of kubeswift-spin that is not a pre-release.
+Its source is the validated v0.1.0-rc6 code; only documentation and version
+references changed. KubeSwift v0.16.3 or later is the supported baseline:
+KubeSwift drains a deleted replica and stops it explicitly, keeps its
+network isolation until it has stopped, and never gives a re-created
+sandbox the previous one's launcher, and the rolling updates and deletion
+below rely on that. On v0.16.0 to v0.16.2 SpinApps still run, with the
+limitations in
+[docs/compatibility.md](docs/compatibility.md#kubeswift-features). Rolling updates keep
 `spec.replicas` replicas available, including for a single replica, and a
 replica without a readiness check is ready about 0.1 seconds after Spin
 first answers. It was validated on one KVM lab cluster; evaluate it with
@@ -55,27 +58,30 @@ On KubeSwift v0.15.1, SpinApps run but report `Available=False` with reason
 
 ### Known limitations
 
-- Validated on linux/amd64 only, on one KVM lab cluster. arm64 images are
-  published but have never been run.
+- Validated on linux/amd64 only, on one KVM lab cluster (see above).
 - A deleted replica (rolling update, scale-down, deletion) keeps serving
   for KubeSwift's default drain of 5 seconds and is then stopped: a request
   still running after that is cut. kubeswift-spin does not change the
   drain period in this release.
-- Force-deleting a launcher pod, or other overrides of KubeSwift's normal
-  termination, bypass the drain and the isolation kept through it
-  ([security-model.md](docs/security-model.md#network-isolation)).
-- The first checkout from a newly created warm pool is much slower than a
-  checkout from an already-warm pool (about 12 seconds to `Available` in
-  the e2e runs, against about 3.2 seconds p50 for an already-warm
-  checkout).
+- Force-deleting a launcher pod (`--force`) is not covered by the drain or
+  by the isolation kept through it: its guest may still run after its
+  NetworkPolicy is removed (not tested; see
+  [security-model.md](docs/security-model.md#network-isolation)).
+- The first checkout from a newly created warm pool is much slower than
+  one from an established pool: 12.0 and 12.2 seconds to `Available` in the
+  two KubeSwift v0.16.3 e2e runs (which poll every 3 seconds), against
+  3.15 seconds p50 in the startup benchmark from an established pool
+  (1.60 seconds without a readiness check). Create pools some time before
+  relying on warm starts.
 - Reaching a new replica through its Service also waits for Kubernetes to
-  route to it (kube-proxy rule syncs, at most once per second by default).
+  route to it (kube-proxy in iptables or nftables mode syncs its rules at
+  most once per `minSyncPeriod`, 1 second by default).
   Lowering kube-proxy's `minSyncPeriod` is optional cluster configuration
   that kubeswift-spin does not require.
 - Startup figures in [performance.md](docs/performance.md) are lab
   measurements, not guarantees. The Wasmtime compilation cache measured
-  there is diagnostic research; v0.1.0 does not ship or populate a
-  compilation cache.
+  there is diagnostic research; v0.1.0 does not ship a prebuilt
+  compilation cache, and every sandbox starts with an empty one.
 
 Read [why kubeswift-spin](docs/why-kubeswift-spin.md) for when a microVM
 around a Wasm application is worth its cost, and when standard SpinKube is

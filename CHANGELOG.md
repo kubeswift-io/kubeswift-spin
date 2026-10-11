@@ -9,7 +9,7 @@ running replicas on upgrade) say so under "Upgrade notes".
 
 ## v0.1.0 (2026-10-11)
 
-First release. The source is v0.1.0-rc6 (commit e851a1f) with only
+First release that is not a pre-release. The source is v0.1.0-rc6 (commit e851a1f) with only
 documentation and version references changed: no change to the controller,
 the chart templates, the runtime image or any API.
 
@@ -17,13 +17,16 @@ the chart templates, the runtime image or any API.
 
 - Upgrading from v0.1.0-rc6 changes no rendered SwiftSandbox spec, so it
   replaces no replica. The runtime image stays `spin-4.2.1-r2`.
-- KubeSwift v0.16.3 or later is required (see v0.1.0-rc6).
+- KubeSwift v0.16.3 or later is the supported baseline; on v0.16.0 to
+  v0.16.2 kubeswift-spin still runs with the limitations listed under
+  v0.1.0-rc6.
 
 ### Changed
 
 - The README states the release status and the known limitations; the
   chart version, install commands, example manifests (now the `v0.1.0`
-  example artifacts) and the release guide use v0.1.0.
+  example artifacts), the e2e test's default `EXAMPLES_TAG` and the release
+  guide use v0.1.0.
 
 ## v0.1.0-rc6 (2026-10-11)
 

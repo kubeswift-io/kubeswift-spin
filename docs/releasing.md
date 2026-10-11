@@ -64,8 +64,9 @@ Configure these before the first release:
    upgrade note: every replica using the default runtime image is replaced.
    Otherwise leave both unchanged, so the release does not replace running
    replicas.
-6. Tag and push. A tag with a pre-release suffix (such as `v0.1.0-rc6`)
-   produces a pre-release:
+6. Tag and push. A tag without a suffix (`v0.1.0`) produces a regular
+   release; a tag with a pre-release suffix (such as `v0.1.0-rc6`) produces
+   a pre-release. No `latest` image tag is pushed for either:
 
    ```bash
    git tag -s v0.1.0 -m v0.1.0
@@ -114,12 +115,18 @@ cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0 \
   --certificate-identity https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v0.1.0
 ```
 
-The same command verifies
-`ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r2` (signed by
-the release that first built it: v0.1.0-rc4 for `spin-4.2.1-r2`, v0.1.0-rc1
-for `spin-4.2.1-r1`),
+The same command, with only the image reference changed, verifies
 `ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0` and
-`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0`.
+`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0`. The
+runtime image is signed by the release that first built it (v0.1.0-rc4
+for `spin-4.2.1-r2`, v0.1.0-rc1 for `spin-4.2.1-r1`), so its identity
+names that tag:
+
+```bash
+cosign verify ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r2 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v0.1.0-rc4
+```
 
 Provenance attestations:
 
