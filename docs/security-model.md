@@ -133,7 +133,7 @@ Secrets (SpinApps, SwiftSandboxes, Pods and their command lines, ConfigMaps,
 Events, NetworkPolicies), the Events of all namespaces, and the logs of the
 kubeswift-spin controller, the KubeSwift system pods and the launcher pods
 for the value and its base64 encodings. None was found; see
-[compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05).
+[compatibility.md](compatibility.md#validation-of-v010).
 
 Trust consequences:
 
@@ -238,13 +238,14 @@ application.
   identity. Tag creation is therefore restricted to maintainers by a
   repository ruleset (see [releasing.md](releasing.md#repository-settings)),
   and verifiers should check the exact certificate identity of the tag
-  they verify, not a pattern. The release jobs build multi-architecture
-  images with BuildKit SBOM and provenance attestations, sign the images,
-  the chart and the example artifacts with cosign keyless signing, and pin
-  the image digests into the published chart. v0.1.0-rc2 is the first
-  complete run of the release workflow. An existing
-  runtime image is reused only after `cosign verify` confirms it was signed
-  by this release workflow. Jobs that run third-party build code (cargo)
+  they verify, not a pattern (the runtime image, reused across releases,
+  is the exception; see
+  [releasing.md](releasing.md#verifying-a-release)). The release jobs
+  build multi-architecture images with BuildKit SBOM and provenance
+  attestations, sign the images, the chart and the example artifacts with
+  cosign keyless signing, and pin the image digests into the published
+  chart. An existing runtime image is reused only after `cosign verify`
+  confirms it was signed by this release workflow. Jobs that run third-party build code (cargo)
   have read-only tokens; checkouts do not persist credentials, except in
   the OSV pull request scan, whose upstream reusable workflow keeps its
   token (`contents: read`, `actions: read`, `security-events: write`) to

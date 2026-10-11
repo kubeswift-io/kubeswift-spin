@@ -543,8 +543,8 @@ these replaces the replicas (one at a time, as in
   replica is replaced once. The controller re-reads the schema at most every
   `--capability-refresh` (default 5 minutes); a failed read keeps the last
   result, so a transient error never changes the spec
-- the first reconcile of kubeswift-spin v0.1.0-rc5 or later on KubeSwift
-  v0.16.2 or later (upgrading either one): replicas whose readiness check
+- the first reconcile on KubeSwift v0.16.2 or later after upgrading
+  KubeSwift from an earlier version: replicas whose readiness check
   gets `readinessStartup` (the TCP check kubeswift-spin adds, or every check
   with `readiness-startup: always`) are replaced once. The same holds for
   changing the `spin.kubeswift.io/readiness-startup` annotation

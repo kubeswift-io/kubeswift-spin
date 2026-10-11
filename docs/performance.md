@@ -42,18 +42,6 @@ Two stage terms are used below:
   until its HTTP listener answers. For an application referenced from a
   registry it includes the pull, which Spin performs at every start.
 
-### The 19 to 26 second figure
-
-Releases before v0.1.0-rc4 quoted "19 to 26 seconds" for a cold start. That
-was the time to `Available` printed by the KVM e2e test, which then polled
-every 3 seconds, for a hello-http SpinApp whose readiness check used Spin
-Operator's default `initialDelaySeconds` of 10. Measured afterwards with
-startupbench on the same cluster with that default, a cold hello-http
-replica first answered directly after 9.98 seconds and was `Available` after
-18.87 seconds (p50, KubeSwift v0.16.0; see [Readiness
-configuration](#readiness-configuration)); the rest of the quoted figure was
-the polling. It was never the time until the application could serve.
-
 ## How it is measured
 
 [startupbench](../test/perf/startupbench/README.md) creates the SpinApp,
@@ -65,8 +53,7 @@ from one clock, and it deletes everything a run created before the next run
 starts. `make perf-startup` runs 10 cold and 10 warm runs by default.
 
 The durations printed by the KVM e2e test (`test/e2e/kvm-e2e.sh`) are
-functional indicators, not benchmark results (see
-[The 19 to 26 second figure](#the-19-to-26-second-figure)).
+functional indicators, not benchmark results.
 
 Spin runtime startup latency and the stages inside the guest are not
 visible to startupbench. They were measured once, on 2026-10-06, with a
@@ -75,7 +62,31 @@ Spin's own tracing; that build is not part of the repository.
 
 ## Current results
 
-### KubeSwift v0.16.2, kubeswift-spin v0.1.0-rc5 (2026-10-11)
+### KubeSwift v0.16.3 (2026-10-11)
+
+The cluster and configurations of the v0.16.2 results below, upgraded to
+the KubeSwift v0.16.3 release images, with a pre-release kubeswift-spin
+controller whose startup path is the same as in v0.1.0, the
+`spin-4.2.1-r2` runtime image and stock kube-proxy; 15 warm and 5 cold
+runs per configuration. A small population to detect a regression, not a
+new baseline:
+
+| Seconds from SpinApp creation, p50 | Shipped, warm | No check, warm | Shipped, cold | No check, cold |
+|---|---:|---:|---:|---:|
+| first direct response | 1.50 | 1.51 | 8.95 | 9.10 |
+| `Available` | 3.15 | 1.60 | 10.70 | 9.24 |
+| first Service response | 3.31 | 2.21 | 11.12 | 9.61 |
+
+Each value is below the v0.16.2 p50 or between its p50 and p95 below.
+v0.16.3 also changed the cold start path (the NetworkPolicy is created
+before the launcher pod, and a node's runtime image cache is authorized per
+repository, which made the first cold start per node read the image's
+layers once); after that first start, these runs show no change in startup.
+The Wasmtime cache diagnostic below, repeated with 10 warm runs, gave p50
+values of 0.385 seconds to the first direct response, 0.487 to `Available`
+and 1.444 to the first Service response, close to its 30-run result.
+
+### KubeSwift v0.16.2 (2026-10-11)
 
 Environment:
 
@@ -85,8 +96,7 @@ Environment:
   of 1 second
 - KubeSwift v0.16.2 release images, SwiftKernel `kernels/sandbox:6.6.16`
   (Linux 6.6.158); Spin Operator v0.6.1; a development build of
-  kubeswift-spin commit 7cb6d55 (v0.1.0-rc5 code, before release) and the
-  `spin-4.2.1-r2` runtime image
+  kubeswift-spin (commit 7cb6d55) and the `spin-4.2.1-r2` runtime image
 - the canonical [hello-http SpinApp](../examples/hello-http/spinapp.yaml)
   (1 vCPU, 256Mi), application artifact `sha256:5016dcb7...` pulled from
   `ghcr.io` by Spin at every start
@@ -99,8 +109,7 @@ Three readiness configurations, 30 warm runs and 10 cold runs each:
 - *shipped*: the example as published, with its `/healthz` readiness check
   (`initialDelaySeconds: 1`, `periodSeconds: 2`) and the default
   `spin.kubeswift.io/readiness-startup: auto`. kubeswift-spin passes an
-  explicit check through unchanged, so this is the same configuration as
-  in v0.1.0-rc4.
+  explicit check through unchanged.
 - *no check*: the same SpinApp without `spec.checks`. kubeswift-spin adds a
   TCP readiness check on the Spin port and, with `auto`, KubeSwift's
   readiness startup (probe every 100 ms from the start of Spin until the
@@ -129,28 +138,6 @@ The cold runs are a sanity check; 10 runs give no meaningful p95.
 The raw results are in
 [performance-results/2026-10-11-kubeswift-v0.16.2](performance-results/2026-10-11-kubeswift-v0.16.2/).
 
-### KubeSwift v0.16.3 sanity check (2026-10-11)
-
-The same cluster, upgraded to the KubeSwift v0.16.3 release images, with the
-published kubeswift-spin v0.1.0-rc5 controller and runtime image, stock
-kube-proxy, 15 warm and 5 cold runs per configuration. A small population
-to detect a regression, not a new baseline:
-
-| Seconds from SpinApp creation, p50 | Shipped, warm | No check, warm | Shipped, cold | No check, cold |
-|---|---:|---:|---:|---:|
-| first direct response | 1.50 | 1.51 | 8.95 | 9.10 |
-| `Available` | 3.15 | 1.60 | 10.70 | 9.24 |
-| first Service response | 3.31 | 2.21 | 11.12 | 9.61 |
-
-Each value is below the v0.16.2 p50 or between its p50 and p95 above.
-v0.16.3 also changed the cold start path (the NetworkPolicy is created
-before the launcher pod, and a node's runtime image cache is authorized per
-repository, which made the first cold start per node read the image's
-layers once); after that first start, these runs show no change in startup.
-The Wasmtime cache diagnostic below, repeated with 10 warm runs, gave p50
-values of 0.385 seconds to the first direct response, 0.487 to `Available`
-and 1.444 to the first Service response, close to its 30-run result.
-
 ## Earlier results
 
 Environment for the KubeSwift v0.16.1 and v0.16.0 result sets below:
@@ -158,14 +145,13 @@ Environment for the KubeSwift v0.16.1 and v0.16.0 result sets below:
 - cluster: k0s Kubernetes v1.34.3, Calico, containerd 1.7.30, Ubuntu 24.04
   with kernel 6.8; benchmark and sandboxes on one KVM node with 8 CPUs
   and 64 GiB
-- Spin Operator v0.6.1, kubeswift-spin v0.1.0-rc3 (controller and runtime
-  image, Spin 4.2.1)
+- Spin Operator v0.6.1, a pre-release kubeswift-spin build with the
+  `spin-4.2.1-r1` runtime image (Spin 4.2.1)
 - the canonical [hello-http SpinApp](../examples/hello-http/spinapp.yaml):
   1 vCPU, 256Mi, readiness check on `/healthz` with
-  `initialDelaySeconds: 1` and `periodSeconds: 2`, application artifact
-  `v0.1.0-rc3` pulled from `ghcr.io` by Spin at every start (by tag for
-  KubeSwift v0.16.0; by that tag's digest, `sha256:5016dcb7...`, for
-  v0.16.1)
+  `initialDelaySeconds: 1` and `periodSeconds: 2`, the published
+  hello-http application artifact (`sha256:5016dcb7...`) pulled from
+  `ghcr.io` by Spin at every start
 - cold: the sandbox boots a microVM; the runtime image is already cached
   on the node
 - warm: a one-slot SwiftSandboxPool with a slot started at least 30 seconds
@@ -355,7 +341,7 @@ With `never`, a fast replica was ready 0.46 seconds after it first
 answered, at its periodic probe. No replica received Service traffic
 before its endpoint was ready.
 
-## Wasmtime compilation cache (measured once, not provided)
+## Wasmtime compilation cache (diagnostic, not provided)
 
 Spin compiles the application's WebAssembly with Wasmtime at every start
 unless Wasmtime's compilation cache already holds the result. In a fresh
@@ -427,7 +413,7 @@ response 1,518 ms p50.
 With KubeSwift v0.16.0 the warm path to the first response was mostly two
 items: the launcher's 2-second check for new work and the application pull.
 KubeSwift v0.16.1 removed the first: slot claim to workload start is 30 ms p50
-(see [Current results](#warm-pool-kubeswift-v0161-2026-10-08)). What remains
+(see [Earlier results](#warm-pool-kubeswift-v0161-2026-10-08)). What remains
 is in the guest: workload start to the first direct response is 1,480 ms p50;
 in the v0.16.0 investigation the application pull alone took about 0.95
 seconds of the guest path. With the application in the guest instead of in a

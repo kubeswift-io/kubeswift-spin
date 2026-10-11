@@ -6,8 +6,8 @@ do. It is the only test in this repository that runs SpinApps in KubeSwift
 sandboxes; the envtest and kind tests stand in for KubeSwift, and the
 runtime image test runs Spin in Docker.
 
-It passed on a lab cluster on 2026-10-05 with KubeSwift v0.16.0 and all
-nine phases; see [Lab result](#lab-result).
+It has passed all nine phases on the KVM lab cluster; see
+[Lab result](#lab-result).
 
 ## Phases
 
@@ -58,7 +58,7 @@ seconds. Startup latency is measured with `make perf-startup` (see
 - the hello-http, request-info, serverless-ai and outbound-http artifacts
   under one registry prefix the sandboxes can pull from without
   credentials. The defaults (`EXAMPLES`, `EXAMPLES_TAG`) name the artifacts
-  published by the v0.1.0-rc6 release. To test other builds, push them to
+  published by the v0.1.0 release. To test other builds, push them to
   your registry and set `EXAMPLES` and `EXAMPLES_TAG`, for example:
 
 ```bash
@@ -95,7 +95,7 @@ make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 |---|---|---|
 | `E2E_NAMESPACE` | `kubeswift-spin-e2e` | namespace with the executor and the SwiftKernel |
 | `EXAMPLES` | `ghcr.io/kubeswift-io/kubeswift-spin-examples` | registry prefix of the example artifacts |
-| `EXAMPLES_TAG` | `v0.1.0-rc6` | tag of the example artifacts |
+| `EXAMPLES_TAG` | `v0.1.0` | tag of the example artifacts |
 | `EXECUTOR` | `kubeswift` | executor for phases 1 to 3 |
 | `TIMEOUT` | `300` | seconds to wait for each step |
 | `E2E_PHASES` | `1 2 3 5 7 8 9` | phases to run; when set, `E2E_WARM_POOL` and `E2E_SCRATCH_REGISTRY` add no phases |
@@ -109,28 +109,18 @@ make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 The script uses the current kubeconfig context. From the repository root:
 
 ```bash
-E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.1.0-rc6 E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh test/e2e/kvm-e2e.sh
+E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.1.0 E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh test/e2e/kvm-e2e.sh
 ```
 
 `make e2e` runs the same script and passes these variables through.
 
 ## Lab result
 
-On 2026-10-05 the script passed every check with all nine phases
-(`E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh`) on a k0s Kubernetes v1.34.3
-cluster with three linux/amd64 nodes (two kernel nodes with KVM) and Calico,
-KubeSwift v0.16.0, cert-manager v1.21.1 and Spin Operator v0.6.1, with a
-kubeswift-spin development build from `charts/kubeswift-spin`. The timings
-are in
-[compatibility.md](../../docs/compatibility.md#kvm-e2e-lab-run-2026-10-05).
-On 2026-10-09 it passed all 75 checks again on the same cluster with
-KubeSwift v0.16.1 and the published v0.1.0-rc3 artifacts (see
-[compatibility.md](../../docs/compatibility.md#kubeswift-v0161-2026-10-08-and-2026-10-09)).
-On 2026-10-11 it passed all checks on the same cluster with KubeSwift
-v0.16.2 (75 checks) and KubeSwift v0.16.3 (23 checks for phases 1 and 2, 55
-for phases 3 to 9, the latter with the retrying HTTP helpers); see
-[compatibility.md](../../docs/compatibility.md#kubeswift-v0163-2026-10-11).
-Not covered: arm64.
+The script passed every check of all nine phases on the KVM lab cluster
+described in
+[compatibility.md](../../docs/compatibility.md#validation-of-v010), with
+KubeSwift v0.16.3 and the v0.1.0 source. Earlier builds also passed it on
+KubeSwift v0.16.0, v0.16.1 and v0.16.2. Not covered: arm64.
 
 ## CI
 

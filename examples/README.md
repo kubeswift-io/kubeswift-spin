@@ -49,7 +49,7 @@ Spin applications are published as Spin OCI artifacts with
 `spin registry push`. The release workflow publishes the examples to
 `ghcr.io/kubeswift-io/kubeswift-spin-examples/<name>:<version>`, where
 `<name>` is the application name in `spin.toml` (`mcp-tools` for
-experimental/mcp), and each `spinapp.yaml` references the v0.1.0-rc6
+experimental/mcp), and each `spinapp.yaml` references the v0.1.0
 artifact. To deploy a published example, from the repository root:
 
 ```bash
@@ -60,11 +60,11 @@ To use your own registry, push the example and deploy it with the same
 registry and tag (`make example-deploy` rewrites `spec.image`):
 
 ```bash
-make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc6
+make example-push EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0
 ```
 
 ```bash
-make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0-rc6 NAMESPACE=<namespace>
+make example-deploy EXAMPLE=hello-http EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.1.0 NAMESPACE=<namespace>
 ```
 
 `EXAMPLE_REGISTRY` must start with a registry host. Spin pulls the artifact
@@ -74,12 +74,12 @@ private registry needs `spec.imagePullSecrets` (see
 
 ## What works in a KubeSwift sandbox today
 
-With KubeSwift v0.16.0 each SpinApp is reachable through the Service Spin
-Operator creates (`http://<app>.<namespace>.svc`), and becomes `Available`
+With KubeSwift v0.16.0 or later each SpinApp is reachable through the
+Service Spin Operator creates (`http://<app>.<namespace>.svc`), and becomes `Available`
 when its replicas pass the readiness check. The KVM e2e test
 ([test/e2e](../test/e2e/README.md)) ran on a lab cluster:
 
-| Example | In a KubeSwift v0.16.0 sandbox |
+| Example | In a KubeSwift v0.16.3 sandbox |
 |---|---|
 | hello-http | tested: readiness, Service, scaling, rolling update without failed requests, warm-pool checkout, private registry with `imagePullSecrets`, `ingress-from` |
 | request-info | tested: two replicas behind the Service, literal and Secret-backed variables |
