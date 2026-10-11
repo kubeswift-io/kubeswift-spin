@@ -69,7 +69,7 @@ their SpinApp status.
 | `SandboxConflict` | A SwiftSandbox with the needed name exists and is not owned by the SpinApp. Delete or rename it. |
 | `SandboxRejected` | The API server refused to create a SwiftSandbox: `Forbidden` (HTTP 403, for example a ResourceQuota on `count/swiftsandboxes.sandbox.kubeswift.io`) or `Invalid` (HTTP 422, for example an admission policy). The controller log has the full error, logged at the first refusal. A quota must leave room for `replicas + 1` sandboxes during a rolling update. The controller retries after 10 seconds, doubling up to 5 minutes. A pod quota that refuses the launcher pod appears as a KubeSwift reason on the sandbox instead. |
 | `RuntimeImageUnavailable` | KubeSwift could not pull, verify or materialize the runtime image. Check the image reference, pull secret and cosign key. |
-| `SandboxFailed` | Spin exited or the guest failed. Read the guest console (below). The replica is replaced after a backoff of up to 5 minutes. |
+| `SandboxFailed` | Spin exited or the guest failed. Read the guest console (below). The replica is replaced after a backoff of up to 5 minutes. If the SpinApp was deleted and created again under the same name less than 30 seconds earlier, the sandbox may have been attached to the previous replica's terminating launcher pod (a KubeSwift v0.16.2 issue, see [compatibility.md](compatibility.md#known-upstream-issues)); delete with `--cascade=foreground` before re-creating. |
 
 ## Sandboxes stay Pending
 

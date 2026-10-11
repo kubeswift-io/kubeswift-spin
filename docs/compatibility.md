@@ -322,6 +322,23 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   during the v0.16.1 benchmark runs)
   ([kubeswift-io/kubeswift#758](https://github.com/kubeswift-io/kubeswift/issues/758)).
   Do not alert on those lines alone.
+- **KubeSwift v0.16.2 attaches a new SwiftSandbox to a terminating launcher
+  pod that has its name.** KubeSwift finds a sandbox's launcher pod by name
+  and does not check that the pod belongs to that sandbox. When a
+  SwiftSandbox is deleted with background propagation (the `kubectl
+  delete` default, and what deleting a SpinApp does to its sandboxes), the
+  object disappears at once while its launcher pod keeps running for up to
+  30 seconds. A sandbox created with the same name in that window reports
+  the old pod's state, including `Running` and ready, and turns `Failed`
+  when that pod exits; kubeswift-spin then replaces it after the failure
+  backoff. Observed on the lab cluster when a SpinApp was deleted and
+  created again with the same name within 30 seconds: the new SpinApp was
+  `Available` on the previous app's terminating replica, then had no ready
+  replica until the replacement started. kubeswift-spin's own replacements
+  use foreground deletion and are not affected. Delete SpinApps and
+  SwiftSandboxes with `--cascade=foreground` before re-creating them under
+  the same name
+  ([kubeswift-io/kubeswift#772](https://github.com/kubeswift-io/kubeswift/issues/772)).
 - **KubeSwift v0.16.2 keeps a deleted sandbox's guest running until the
   launcher's termination grace period ends.** swiftletd answers SIGTERM by
   pressing the guest's ACPI power button, which the sandbox guest ignores,
