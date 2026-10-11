@@ -20,6 +20,7 @@ import (
 
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 	"github.com/kubeswift-io/kubeswift-spin/internal/status"
@@ -1068,4 +1069,29 @@ func TestTerminatingForeignSandboxIsAConflict(t *testing.T) {
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxConflict)
 	releaseFinalizer(t, ns, "hello-0")
+}
+
+func TestDrainPeriodAnnotation(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", map[string]string{executor.AnnDrainPeriod: "30s"}), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	sb := getSandbox(t, ns, "hello-0")
+	if sb.Spec.Termination == nil || sb.Spec.Termination.DrainPeriod == nil || sb.Spec.Termination.DrainPeriod.Duration != 30*time.Second {
+		t.Fatalf("termination %+v", sb.Spec.Termination)
+	}
+}
+
+func TestDrainPeriodNeedsKubeSwiftTermination(t *testing.T) {
+	v0162 := capabilities.Static{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true, ReadinessStartup: true}
+	startManager(t, harnessOpts{detector: v0162})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", map[string]string{executor.AnnDrainPeriod: "30s"}), spinApp(ns, "hello", "kubeswift", 1))
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonExecutorInvalid)
+	if msg := findCond(a, status.TypeProgressing).Message; !strings.Contains(msg, executor.AnnDrainPeriod) || !strings.Contains(msg, "v0.16.3") {
+		t.Fatalf("message %q", msg)
+	}
+	if n := len(listSandboxes(t, ns)); n != 0 {
+		t.Fatalf("%d sandboxes for an invalid executor", n)
+	}
 }

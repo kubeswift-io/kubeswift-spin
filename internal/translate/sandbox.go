@@ -167,6 +167,11 @@ func expose(spec *sandboxv1alpha1.SwiftSandboxSpec, app *spinv1alpha1.SpinApp, p
 		// after the window the check runs every periodSeconds as usual.
 		spec.ReadinessStartup = &sandboxv1alpha1.SandboxReadinessStartup{}
 	}
+	if p.DrainPeriod != nil && f.Termination {
+		// Only when the executor asks for it, so executors without the
+		// annotation keep the spec, and their replicas, unchanged.
+		spec.Termination = &sandboxv1alpha1.SandboxTermination{DrainPeriod: &metav1.Duration{Duration: *p.DrainPeriod}}
+	}
 }
 
 // useReadinessStartup reports whether a replica's readiness check is retried

@@ -398,7 +398,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 				// terminating under KubeSwift's finalizer: not a conflict,
 				// unless it takes far longer than KubeSwift allows.
 				age := now.Sub(held.DeletionTimestamp.Time)
-				if age < r.LeavingTimeout {
+				if age < r.leavingTimeout(profile) {
 					logger.V(1).Info("waiting for a terminating sandbox of the same name", "sandbox", sb.Name)
 					waitForName = true
 					continue
@@ -462,6 +462,16 @@ func rejectionReason(err error) (string, bool) {
 		return "Invalid", true
 	}
 	return "", false
+}
+
+// leavingTimeout is how long a predecessor's terminating sandbox may hold a
+// name: LeavingTimeout plus the executor's drain period, so a long drain is
+// not reported as a stuck sandbox.
+func (r *SpinAppReconciler) leavingTimeout(p *executor.Profile) time.Duration {
+	if p != nil && p.DrainPeriod != nil {
+		return r.LeavingTimeout + *p.DrainPeriod
+	}
+	return r.LeavingTimeout
 }
 
 // nameState is who holds a sandbox name this SpinApp wants to create.

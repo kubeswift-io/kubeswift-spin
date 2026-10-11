@@ -66,6 +66,8 @@ executors:
     #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: frontend}}
     # readinessStartup: auto      # auto (default), always (KubeSwift v0.16.2) or never; see
     #                             # docs/executor-contract.md#readiness-startup
+    # drainPeriod: 30s            # KubeSwift v0.16.3: how long a deleted replica keeps
+    #                             # serving after leaving the Service (default 5s)
     # otel:
     #   exporter_otlp_endpoint: http://otel-collector.observability:4318
 

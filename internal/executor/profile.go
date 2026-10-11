@@ -13,6 +13,7 @@ import (
 	"net"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -71,7 +72,15 @@ const (
 	// the check kubeswift-spin adds when a SpinApp sets none, "always" also
 	// for a SpinApp's own readiness check, "never" for none.
 	AnnReadinessStartup = Prefix + "readiness-startup"
+	// AnnDrainPeriod is how long a deleted replica keeps serving after it
+	// has left Service endpoints, before KubeSwift stops its microVM
+	// (SwiftSandbox spec.termination.drainPeriod, KubeSwift v0.16.3), as a
+	// duration from 0s to 10m. Unset leaves KubeSwift's default of 5s.
+	AnnDrainPeriod = Prefix + "drain-period"
 )
+
+// MaxDrainPeriod is KubeSwift's upper bound for spec.termination.drainPeriod.
+const MaxDrainPeriod = 10 * time.Minute
 
 // ReadinessStartup values of AnnReadinessStartup.
 const (
@@ -97,6 +106,7 @@ var knownAnnotations = map[string]bool{
 	AnnEgressAllow:            true,
 	AnnIngressFrom:            true,
 	AnnReadinessStartup:       true,
+	AnnDrainPeriod:            true,
 }
 
 // KnownAnnotations returns the supported profile annotation keys, sorted.
@@ -145,6 +155,9 @@ type Profile struct {
 	// ReadinessStartup is AnnReadinessStartup: ReadinessStartupAuto,
 	// ReadinessStartupAlways or ReadinessStartupNever.
 	ReadinessStartup string
+
+	// DrainPeriod is AnnDrainPeriod; nil leaves KubeSwift's default.
+	DrainPeriod *time.Duration
 }
 
 // CheckFeatures reports profile settings the installed KubeSwift cannot
@@ -159,6 +172,9 @@ func (p *Profile) CheckFeatures(f capabilities.Sandbox) error {
 	}
 	if p.ReadinessStartup == ReadinessStartupAlways && !f.ReadinessStartup {
 		problems = append(problems, fmt.Sprintf("annotation %s=%s needs spec.readinessStartup, KubeSwift v0.16.2 or later", AnnReadinessStartup, ReadinessStartupAlways))
+	}
+	if p.DrainPeriod != nil && !f.Termination {
+		problems = append(problems, fmt.Sprintf("annotation %s needs spec.termination, KubeSwift v0.16.3 or later", AnnDrainPeriod))
 	}
 	if len(problems) > 0 {
 		return &ValidationError{Executor: p.ExecutorName, Problems: problems}
@@ -306,6 +322,18 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 		default:
 			add("annotation %s must be %q, %q or %q, got %q", AnnReadinessStartup,
 				ReadinessStartupAuto, ReadinessStartupAlways, ReadinessStartupNever, v)
+		}
+	}
+
+	if v, ok := ann[AnnDrainPeriod]; ok {
+		d, err := time.ParseDuration(v)
+		switch {
+		case err != nil:
+			add("annotation %s must be a duration such as 30s or 2m, got %q", AnnDrainPeriod, v)
+		case d < 0 || d > MaxDrainPeriod:
+			add("annotation %s must be between 0s and %s, got %s", AnnDrainPeriod, MaxDrainPeriod, d)
+		default:
+			p.DrainPeriod = &d
 		}
 	}
 

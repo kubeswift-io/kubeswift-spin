@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -251,6 +252,37 @@ func TestParseReadinessStartup(t *testing.T) {
 	// "auto" falls back to whole-second checks on an older KubeSwift.
 	auto, _ := Parse(managed("kubeswift", nil), defaults())
 	if err := auto.CheckFeatures(v0161); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseDrainPeriod(t *testing.T) {
+	p, err := Parse(managed("kubeswift", nil), defaults())
+	if err != nil || p.DrainPeriod != nil {
+		t.Fatalf("default: %v %+v", err, p.DrainPeriod)
+	}
+	for v, want := range map[string]time.Duration{"0s": 0, "30s": 30 * time.Second, "2m": 2 * time.Minute, "10m": 10 * time.Minute} {
+		p, err := Parse(managed("kubeswift", map[string]string{AnnDrainPeriod: v}), defaults())
+		if err != nil || p.DrainPeriod == nil || *p.DrainPeriod != want {
+			t.Fatalf("%q: %v %+v", v, err, p.DrainPeriod)
+		}
+	}
+	for _, v := range []string{"", "30", "-1s", "11m", "1h", "soon"} {
+		if _, err := Parse(managed("kubeswift", map[string]string{AnnDrainPeriod: v}), defaults()); err == nil {
+			t.Errorf("%q accepted", v)
+		}
+	}
+	set, err := Parse(managed("kubeswift", map[string]string{AnnDrainPeriod: "30s"}), defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	v0162 := capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true, ReadinessStartup: true}
+	if err := set.CheckFeatures(v0162); err == nil || !strings.Contains(err.Error(), "v0.16.3") {
+		t.Fatalf("drain period without spec.termination: %v", err)
+	}
+	v0163 := v0162
+	v0163.Termination = true
+	if err := set.CheckFeatures(v0163); err != nil {
 		t.Fatal(err)
 	}
 }

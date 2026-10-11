@@ -150,6 +150,7 @@ type SwiftSandboxSpec struct {
 	ReadinessProbe     *corev1.Probe                `json:"readinessProbe,omitempty"`
 	LivenessProbe      *corev1.Probe                `json:"livenessProbe,omitempty"`
 	ReadinessStartup   *SandboxReadinessStartup     `json:"readinessStartup,omitempty"`
+	Termination        *SandboxTermination          `json:"termination,omitempty"`
 }
 
 // SandboxReadinessStartup runs the readiness probe every Interval from the
@@ -157,6 +158,13 @@ type SwiftSandboxSpec struct {
 type SandboxReadinessStartup struct {
 	Interval *metav1.Duration `json:"interval,omitempty"`
 	Window   *metav1.Duration `json:"window,omitempty"`
+}
+
+// SandboxTermination is how a deleted sandbox ends (KubeSwift v0.16.3): it
+// leaves Service endpoints, keeps running for DrainPeriod, then its microVM
+// is stopped.
+type SandboxTermination struct {
+	DrainPeriod *metav1.Duration `json:"drainPeriod,omitempty"`
 }
 
 // SwiftSandboxPhase is the sandbox lifecycle phase.

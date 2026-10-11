@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -312,5 +313,41 @@ func TestReadinessStartup(t *testing.T) {
 	}
 	if rp := tmpl.Spec.ReadinessProbe; rp.InitialDelaySeconds != 10 || rp.PeriodSeconds != 2 || rp.HTTPGet == nil || rp.HTTPGet.Path != "/healthz" {
 		t.Fatalf("readiness probe changed: %+v", rp)
+	}
+}
+
+func TestDrainPeriod(t *testing.T) {
+	v163 := v16
+	v163.ReadinessStartup = true
+	v163.Termination = true
+	thirty := 30 * time.Second
+	unset := testProfile()
+	base, err := BuildTemplate(testApp(), unset, DefaultResourcePolicy(), v163)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.Spec.Termination != nil {
+		t.Fatalf("termination set without the annotation: %+v", base.Spec.Termination)
+	}
+	set := testProfile()
+	set.DrainPeriod = &thirty
+	tmpl, err := BuildTemplate(testApp(), set, DefaultResourcePolicy(), v163)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tmpl.Spec.Termination == nil || tmpl.Spec.Termination.DrainPeriod == nil || tmpl.Spec.Termination.DrainPeriod.Duration != thirty {
+		t.Fatalf("termination %+v", tmpl.Spec.Termination)
+	}
+	if tmpl.Revision == base.Revision {
+		t.Fatal("drain period does not change the revision")
+	}
+	// Without spec.termination in the schema nothing is rendered (the
+	// executor is reported invalid instead, see executor.CheckFeatures).
+	old, err := BuildTemplate(testApp(), set, DefaultResourcePolicy(), v16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.Spec.Termination != nil {
+		t.Fatal("termination rendered for KubeSwift without spec.termination")
 	}
 }

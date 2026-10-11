@@ -84,8 +84,8 @@ executors:
 Fields: `networkMode`, `rootfsMode`, `kernelProfile`, `sandboxPool`,
 `nodeSelector`, `defaultCPU`, `defaultMemory`, `runtimeImage`,
 `runtimeImagePullSecret`, `runtimeImageVerifyKeySecret`, `egressAllow`,
-`ingressFrom`, `readinessStartup`, `otel`. The namespaces must exist before
-installing.
+`ingressFrom`, `readinessStartup`, `drainPeriod`, `otel`. The namespaces
+must exist before installing.
 
 `egressAllow` (1 to 32 rules, each a `service` with `name` and optional
 `namespace`, or a `cidr`, with optional `ports`) renders the
@@ -103,6 +103,14 @@ then does not delay the first checks; see
 [docs/executor-contract.md](../../docs/executor-contract.md#readiness-startup).
 On KubeSwift before v0.16.2, `always` makes the executor invalid and
 `auto` changes nothing.
+
+`drainPeriod` (a duration from `0s` to `10m`, for example `30s`) renders
+`spin.kubeswift.io/drain-period`: how long a deleted replica keeps serving
+after it has left the Service before KubeSwift stops it. Without it
+KubeSwift's 5 seconds apply, and requests running longer than that are cut
+when a replica is replaced. It needs KubeSwift v0.16.3; setting or changing
+it replaces the executor's replicas once; see
+[docs/executor-contract.md](../../docs/executor-contract.md#rolling-updates).
 
 `sandboxPool` names a SwiftSandboxPool that you create in the same
 namespace. Its `image` must equal the controller's runtime image reference
