@@ -70,6 +70,10 @@ make kind-test WITH_SPIN_OPERATOR=1
 
 Do not describe mocked or kind-based tests as end-to-end tests.
 
+The example and runtime image tests start a mock OpenAI-compatible server
+on `127.0.0.1:8090`. If another process uses that port, set
+`UPSTREAM_PORT`, for example `UPSTREAM_PORT=18090 make example-test`.
+
 ## Writing
 
 Documentation, comments, commit messages and user-facing messages:
