@@ -16,24 +16,29 @@ KubeSwift.
 
 ## Status
 
-v0.1.0-rc4 is a release candidate. It differs from v0.1.0-rc3 in being
-built with Go 1.26.9 (standard-library security fixes) and in a new runtime
-image, `spin-4.2.1-r2`, whose only change is that build. It validates the initial
+v0.1.0-rc5 is a release candidate for KubeSwift v0.16.2. Rolling updates
+keep `spec.replicas` replicas available, including for a single replica,
+and on KubeSwift v0.16.2 a replica without a readiness check is ready
+about 0.1 seconds after Spin first answers. The runtime image
+`spin-4.2.1-r2` is unchanged from v0.1.0-rc4. It validates the initial
 architecture and the core execution path on real KVM hardware and is meant
 for evaluation and integration testing while the project builds broader
 compatibility and operational experience. It is not production-ready.
 
-Tested on linux/amd64 only, with KubeSwift v0.16.0 and v0.16.1, Spin
-Operator v0.6.1 and Kubernetes 1.34 (one k0s lab cluster with Calico).
-arm64 images are built and published but not validated.
-[docs/compatibility.md](docs/compatibility.md) lists what was tested and the support status of every SpinApp field.
+Tested on linux/amd64 only, with KubeSwift v0.16.2 (earlier releases also on
+v0.16.0 and v0.16.1), Spin Operator v0.6.1 and Kubernetes 1.34 (one k0s lab
+cluster with Calico). arm64 images are built and published but not
+validated. [docs/compatibility.md](docs/compatibility.md) lists what was
+tested and the support status of every SpinApp field.
 
-What works on KubeSwift v0.16.0 and v0.16.1, exercised by the KVM
-end-to-end test ([test/e2e](test/e2e/README.md)):
+What works on KubeSwift v0.16.2, exercised by the KVM end-to-end test
+([test/e2e](test/e2e/README.md)) and the lab runs in
+[docs/compatibility.md](docs/compatibility.md):
 
 - HTTP SpinApps become `Available` and are reached through the Service
   Spin Operator creates; `readyReplicas` follows KubeSwift's readiness
-  probes. Scaling, rolling updates without failed requests, and deletion.
+  probes. Scaling, rolling updates without failed requests in the lab runs
+  (including single-replica SpinApps), and deletion.
 - A replica whose liveness check fails is replaced, with a growing backoff
   while it keeps failing.
 - Secrets passed by reference, never copied into objects: Secret-backed
@@ -78,8 +83,9 @@ Details: [docs/architecture.md](docs/architecture.md),
 
 - Kubernetes 1.31 or later (the chart's minimum; only 1.34 was tested on a
   cluster)
-- KubeSwift v0.16.0 or later with the sandbox CRDs, for exposure, readiness,
-  Secrets and egress allowlists (only v0.16.0 was tested). KubeSwift
+- KubeSwift v0.16.0 or later with the sandbox CRDs, for exposure,
+  readiness, Secrets and egress allowlists; v0.16.2 or later for readiness
+  startup (fast readiness), which this release was tested with. KubeSwift
   v0.15.1 works in a degraded mode: SpinApps run but cannot be reached, and
   Secret-backed configuration is rejected.
 - a node labelled `kubeswift.io/kernel-node=true`
@@ -112,7 +118,7 @@ kubectl create namespace demo
 Install the chart with a `kubeswift` executor in `demo`:
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc4 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc5 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -127,7 +133,7 @@ Chart values are documented in
 ## Run hello-http
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc4/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc5/examples/hello-http/spinapp.yaml
 ```
 
 ```bash
@@ -198,12 +204,18 @@ To publish an example to your own registry, see
 
 ## Documentation
 
-- [Why kubeswift-spin](docs/why-kubeswift-spin.md): when it is worth it, trust model, costs
-- [Architecture](docs/architecture.md): design, verified upstream contracts, diagrams
-- [Executor contract](docs/executor-contract.md): profiles, translation, replicas, status
-- [Compatibility](docs/compatibility.md): tested versions and SpinApp field support
-- [Startup performance](docs/performance.md): startup latency terms, lab results, release-time benchmark
-- [Networking](docs/networking.md): exposure through the SpinApp Service, egress, feature detection
+- [Why kubeswift-spin](docs/why-kubeswift-spin.md): when it is worth it,
+  trust model, costs
+- [Architecture](docs/architecture.md): design, verified upstream contracts,
+  diagrams
+- [Executor contract](docs/executor-contract.md): profiles, translation,
+  replicas, status
+- [Compatibility](docs/compatibility.md): tested versions and SpinApp field
+  support
+- [Startup performance](docs/performance.md): startup latency terms, lab
+  results, release-time benchmark
+- [Networking](docs/networking.md): exposure through the SpinApp Service,
+  egress, feature detection
 - [Security model](docs/security-model.md)
 - [Runtime image](docs/runtime-image.md)
 - [Observability](docs/observability.md)
