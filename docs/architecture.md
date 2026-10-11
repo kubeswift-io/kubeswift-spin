@@ -44,8 +44,8 @@ proposals in [docs/upstream](upstream/).
 ## Verified upstream contracts
 
 These facts were read from upstream source at the pinned versions; the
-KubeSwift v0.16.0 facts were also exercised by the KVM e2e lab run (see
-[compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05)). They
+KubeSwift facts were also exercised by the KVM end-to-end test (see
+[compatibility.md](compatibility.md#validation-of-v010)). They
 constrain the design.
 
 **Spin Operator v0.6.1, `createDeployment: false`**

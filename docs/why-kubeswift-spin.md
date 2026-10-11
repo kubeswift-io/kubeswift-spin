@@ -38,7 +38,7 @@ request from them; no microVM is booted per request.
 
 kubeswift-spin is built for strong isolation first. The project's goal is
 a first direct response from a warm pool in under one second; on the lab
-cluster it is 1.58 seconds (p50, KubeSwift v0.16.1) today. The measured
+cluster it is 1.50 seconds (p50, KubeSwift v0.16.3) today. The measured
 stages, and which of them are fixed waits rather than work, are in
 [performance.md](performance.md).
 

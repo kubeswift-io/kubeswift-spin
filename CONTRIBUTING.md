@@ -31,6 +31,45 @@ Makefile on first use.
 make help
 ```
 
+## Build from source
+
+Build both images from the same commit and push them to a registry your
+cluster can pull from. The runtime image has its own version, read from
+`runtime/VERSION` (currently `spin-4.2.1-r2`), so that controller upgrades
+do not replace running replicas:
+
+```bash
+make image runtime-image REGISTRY=<registry> VERSION=v0.1.0-dev
+```
+
+```bash
+docker push <registry>/kubeswift-spin:v0.1.0-dev
+```
+
+```bash
+docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r2
+```
+
+Then install from the source tree:
+
+```bash
+helm install kubeswift-spin charts/kubeswift-spin \
+  --namespace kubeswift-spin-system --create-namespace \
+  --set image.repository=<registry>/kubeswift-spin --set image.tag=v0.1.0-dev \
+  --set runtimeImage.repository=<registry>/kubeswift-spin-runtime \
+  --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
+```
+
+KubeSwift pulls the runtime image on the nodes; if the registry is private,
+create a docker-registry Secret in each SpinApp namespace and set the
+executor's `runtimeImagePullSecret` value. The controller image uses the
+chart's `imagePullSecrets` value instead. Application artifacts in a
+private registry are pulled by Spin inside the guest with the SpinApp's
+`spec.imagePullSecrets`; see
+[docs/executor-contract.md](docs/executor-contract.md#registry-credentials).
+To publish an example to your own registry, see
+[examples](examples/README.md).
+
 ## Before sending a change
 
 ```bash

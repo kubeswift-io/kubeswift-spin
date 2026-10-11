@@ -7,10 +7,7 @@ token uses the `release` environment and waits for its approval, except
 the OSV-Scanner job, whose only write permission is
 `security-events: write` for the code scanning upload.
 
-The first run, for v0.1.0-rc1, published the images and the chart but
-failed at the last example push (a path error in the workflow), so rc1 has
-no GitHub release; v0.1.0-rc2 is the first complete release.
-Check every artifact (see [Verifying a release](#verifying-a-release))
+The workflow leaves the GitHub release as a draft. Check every artifact (see [Verifying a release](#verifying-a-release))
 before publishing the draft release.
 
 ## Repository settings
@@ -65,7 +62,7 @@ Configure these before the first release:
    Otherwise leave both unchanged, so the release does not replace running
    replicas.
 6. Tag and push. A tag without a suffix (`v0.1.0`) produces a regular
-   release; a tag with a pre-release suffix (such as `v0.1.0-rc6`) produces
+   release; a tag with a pre-release suffix (such as `v0.2.0-rc1`) produces
    a pre-release. No `latest` image tag is pushed for either:
 
    ```bash
@@ -104,10 +101,10 @@ provenance attestations.
 ## Verifying a release
 
 The release workflow signs with cosign v3, which stores signatures as
-Sigstore bundles attached as OCI referrers. Verify with cosign v3: on the
-v0.1.0-rc2 controller image, cosign v2.6.3 also verified, while cosign
-v2.2.2 reported "no matching signatures". Check the exact workflow
-identity of the release tag, not a pattern:
+Sigstore bundles attached as OCI referrers. Verify with cosign v3 (cosign
+v2.6.3 also verifies them; cosign v2.2.2 reports "no matching
+signatures"). Check the exact workflow identity of the release tag, not a
+pattern:
 
 ```bash
 cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0 \
@@ -118,14 +115,16 @@ cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0 \
 The same command, with only the image reference changed, verifies
 `ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0` and
 `ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0`. The
-runtime image is signed by the release that first built it (v0.1.0-rc4
-for `spin-4.2.1-r2`, v0.1.0-rc1 for `spin-4.2.1-r1`), so its identity
-names that tag:
+runtime image has its own version and is reused by later releases, so it
+carries the signature of the release that first built it, not of the
+current tag. Verify the digest listed in the release's `images.txt` with
+the release workflow identity of any version tag, as the release workflow
+itself does before reusing it:
 
 ```bash
 cosign verify ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r2 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v0.1.0-rc4
+  --certificate-identity-regexp '^https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v'
 ```
 
 Provenance attestations:

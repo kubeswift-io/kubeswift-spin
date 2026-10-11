@@ -186,8 +186,8 @@ empty `allowed_outbound_hosts`.
 
 ### What was measured
 
-On the KubeSwift v0.16.0 lab cluster (see
-[compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05)):
+On the lab cluster, first with KubeSwift v0.16.0 (see
+[compatibility.md](compatibility.md#validation-of-v010)):
 
 - Spin pulled the example applications from `ghcr.io` under `restricted`.
 - A restricted sandbox with an allowlist entry for an in-cluster Service
