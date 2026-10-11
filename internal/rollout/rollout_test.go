@@ -234,12 +234,39 @@ func TestScaleToZeroAfterAutoscalingIsNotSupported(t *testing.T) {
 	}
 }
 
-func TestReplicaLeftByScaleDownIsNotASurge(t *testing.T) {
-	// Scale 2 -> 1 while ordinal 0 is still starting: ordinal 1 goes.
-	p := Compute(Input{Replicas: 1, Revision: "r1", ReadinessObservable: true, Instances: []Instance{
-		inst(0, "r1", Pending), inst(1, "r1", Ready)}})
-	if !reflect.DeepEqual(deletions(p), map[string]Reason{"app-1": ReasonScaleDown}) {
+func TestScaleDownKeepsAServingReplicaUntilTheRestAreReady(t *testing.T) {
+	// Scale 2 -> 1 while ordinal 0 is still starting: ordinal 1 serves
+	// until ordinal 0 is ready, and is not treated as a surge replica.
+	in := Input{Replicas: 1, Revision: "r1", ReadinessObservable: true, Instances: []Instance{
+		inst(0, "r1", Pending), inst(1, "r1", Ready)}}
+	if p := Compute(in); len(p.Delete) != 0 || len(p.Create) != 0 || !p.Waiting {
 		t.Fatalf("plan %+v", p)
+	}
+	in.Instances[0].Health = Ready
+	if got := deletions(Compute(in)); !reflect.DeepEqual(got, map[string]Reason{"app-1": ReasonScaleDown}) {
+		t.Fatalf("delete %v", got)
+	}
+	// A replica that is not serving goes at once.
+	in.Instances = []Instance{inst(0, "r1", Pending), inst(1, "r1", Pending)}
+	if got := deletions(Compute(in)); !reflect.DeepEqual(got, map[string]Reason{"app-1": ReasonScaleDown}) {
+		t.Fatalf("delete %v", got)
+	}
+}
+
+// Scaling down at the end of a rollout, while ordinal 0 restarts at the new
+// revision, keeps one serving replica (reliability review S2).
+func TestScaleDownMidRolloutKeepsAvailability(t *testing.T) {
+	in := Input{Replicas: 1, Revision: "r2", ReadinessObservable: true, Instances: []Instance{
+		inst(0, "r2", Pending), inst(1, "r2", Ready), surgeInst(2, "r2", Ready)}}
+	p := Compute(in)
+	if got := deletions(p); !reflect.DeepEqual(got, map[string]Reason{"app-2": ReasonScaleDown}) || len(p.Create) != 0 {
+		t.Fatalf("plan %+v", p)
+	}
+	// With more desired replicas: keep only as many as are missing.
+	in = Input{Replicas: 2, Revision: "r2", ReadinessObservable: true, Instances: []Instance{
+		inst(0, "r2", Pending), inst(1, "r2", Ready), inst(2, "r2", Ready), inst(3, "r2", Ready), inst(4, "r2", Terminal)}}
+	if got := deletions(Compute(in)); !reflect.DeepEqual(got, map[string]Reason{"app-3": ReasonScaleDown, "app-4": ReasonScaleDown}) {
+		t.Fatalf("delete %v", got)
 	}
 }
 
@@ -331,5 +358,31 @@ func TestSurgeLabeledSandboxIsRemovedAtZeroReplicas(t *testing.T) {
 		inst(0, "r2", Ready), surgeInst(1, "r2", Ready)}}
 	if got := deletions(Compute(in)); len(got) != 2 {
 		t.Fatalf("delete %v", got)
+	}
+}
+
+// A stale sandbox being deleted whose ordinal label matches a real replica
+// does not hide that replica.
+func TestDeletingStaleSandboxDoesNotMaskAReplica(t *testing.T) {
+	stale := Instance{Name: "app-x", Ordinal: 0, Revision: "r1", Health: Ready, Stale: true, Deleting: true}
+	in := Input{Replicas: 1, Revision: "r1", ReadinessObservable: true, Instances: []Instance{inst(0, "r1", Ready), stale}}
+	if p := Compute(in); len(p.Create) != 0 || len(p.Delete) != 0 {
+		t.Fatalf("plan %+v", p)
+	}
+	in.Instances = []Instance{stale}
+	if p := Compute(in); !reflect.DeepEqual(p.Create, []int{0}) {
+		t.Fatalf("missing replica not created: %+v", p)
+	}
+}
+
+// After a scale-up, a former surge replica that failed is replaced after
+// its backoff like any failed replica, and the new surge is created at the
+// new surge ordinal meanwhile.
+func TestFailedFormerSurgeAfterScaleUpHonorsBackoff(t *testing.T) {
+	in := Input{Replicas: 2, Revision: "r2", ReadinessObservable: true, InBackoff: map[int]bool{1: true}, Instances: []Instance{
+		inst(0, "r1", Ready), surgeInst(1, "r2", Terminal)}}
+	p := Compute(in)
+	if len(p.Delete) != 0 || !reflect.DeepEqual(p.Create, []int{2}) || !p.Waiting {
+		t.Fatalf("plan %+v", p)
 	}
 }

@@ -111,8 +111,15 @@ func Compute(in Input) Plan {
 	// that is being deleted or is deleted by this plan; the surge replica is
 	// created only once the name is free.
 	surgeBusy := false
+	// extra holds replicas above the desired count that a scale-down
+	// removes, decided after the desired replicas are counted.
+	var extra []Instance
 	for _, inst := range in.Instances {
 		switch {
+		case inst.Stale && inst.Deleting:
+			// Its ordinal label may match a real replica; never let it
+			// stand in for one.
+			p.Waiting = true
 		case inst.Deleting:
 			p.Waiting = true
 			if inst.Ordinal == surgeOrd {
@@ -126,7 +133,7 @@ func Compute(in Input) Plan {
 			s := inst
 			surge = &s
 		case inst.Ordinal >= in.Replicas:
-			p.Delete = append(p.Delete, Deletion{inst.Name, inst.Ordinal, ReasonScaleDown})
+			extra = append(extra, inst)
 			if inst.Ordinal == surgeOrd {
 				surgeBusy = true
 			}
@@ -209,6 +216,21 @@ func Compute(in Input) Plan {
 		}
 	case Available(surge.Health, in.ReadinessObservable):
 		surgeAvailable = 1
+	}
+
+	// A scale-down keeps available extra replicas, lowest ordinal first,
+	// only while the desired replicas and the surge replica are fewer than
+	// spec.replicas available, so scaling down never removes the replicas
+	// that serve while the remaining ones start. The others go at once.
+	need := in.Replicas - available - surgeAvailable
+	sort.Slice(extra, func(i, j int) bool { return extra[i].Ordinal < extra[j].Ordinal })
+	for _, inst := range extra {
+		if need > 0 && inst.Health != Terminal && Available(inst.Health, in.ReadinessObservable) {
+			need--
+			p.Waiting = true
+			continue
+		}
+		p.Delete = append(p.Delete, Deletion{inst.Name, inst.Ordinal, ReasonScaleDown})
 	}
 
 	// Replace one available outdated replica only when the others still

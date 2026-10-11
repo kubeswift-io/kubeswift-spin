@@ -488,10 +488,12 @@ A rollout removes an available old replica only after its replacement is
 ready. If the new revision never becomes ready, the old replicas keep
 running with their old configuration, which matters when the change is a
 security fix (a new runtime image, a narrower network profile). To remove
-an old revision sooner, scale the SpinApp to 0 or delete its
-SwiftSandboxes with `kubectl delete swiftsandbox <name> --cascade=foreground`;
-each deleted ordinal is recreated at the new revision once the old one is
-gone. Either way a deleted replica keeps running for up to the 30-second
+an old revision sooner, delete its SwiftSandboxes, including the surge
+replica `<spinapp>-<replicas>`, with
+`kubectl delete swiftsandbox <name> --cascade=foreground`; each deleted
+ordinal is recreated at the new revision once the old one is gone, and the
+surge replica at the new revision too while the rollout lasts.
+`spec.replicas: 0` is not supported and leaves every sandbox in place. Either way a deleted replica keeps running for up to the 30-second
 termination grace period.
 
 ## Finalizers and deletion

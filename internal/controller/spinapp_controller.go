@@ -347,9 +347,15 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 				} else {
 					logger.V(1).Info("SwiftSandbox create rejected again", "sandbox", sb.Name, "retryIn", wait)
 				}
-				blocker = &status.Blocker{Reason: status.ReasonSandboxRejected,
-					Message: fmt.Sprintf("the API server rejected creating SwiftSandbox %s (%s); check ResourceQuota on SwiftSandboxes and admission policies in namespace %s, and the controller log",
-						sb.Name, reason, app.Namespace)}
+				what := "SwiftSandbox " + sb.Name
+				if ord == int(app.Spec.Replicas) {
+					what += " (the surge replica of a rolling update; the old replicas keep serving)"
+				}
+				if blocker == nil {
+					blocker = &status.Blocker{Reason: status.ReasonSandboxRejected,
+						Message: fmt.Sprintf("the API server rejected creating %s (%s); check ResourceQuota on SwiftSandboxes and admission policies in namespace %s, and the controller log",
+							what, reason, app.Namespace)}
+				}
 				rejectedWait = wait
 				break
 			}
@@ -370,6 +376,9 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 			// Never adopt it. Such an object has no owner reference to this
 			// SpinApp and may not even be cached, so its removal triggers
 			// no event: requeue to notice when the name is free.
+			if blocker != nil {
+				continue // report the first blocker; the rest need it resolved too
+			}
 			blocker = &status.Blocker{Reason: status.ReasonSandboxConflict,
 				Message: fmt.Sprintf("SwiftSandbox %s already exists and is not controlled by this SpinApp; delete or rename it", sb.Name)}
 			continue

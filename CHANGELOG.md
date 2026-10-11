@@ -66,6 +66,10 @@ Spin listening instead of after the first probe period. The runtime image
   unavailable during a rollout. A spec change during a rollout keeps an
   earlier-revision surge replica while it is the replica serving. Replica
   names are unchanged.
+- A scale-down keeps the lowest available replicas above the new count
+  while fewer than `spec.replicas` of the remaining replicas are available,
+  instead of deleting them at once; replicas that are not available still
+  go at once.
 - A ready surge replica counts toward `readyReplicas` (capped at
   `spec.replicas`); a failed or waiting surge replica is reported in
   `Progressing` like any replica.

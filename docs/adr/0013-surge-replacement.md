@@ -88,9 +88,13 @@ the old name while the old sandbox still exists.
   ingress policy (see
   [security-model.md](../security-model.md#network-isolation)). Rollouts
   make this window routine; it existed before for every deleted replica.
-- Scaling during a rollout composes with it: a scale-down removes the
-  highest ordinals (an unlabeled replica at the new surge ordinal first),
-  and a scale-up replaces a former surge replica as described above.
+- Scaling during a rollout composes with it. A scale-down removes the
+  replicas above the new count, but keeps the lowest available ones while
+  fewer than `spec.replicas` of the remaining replicas are available, so
+  scaling down at the end of a rollout (when ordinal 0, replaced last, is
+  still starting) does not leave the app without a ready replica. A
+  scale-up replaces a former surge replica as described above. The same
+  rule applies to any scale-down.
 - Downgrading to a release without this ADR during a rollout removes the
   surge replica as a scaled-down replica and finishes with
   delete-then-create.

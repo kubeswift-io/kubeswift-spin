@@ -386,8 +386,12 @@ sandboxes; every transition below is covered by unit and envtest tests.
 
 - **Create and scale up**: missing ordinals below `spec.replicas` are
   created.
-- **Scale down**: ordinals at or above `spec.replicas` are deleted, highest
-  first.
+- **Scale down**: ordinals at or above `spec.replicas` are deleted. While
+  fewer than `spec.replicas` of the remaining replicas are available (for
+  example right after a scale-up, or at the end of a rolling update), the
+  lowest of them that are available are kept until enough of the remaining
+  ones are; they serve traffic and count toward `readyReplicas` meanwhile.
+  Replicas that are not available go at once.
 - **Replacement**: SwiftSandbox specs are immutable except `ttl`, so a
   change is applied by deleting a replica and recreating it at the new
   revision. A replica counts as available when it is ready (KubeSwift
@@ -461,8 +465,9 @@ reported as `SandboxRejected` and retried with a growing delay; a launcher
 pod that a pod quota refuses shows up as a KubeSwift waiting or failure
 reason on the sandbox instead. With a warm pool, the surge replica takes a
 free slot or falls back to a cold boot like any replica. To remove an
-outdated revision sooner, scale the SpinApp to 0 or delete its
-SwiftSandboxes with `--cascade=foreground` (see
+outdated revision sooner, delete its SwiftSandboxes, including the surge
+replica `<spinapp>-<replicas>`, with `--cascade=foreground` (`spec.replicas: 0`
+is not supported; see
 [security-model.md](security-model.md#denial-of-service-and-capacity)).
 
 A deleted replica leaves the SpinApp Service when its launcher pod starts

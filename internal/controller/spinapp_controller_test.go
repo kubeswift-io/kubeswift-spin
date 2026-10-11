@@ -925,3 +925,55 @@ func TestSecondChangeMidRolloutKeepsTheOnlyReadyReplica(t *testing.T) {
 		return nil
 	})
 }
+
+func TestRejectedSurgeKeepsTheOldReplicaAndRecovers(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	setReady(t, ns, "hello-0")
+	uid0 := getSandbox(t, ns, "hello-0").UID
+
+	// Room for exactly the one replica. No quota controller runs under
+	// envtest: publish the status it would.
+	count := corev1.ResourceName("count/swiftsandboxes.sandbox.kubeswift.io")
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "sandboxes"},
+		Spec:       corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{count: resource.MustParse("1")}},
+	}
+	mustCreate(t, quota)
+	quota.Status = corev1.ResourceQuotaStatus{Hard: quota.Spec.Hard, Used: corev1.ResourceList{count: resource.MustParse("1")}}
+	if err := testClient.Status().Update(ctx, quota); err != nil {
+		t.Fatal(err)
+	}
+
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxRejected)
+	if c := findCond(a, status.TypeProgressing); !strings.Contains(c.Message, "hello-1 (the surge replica") {
+		t.Fatalf("message %q", c.Message)
+	}
+	consistently(t, "the old replica keeps serving", time.Second, func() error {
+		if sb := getSandbox(t, ns, "hello-0"); !sb.DeletionTimestamp.IsZero() || sb.UID != uid0 {
+			return fmt.Errorf("hello-0 deleted")
+		}
+		if a := getApp(t, ns, "hello"); a.Status.ReadyReplicas != 1 || findCond(a, status.TypeAvailable).Status != metav1.ConditionTrue {
+			return fmt.Errorf("readyReplicas %d", a.Status.ReadyReplicas)
+		}
+		return nil
+	})
+
+	// Raise the quota: the surge replica is created on the next retry.
+	if err := testClient.Get(ctx, client.ObjectKeyFromObject(quota), quota); err != nil {
+		t.Fatal(err)
+	}
+	quota.Spec.Hard[count] = resource.MustParse("2")
+	if err := testClient.Update(ctx, quota); err != nil {
+		t.Fatal(err)
+	}
+	quota.Status.Hard = quota.Spec.Hard
+	if err := testClient.Status().Update(ctx, quota); err != nil {
+		t.Fatal(err)
+	}
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonRollingUpdate)
+}
