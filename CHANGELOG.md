@@ -7,7 +7,7 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## v0.1.0-rc5 (unreleased)
+## v0.1.0-rc5 (2026-10-11)
 
 Release candidate for KubeSwift v0.16.2. Rolling updates keep
 `spec.replicas` replicas available, including for a single replica, and

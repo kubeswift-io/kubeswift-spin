@@ -64,15 +64,15 @@ Configure these before the first release:
    upgrade note: every replica using the default runtime image is replaced.
    Otherwise leave both unchanged, so the release does not replace running
    replicas.
-6. Tag and push. A tag with a pre-release suffix (`v0.1.0-rc4`) produces a
+6. Tag and push. A tag with a pre-release suffix (`v0.1.0-rc5`) produces a
    pre-release:
 
    ```bash
-   git tag -s v0.1.0-rc4 -m v0.1.0-rc4
+   git tag -s v0.1.0-rc5 -m v0.1.0-rc5
    ```
 
    ```bash
-   git push origin v0.1.0-rc4
+   git push origin v0.1.0-rc5
    ```
 
 7. The release workflow first runs a full OSV-Scanner scan of the tagged
@@ -109,26 +109,26 @@ v2.2.2 reported "no matching signatures". Check the exact workflow
 identity of the release tag, not a pattern:
 
 ```bash
-cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc4 \
+cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc5 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v0.1.0-rc4
+  --certificate-identity https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v0.1.0-rc5
 ```
 
 The same command verifies
 `ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r2` (signed by
 the release that first built it: v0.1.0-rc4 for `spin-4.2.1-r2`, v0.1.0-rc1
 for `spin-4.2.1-r1`),
-`ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc4` and
-`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc4`.
+`ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc5` and
+`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.0-rc5`.
 
 Provenance attestations:
 
 ```bash
-gh attestation verify oci://ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc4 --repo kubeswift-io/kubeswift-spin
+gh attestation verify oci://ghcr.io/kubeswift-io/kubeswift-spin:v0.1.0-rc5 --repo kubeswift-io/kubeswift-spin
 ```
 
 The same command verifies the runtime image and the chart
-(`oci://ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc4`). The
+(`oci://ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.0-rc5`). The
 example artifacts are signed but have no attestation.
 
 Release files, after downloading them from the GitHub release:
