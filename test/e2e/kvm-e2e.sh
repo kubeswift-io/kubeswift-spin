@@ -122,7 +122,9 @@ start_client() {
 }
 # A request right after an endpoint turns ready can reach a node whose
 # kube-proxy has not programmed it yet (up to its minSyncPeriod, 1 s by
-# default): retry a refused connection. Checks that must fail use code_from.
+# default): retry a refused connection. curl's --retry also retries timeouts
+# and HTTP 408, 429 and 5xx, which these checks of a working app tolerate.
+# Checks that must fail use code_from, and the traffic loop plain curl.
 http() { $K exec e2e-client -- curl -sS --max-time 10 --retry 3 --retry-delay 1 --retry-connrefused "$@"; }
 http_code() { $K exec e2e-client -- curl -s -o /dev/null -w '%{http_code}' --max-time 10 --retry 3 --retry-delay 1 --retry-connrefused "$@"; }
 code_from() {

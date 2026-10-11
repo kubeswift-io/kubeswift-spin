@@ -16,6 +16,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -59,9 +60,12 @@ const (
 	EventExecutorChanged    = "ExecutorChanged"
 )
 
-// leavingRequeue is how soon to recheck a SpinApp whose sandbox name is held
-// by a terminating sandbox of a deleted SpinApp with the same name.
-const leavingRequeue = time.Second
+// leavingRequeueMax bounds how soon a SpinApp is rechecked while its sandbox
+// name is held by a terminating sandbox of a deleted SpinApp with the same
+// name. Such a sandbox is still owned by a SpinApp of that name, so its
+// updates and removal already enqueue this SpinApp; the requeue is a safety
+// net.
+const leavingRequeueMax = 5 * time.Second
 
 // SpinAppReconciler realizes SpinApps as SwiftSandboxes.
 type SpinAppReconciler struct {
@@ -86,6 +90,11 @@ type SpinAppReconciler struct {
 	// rollout waits on something no watch reports, such as a foreign object
 	// occupying a sandbox name. Defaults to 30 seconds.
 	WaitingRequeue time.Duration
+	// LeavingTimeout is how long a sandbox of a deleted SpinApp with the
+	// same name may keep a sandbox name while it terminates before it is
+	// reported as SandboxConflict. KubeSwift v0.16.3 releases it within its
+	// drain, a 15 s stop allowance and a 30 s slack. Defaults to 2 minutes.
+	LeavingTimeout time.Duration
 }
 
 // SetupWithManager registers the controller, its watches and the field index.
@@ -98,6 +107,9 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	}
 	if r.Metrics == nil {
 		r.Metrics = metrics.NewTracker()
+	}
+	if r.LeavingTimeout == 0 {
+		r.LeavingTimeout = 2 * time.Minute
 	}
 	if r.WaitingRequeue == 0 {
 		r.WaitingRequeue = 30 * time.Second
@@ -330,7 +342,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	var blocker *status.Blocker
 	var rejectedWait time.Duration
-	nameLeaving := false
+	waitForName := false
 	requeue := plan.Waiting
 	for _, ord := range plan.Create {
 		sb := translate.NewSandbox(&app, profile.ExecutorName, tmpl, ord)
@@ -368,21 +380,34 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 				return ctrl.Result{}, fmt.Errorf("create SwiftSandbox %s: %w", sb.Name, err)
 			}
 			requeue = true
-			mine, leaving, err := r.controlledByApp(ctx, &app, sb.Name)
+			holder, held, err := r.nameHolder(ctx, &app, sb.Name)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-			if mine {
+			switch holder {
+			case nameMine:
 				// Created by an earlier reconcile; the cache has not
 				// caught up yet.
 				continue
-			}
-			if leaving {
+			case nameFree:
+				// Gone between the create and the read: retry soon.
+				waitForName = true
+				continue
+			case nameLeaving:
 				// A sandbox of a deleted SpinApp with the same name, still
-				// draining under KubeSwift's termination finalizer: not a
-				// conflict, the name is free once it is gone.
-				logger.V(1).Info("waiting for a terminating sandbox of the same name", "sandbox", sb.Name)
-				nameLeaving = true
+				// terminating under KubeSwift's finalizer: not a conflict,
+				// unless it takes far longer than KubeSwift allows.
+				age := now.Sub(held.DeletionTimestamp.Time)
+				if age < r.LeavingTimeout {
+					logger.V(1).Info("waiting for a terminating sandbox of the same name", "sandbox", sb.Name)
+					waitForName = true
+					continue
+				}
+				if blocker == nil {
+					blocker = &status.Blocker{Reason: status.ReasonSandboxConflict,
+						Message: fmt.Sprintf("SwiftSandbox %s of a deleted SpinApp with this name has been deleting for %s and still has finalizers %s; check that KubeSwift is running",
+							sb.Name, age.Round(time.Second), strings.Join(held.Finalizers, ", "))}
+				}
 				continue
 			}
 			// The name is taken by an object this SpinApp does not control.
@@ -415,10 +440,8 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	if backoffWait > 0 {
 		return ctrl.Result{RequeueAfter: backoffWait + 100*time.Millisecond}, nil
 	}
-	if nameLeaving {
-		// The terminating sandbox is not owned by this SpinApp, so its
-		// removal triggers no event; KubeSwift finishes it in seconds.
-		return ctrl.Result{RequeueAfter: leavingRequeue}, nil
+	if waitForName && blocker == nil {
+		return ctrl.Result{RequeueAfter: min(r.WaitingRequeue, leavingRequeueMax)}, nil
 	}
 	if requeue {
 		// Watches normally trigger the next step (owned sandbox events);
@@ -441,18 +464,45 @@ func rejectionReason(err error) (string, bool) {
 	return "", false
 }
 
-// controlledByApp reads a sandbox from the API server, bypassing the cache,
-// and reports whether this SpinApp controls it and whether it is being
-// deleted.
-func (r *SpinAppReconciler) controlledByApp(ctx context.Context, app *spinv1alpha1.SpinApp, name string) (mine, leaving bool, err error) {
+// nameState is who holds a sandbox name this SpinApp wants to create.
+type nameState int
+
+const (
+	nameTaken   nameState = iota // a foreign object: never adopted, a conflict
+	nameFree                     // nobody (any longer)
+	nameMine                     // this SpinApp
+	nameLeaving                  // a deleted same-named SpinApp's sandbox, being deleted
+)
+
+// nameHolder reads a sandbox from the API server, bypassing the cache, and
+// says who holds the name.
+func (r *SpinAppReconciler) nameHolder(ctx context.Context, app *spinv1alpha1.SpinApp, name string) (nameState, *sandboxv1alpha1.SwiftSandbox, error) {
 	var sb sandboxv1alpha1.SwiftSandbox
 	if err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: name}, &sb); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, false, nil
+			return nameFree, nil, nil
 		}
-		return false, false, fmt.Errorf("read SwiftSandbox %s: %w", name, err)
+		return nameTaken, nil, fmt.Errorf("read SwiftSandbox %s: %w", name, err)
 	}
-	return metav1.IsControlledBy(&sb, app), !sb.DeletionTimestamp.IsZero(), nil
+	if metav1.IsControlledBy(&sb, app) {
+		return nameMine, &sb, nil
+	}
+	if !sb.DeletionTimestamp.IsZero() && ownedByPredecessor(&sb, app) {
+		return nameLeaving, &sb, nil
+	}
+	return nameTaken, &sb, nil
+}
+
+// ownedByPredecessor reports whether sb is controlled by an earlier SpinApp
+// with app's name (same name, another UID), which a deletion and re-creation
+// of the SpinApp leaves behind.
+func ownedByPredecessor(sb *sandboxv1alpha1.SwiftSandbox, app *spinv1alpha1.SpinApp) bool {
+	ref := metav1.GetControllerOf(sb)
+	if ref == nil || ref.Kind != "SpinApp" || ref.Name != app.Name || ref.UID == app.UID {
+		return false
+	}
+	gv, err := schema.ParseGroupVersion(ref.APIVersion)
+	return err == nil && gv.Group == spinv1alpha1.GroupVersion.Group
 }
 
 // features returns the SwiftSandbox features of the installed KubeSwift.
