@@ -271,6 +271,14 @@ YAML
   # Progress goes to standard error and results (JSON lines) to standard
   # output; the pod log has both.
   "${K[@]}" logs -f "job/startupbench-$mode" | tee "$OUT/$mode.log" | grep -v '^{' || true
+  # A log stream can end before the Job does (a dropped connection): wait
+  # for the Job to finish, then read the whole log again.
+  for _ in $(seq $((RUNS * 60))); do
+    done_="$("${K[@]}" get job "startupbench-$mode" -o jsonpath='{.status.succeeded}{.status.failed}' 2>/dev/null || true)"
+    [[ -n "$done_" ]] && break
+    sleep 2
+  done
+  "${K[@]}" logs "job/startupbench-$mode" >"$OUT/$mode.log" 2>/dev/null || true
   grep '^{' "$OUT/$mode.log" >"$OUT/$mode.jsonl" || die "the $mode Job produced no results; see $OUT/$mode.log"
   "${K[@]}" wait --for=condition=Complete --timeout=60s "job/startupbench-$mode" >/dev/null \
     || die "the $mode Job did not complete; see $OUT/$mode.log"

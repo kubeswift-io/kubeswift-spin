@@ -11,8 +11,9 @@ that ran; nothing else is implied.
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
-| KubeSwift | v0.16.1 | KVM e2e, startup benchmark and warm-pool functional checks on the lab cluster (below); its sandbox API types and CRDs are unchanged from v0.16.0 (release diff), and the contract test still runs against v0.16.0 |
-| KubeSwift | v0.16.0 | KVM e2e on a lab cluster (below); contract test of `internal/sandboxapi` against the v0.16.0 Go types and CRDs; v0.16.0 sandbox CRDs in envtest |
+| KubeSwift | v0.16.2 | KVM e2e, rolling updates under traffic, startup benchmark and warm-pool functional checks on the lab cluster with the release images (below); contract test of `internal/sandboxapi` against the v0.16.2 Go types and CRDs; v0.16.2 sandbox CRDs in envtest. Required for readiness startup |
+| KubeSwift | v0.16.1 | KVM e2e, startup benchmark and warm-pool functional checks on the lab cluster (below); its sandbox API types and CRDs are unchanged from v0.16.0 (release diff), and the contract test then ran against v0.16.0 |
+| KubeSwift | v0.16.0 | KVM e2e on a lab cluster (below); until v0.1.0-rc4, contract test of `internal/sandboxapi` and envtest CRDs at v0.16.0 |
 | KubeSwift | v0.15.1 | legacy mode only: unit and envtest tests with a feature detector that reports no optional features. Legacy mode uses only the API subset that was contract-tested against v0.15.1 before the module moved to v0.16.0. Not run on a v0.15.1 cluster since the v0.16.0 integration. |
 | cert-manager | v1.21.1 | KVM e2e cluster (the kind integration test pins v1.21.2) |
 | Kubernetes API server | 1.34.1, 1.37.0 | envtest controller suite |
@@ -184,6 +185,50 @@ runs, so every launcher was created by v0.16.1.
   more than two watch resyncs showed no repeated action. Deleting the SpinApps
   left no sandbox, pod, Service, NetworkPolicy, Role or ServiceAccount.
 - The kubeswift-spin controller logged no warning or error.
+
+### Zero-loss rolling updates (KubeSwift v0.16.2, 2026-10-11)
+
+Method: an in-cluster client on another node sent requests to the SpinApp
+Service for the whole run, eight concurrent loops, a new connection per
+request and a 2-second timeout; any error, timeout or unexpected response
+counts as failed. A watcher recorded pods, EndpointSlices and SwiftSandboxes
+on the same clock. Lab cluster as below, KubeSwift v0.16.2 release images,
+kube-proxy in iptables mode with default settings, the hello-http example
+with its readiness check. Each rollout changes the spec (a pod label) and
+ends when every replica is ready at the new revision.
+
+Final v0.1.0-rc5 code (development build of commit 7cb6d55):
+
+| Scenario | Requests | Failed |
+|---|---:|---:|
+| 3 rollouts, 1 replica, cold | 386,479 | 0 |
+| 3 rollouts, 2 replicas, warm pool | 496,773 | 0 |
+| 3 rollouts, 1 replica, a second spec change as soon as replica 0 was replaced | 519,313 | 0 |
+| scaling 1, 3, 1, 3, 1 | 261,692 | 0 |
+| a rollout to a revision that never starts, held 90 s, then a fix, 1 replica | 283,285 | 0 |
+| the same with 2 replicas | 329,473 | 0 |
+| 2 rollouts with a controller restart 15 s into each | 338,075 | 0 |
+
+Earlier v0.1.0-rc5 code (commit 3979592, before the scale-down and
+backoff changes), no failure in 3,575,000 requests: 3 rollouts each with
+1 and 2 replicas, cold and warm; second spec changes with 1 replica (3)
+and 2 replicas (2); scaling; controller restarts. One run of that batch
+lost 450 requests: it re-created the SpinApp under the name of one deleted
+seconds earlier, and KubeSwift attached the new sandbox to the old
+replica's terminating launcher pod
+([kubeswift-io/kubeswift#772](https://github.com/kubeswift-io/kubeswift/issues/772),
+see [Known upstream issues](#known-upstream-issues)). The scenario passed
+on clean preconditions (above).
+
+With a revision that never starts, the surge replica failed and was
+retried with backoff while the old replicas kept serving (`Available=True`,
+`Progressing=False` with `SandboxFailed`). For comparison, v0.1.0-rc4 on
+the same cluster lost 68 of 105,634 requests in one single-replica rollout
+and none with two replicas.
+
+These results depend on the KubeSwift v0.16.2 termination behavior
+described under [Known upstream issues](#known-upstream-issues): a
+deleted replica keeps serving until its grace period ends.
 
 ### Not tested
 
