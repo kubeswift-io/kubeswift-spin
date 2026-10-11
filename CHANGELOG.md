@@ -7,6 +7,24 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## v0.1.0 (2026-10-11)
+
+First release. The source is v0.1.0-rc6 (commit e851a1f) with only
+documentation and version references changed: no change to the controller,
+the chart templates, the runtime image or any API.
+
+### Upgrade notes
+
+- Upgrading from v0.1.0-rc6 changes no rendered SwiftSandbox spec, so it
+  replaces no replica. The runtime image stays `spin-4.2.1-r2`.
+- KubeSwift v0.16.3 or later is required (see v0.1.0-rc6).
+
+### Changed
+
+- The README states the release status and the known limitations; the
+  chart version, install commands, example manifests (now the `v0.1.0`
+  example artifacts) and the release guide use v0.1.0.
+
 ## v0.1.0-rc6 (2026-10-11)
 
 Release candidate for KubeSwift v0.16.3, which is now the supported
@@ -22,7 +40,7 @@ implements none of them. The runtime image `spin-4.2.1-r2` is reused.
   replaces no replica. kubeswift-spin does not set
   `spec.termination.drainPeriod`; KubeSwift's default of 5 seconds for
   sandboxes with exposed ports applies. A request still running about 5
-seconds after its replica is deleted (rolling update, scale-down, deletion) is
+  seconds after its replica is deleted (rolling update, scale-down, deletion) is
   cut; on KubeSwift v0.16.2 and earlier it had up to about 30 seconds.
 - Upgrade KubeSwift to v0.16.3 as its release notes describe (apply its
   CRDs first). That changes no SwiftSandbox kubeswift-spin renders either.

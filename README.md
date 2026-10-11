@@ -16,17 +16,17 @@ KubeSwift.
 
 ## Status
 
-v0.1.0-rc6 is a release candidate for KubeSwift v0.16.3, the supported
-baseline: KubeSwift drains a deleted replica and stops it explicitly, keeps
-its network isolation until it has stopped, and never gives a re-created
-sandbox the previous one's launcher. Rolling updates keep `spec.replicas`
-replicas available, including for a single replica, and a replica without a
-readiness check is ready about 0.1 seconds after Spin first answers. The
-runtime image `spin-4.2.1-r2` is unchanged from v0.1.0-rc4. It validates the
-initial architecture and the core execution path on real KVM hardware and is
-meant for evaluation and integration testing while the project builds
-broader compatibility and operational experience. It is not
-production-ready.
+v0.1.0 is the first release of kubeswift-spin. Its source is the validated
+v0.1.0-rc6 code; only documentation and version references changed. It requires KubeSwift
+v0.16.3 or later: KubeSwift drains a deleted replica and stops it
+explicitly, keeps its network isolation until it has stopped, and never
+gives a re-created sandbox the previous one's launcher, and the rolling
+updates and deletion below rely on that. Rolling updates keep
+`spec.replicas` replicas available, including for a single replica, and a
+replica without a readiness check is ready about 0.1 seconds after Spin
+first answers. It was validated on one KVM lab cluster; evaluate it with
+your own workloads, and read the known limitations below, before relying on
+it in production.
 
 Tested on linux/amd64 only, with KubeSwift v0.16.3 (earlier releases also
 on v0.16.0 to v0.16.2), Spin Operator v0.6.1 and Kubernetes 1.34 (one k0s lab
@@ -52,6 +52,30 @@ What works on KubeSwift v0.16.3, exercised by the KVM end-to-end test
 
 On KubeSwift v0.15.1, SpinApps run but report `Available=False` with reason
 `NetworkUnavailable`, and Secret-backed configuration is rejected.
+
+### Known limitations
+
+- Validated on linux/amd64 only, on one KVM lab cluster. arm64 images are
+  published but have never been run.
+- A deleted replica (rolling update, scale-down, deletion) keeps serving
+  for KubeSwift's default drain of 5 seconds and is then stopped: a request
+  still running after that is cut. kubeswift-spin does not change the
+  drain period in this release.
+- Force-deleting a launcher pod, or other overrides of KubeSwift's normal
+  termination, bypass the drain and the isolation kept through it
+  ([security-model.md](docs/security-model.md#network-isolation)).
+- The first checkout from a newly created warm pool is much slower than a
+  checkout from an already-warm pool (about 12 seconds to `Available` in
+  the e2e runs, against about 3.2 seconds p50 for an already-warm
+  checkout).
+- Reaching a new replica through its Service also waits for Kubernetes to
+  route to it (kube-proxy rule syncs, at most once per second by default).
+  Lowering kube-proxy's `minSyncPeriod` is optional cluster configuration
+  that kubeswift-spin does not require.
+- Startup figures in [performance.md](docs/performance.md) are lab
+  measurements, not guarantees. The Wasmtime compilation cache measured
+  there is diagnostic research; v0.1.0 does not ship or populate a
+  compilation cache.
 
 Read [why kubeswift-spin](docs/why-kubeswift-spin.md) for when a microVM
 around a Wasm application is worth its cost, and when standard SpinKube is
@@ -125,7 +149,7 @@ kubectl create namespace demo
 Install the chart with a `kubeswift` executor in `demo`:
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc6 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -140,7 +164,7 @@ Chart values are documented in
 ## Run hello-http
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc6/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0/examples/hello-http/spinapp.yaml
 ```
 
 ```bash
