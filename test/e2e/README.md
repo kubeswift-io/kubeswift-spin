@@ -6,7 +6,7 @@ do. It is the only test in this repository that runs SpinApps in KubeSwift
 sandboxes; the envtest and kind tests stand in for KubeSwift, and the
 runtime image test runs Spin in Docker.
 
-It passes all nine phases on the KVM lab cluster; see
+It has passed all nine phases on the KVM lab cluster; see
 [Lab result](#lab-result).
 
 ## Phases
@@ -119,7 +119,7 @@ E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.1.0 E2E_WARM_POOL=1 E2E_SCRATCH
 The script passed every check of all nine phases on the KVM lab cluster
 described in
 [compatibility.md](../../docs/compatibility.md#validation-of-v010), with
-KubeSwift v0.16.3 and the v0.1.0 code. Development builds also passed it on
+KubeSwift v0.16.3 and the v0.1.0 source. Earlier builds also passed it on
 KubeSwift v0.16.0, v0.16.1 and v0.16.2. Not covered: arm64.
 
 ## CI

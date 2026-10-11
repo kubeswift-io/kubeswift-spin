@@ -82,11 +82,12 @@ cluster:
 kubectl -n <namespace> run curl --rm -i --restart=Never --image=curlimages/curl:8.16.0 --command -- curl -sS http://hello-http.<namespace>.svc/hello
 ```
 
-The response is `Hello from Spin on KubeSwift`. On the KVM lab cluster a
-new replica that booted a microVM returned its first direct response 9.9
-seconds after creation, the SpinApp became `Available` after 11.9 seconds
-and the replica answered through the Service after 13.0 seconds (medians;
-see [docs/performance.md](../../docs/performance.md)).
+The response is `Hello from Spin on KubeSwift`. On the KVM lab cluster with
+KubeSwift v0.16.3 a new replica that booted a microVM returned its first
+direct response 8.95 seconds after creation, the SpinApp became
+`Available` after 10.70 seconds and the replica answered through the
+Service after 11.12 seconds (medians of five runs; see
+[docs/performance.md](../../docs/performance.md)).
 
 The manifest uses `/healthz` as the readiness check. `httpHeaders: []` is
 required by Spin Operator v0.6.1, which otherwise rejects the SpinApp at

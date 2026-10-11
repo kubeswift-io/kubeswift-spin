@@ -12,7 +12,7 @@ that ran; nothing else is implied.
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
 | KubeSwift | v0.16.3 | KVM e2e, rolling updates under traffic, termination and `ingress-from` through deletion, re-creation under the same name, readiness startup and the startup benchmark on the lab cluster; contract test of `internal/sandboxapi` against the v0.16.3 Go types and CRDs; v0.16.3 sandbox CRDs in envtest. The supported baseline |
-| KubeSwift | v0.16.0 to v0.16.2 | KVM e2e, startup benchmark and, on v0.16.2, rolling updates with development builds on the lab cluster; see [Known upstream issues](#known-upstream-issues) for what they lack |
+| KubeSwift | v0.16.0 to v0.16.2 | KVM e2e, startup benchmark and, on v0.16.2, rolling updates with earlier builds on the lab cluster; see [Known upstream issues](#known-upstream-issues) for what they lack |
 | KubeSwift | v0.15.1 | legacy mode only: unit and envtest tests with a feature detector that reports no optional features. Legacy mode uses only the API subset that was contract-tested against v0.15.1 before the module moved to v0.16.0. Not run on a v0.15.1 cluster since the v0.16.0 integration. |
 | cert-manager | v1.21.1 | KVM e2e cluster (the kind integration test pins v1.21.2) |
 | Kubernetes API server | 1.34.1, 1.37.0 | envtest controller suite |
@@ -27,25 +27,26 @@ Calico CNI on linux/amd64 nodes, kube-proxy in iptables mode with default
 settings, cert-manager v1.21.1, Spin Operator v0.6.1 and the KubeSwift
 v0.16.3 release images, with the SwiftKernel artifact
 `kernels/sandbox:6.6.16` (Linux 6.6.158). The end-to-end and
-published-artifact checks used signed images, chart and example artifacts
-that the release workflow built from the v0.1.0 code; the long traffic
-runs used a development build of the same controller code (it differs
-only in the wording of one status message).
+release-artifact checks used signed images, chart and example artifacts
+that the release workflow built from a pre-release whose source differs
+from v0.1.0 only in version strings; the long traffic runs used a
+development build of the same source (it differs only in the wording of
+one status message).
 
 End-to-end test (`test/e2e/kvm-e2e.sh`): every check of all nine phases
 passed: hello-http with scaling and a rolling update, Secret-backed
 variables, serverless-ai with an egress allowlist and a Secret-backed LLM
 token, a warm-pool checkout, `runtimeConfig.loadFromSecret`, a private
 application registry through `imagePullSecrets`, `ingress-from`, liveness
-failure and replacement, and teardown. hello-http was `Available` about 11
-seconds after creation from a cold start; the first checkout of a newly
-created warm pool took 12.0 seconds. Startup benchmarks are in
+failure and replacement, and teardown (in two runs). hello-http was
+`Available` about 11 to 12 seconds after creation from a cold start; the
+first checkout of a newly created warm pool took 12.0 seconds. Startup benchmarks are in
 [performance.md](performance.md#current-results).
 
 Release artifacts: the controller image, the chart, the runtime image and
 the hello-http example verified with cosign against the release workflow
-identity. A clean install of the chart detected exposure, secrets,
-egress, readiness startup and termination; the end-to-end phases 1, 2, 4
+identity. After a clean install of the chart, the controller detected
+exposure, secrets, egress, readiness startup and termination; the end-to-end phases 1, 2, 4
 and 9 passed (29 checks), a single-replica rolling update under traffic had
 no failed request, and the deletion left no SpinApp, SwiftSandbox, pool or
 NetworkPolicy behind.
@@ -64,7 +65,7 @@ launcher pod.
 `ingress-from` through deletion: see
 [security-model.md](security-model.md#network-isolation).
 
-Development builds of kubeswift-spin were also run on KubeSwift v0.16.0,
+Earlier builds of kubeswift-spin were also run on KubeSwift v0.16.0,
 v0.16.1 and v0.16.2 (end-to-end test, startup benchmark, rolling updates).
 Those releases lack behavior the rolling updates and deletion rely on; see
 [Known upstream issues](#known-upstream-issues).
@@ -95,7 +96,7 @@ KubeSwift v0.16.3, which drains each deleted replica explicitly (see
 
 In every replacement of a serving replica that the watch recorded (50;
 scale-downs and replicas replaced before they were ready are not counted)
-the old replica was deleted 1 to 276 ms after its replacement was ready,
+the old replica was deleted 9 to 276 ms after its replacement was ready,
 was marked not ready (`Terminating=Draining`) within 91 ms of the deletion,
 drained, and its launcher exited successfully 5.4 to 6.8 seconds after the
 deletion; the NetworkPolicy was removed 5 to 70 ms after the launcher
@@ -320,7 +321,7 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   re-reads the schema at most every `--capability-refresh` (default 5
   minutes) and renders the new spec at the next reconcile of each SpinApp;
   restarting the controller applies it at once.
-- **Upgrading KubeSwift to v0.16.3** changes no SwiftSandbox that
+- **Upgrading KubeSwift from v0.16.2 to v0.16.3** changes no SwiftSandbox that
   kubeswift-spin renders, so it replaces no replica. Apply the v0.16.3 CRDs
   as its upgrade notes say. Its controller adds finalizers to every
   SwiftSandbox and launcher NetworkPolicy; remove them before downgrading
@@ -330,8 +331,9 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   as a pull.
 - **Upgrading KubeSwift from v0.16.0 or v0.16.1 to v0.16.2 or later**
   gives replicas without a readiness check `spec.readinessStartup` (with
-  the default `auto`; every replica with `always`) and replaces them once. The chart does not move SwiftKernels to
-  the v0.16.2 kernel artifact (`kernels/sandbox:6.6.16`, Linux 6.6.158);
+  the default `auto`; every replica with `always`) and replaces them once.
+  The KubeSwift chart does not move SwiftKernels to the v0.16.2 kernel
+  artifact (`kernels/sandbox:6.6.16`, Linux 6.6.158);
   changing `spec.ociRef.image` pulls nothing until the kernel's pull Jobs
   are deleted, as the KubeSwift v0.16.2 upgrade notes describe. Running
   sandboxes keep the kernel they booted with until they are replaced.

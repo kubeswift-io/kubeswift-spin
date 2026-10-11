@@ -7,8 +7,8 @@ token uses the `release` environment and waits for its approval, except
 the OSV-Scanner job, whose only write permission is
 `security-events: write` for the code scanning upload.
 
-The workflow leaves the GitHub release as a draft. Check every artifact (see [Verifying a release](#verifying-a-release))
-before publishing the draft release.
+The workflow leaves the GitHub release as a draft. Check every artifact
+(see [Verifying a release](#verifying-a-release)) before publishing it.
 
 ## Repository settings
 
@@ -119,12 +119,13 @@ runtime image has its own version and is reused by later releases, so it
 carries the signature of the release that first built it, not of the
 current tag. Verify the digest listed in the release's `images.txt` with
 the release workflow identity of any version tag, as the release workflow
-itself does before reusing it:
+itself does before reusing it (the one place where a pattern is the right
+check):
 
 ```bash
-cosign verify ghcr.io/kubeswift-io/kubeswift-spin-runtime:spin-4.2.1-r2 \
+cosign verify ghcr.io/kubeswift-io/kubeswift-spin-runtime@<digest from images.txt> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/kubeswift-io/kubeswift-spin/.github/workflows/release.yaml@refs/tags/v'
+  --certificate-identity-regexp '^https://github\.com/kubeswift-io/kubeswift-spin/\.github/workflows/release\.yaml@refs/tags/v'
 ```
 
 Provenance attestations:

@@ -23,8 +23,8 @@ v0.1.0 is the first release. It was validated on a KVM lab cluster:
 Kubernetes 1.34 (k0s) with the Calico CNI on linux/amd64 nodes, KubeSwift
 v0.16.3 and Spin Operator v0.6.1. The validation covered the end-to-end
 test suite, rolling updates, scaling and deletion under continuous traffic,
-network isolation during termination, warm pools and the release
-artifacts. [docs/compatibility.md](docs/compatibility.md) lists what was
+network isolation during termination and warm pools, with builds from the
+same source as v0.1.0. [docs/compatibility.md](docs/compatibility.md) lists what was
 tested.
 
 It has been run on that one cluster only. Evaluate it with your own
@@ -53,9 +53,9 @@ SpinApp  ->  Spin Operator  ->  kubeswift-spin  ->  SwiftSandbox  ->  microVM  -
               createDeployment: false)                                 your Spin OCI artifact
 ```
 
-1. An operator creates a SpinAppExecutor labelled
+1. A platform operator creates a SpinAppExecutor labelled
    `spin.kubeswift.io/managed-by: kubeswift-spin` with
-   `createDeployment: false`. Its annotations select the sandbox profile.
+   `createDeployment: false`. Its annotations set the executor profile.
 2. A developer applies a normal SpinApp that names that executor.
 3. kubeswift-spin creates one SwiftSandbox per replica. Each boots the
    `kubeswift-spin-runtime` image, which runs
@@ -69,7 +69,7 @@ Details: [architecture](docs/architecture.md) and
 ## Requirements
 
 - Kubernetes 1.31 or later (the chart's minimum; 1.34 was tested)
-- KubeSwift v0.16.3 or later, the supported baseline. kubeswift-spin
+- KubeSwift v0.16.3 or later (v0.16.3 tested), the supported baseline. kubeswift-spin
   relies on its termination order (a deleted replica leaves the Service,
   drains and is then stopped), on its network isolation being kept until a
   replica has stopped, and on a re-created sandbox never taking over the
@@ -149,8 +149,12 @@ and an experimental MCP server, are in [examples](examples/).
   configuration.
 - Startup figures in [performance](docs/performance.md) are lab
   measurements, not guarantees. The Wasmtime compilation cache measured
-  there is research; v0.1.0 ships no prebuilt cache, and every sandbox
-  starts with an empty one.
+  there was a diagnostic; v0.1.0 ships no prebuilt cache, and every
+  sandbox starts with an empty one.
+- Any SpinApp author in a namespace can make that namespace's Secrets
+  readable by their application, and registry credentials and
+  Secret-backed values are readable by the Spin process in the guest; see
+  the [security model](docs/security-model.md).
 
 ## Documentation
 

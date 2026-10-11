@@ -96,7 +96,7 @@ not been validated. See docs/compatibility.md for what was tested.
 - A deleted replica drains for KubeSwift's default of 5 seconds and is
   then stopped; a request still running after that is cut. A launcher pod
   deleted with `--force` bypasses the drain and the isolation kept through
-  it.
+  it (not tested).
 - On KubeSwift v0.16.0 to v0.16.2 a deleted replica is not drained, its
   NetworkPolicy is removed while it can still serve, and a SpinApp
   re-created under the same name can be attached to the old launcher; the
@@ -114,5 +114,6 @@ not been validated. See docs/compatibility.md for what was tested.
 - Any SpinApp author in a namespace can expose that namespace's Secrets to
   their application. Executor authors control sandbox images, nodes and
   network modes; there is no administrator policy for executor profiles.
-- Not supported: autoscaling, `serviceAccountName`, volumes,
-  `configMapKeyRef`, `deploymentConfig.caCertSecret`.
+- Not supported, among others (see docs/compatibility.md): autoscaling,
+  `serviceAccountName`, volumes, `configMapKeyRef`,
+  `deploymentConfig.caCertSecret`.

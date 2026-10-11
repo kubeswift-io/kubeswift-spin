@@ -50,7 +50,12 @@ docker push <registry>/kubeswift-spin:v0.1.0-dev
 docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r2
 ```
 
-Then install from the source tree:
+Then install from the source tree, with a `kubeswift` executor in an
+existing namespace (`demo` here):
+
+```bash
+kubectl create namespace demo
+```
 
 ```bash
 helm install kubeswift-spin charts/kubeswift-spin \

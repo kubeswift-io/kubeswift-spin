@@ -74,12 +74,12 @@ private registry needs `spec.imagePullSecrets` (see
 
 ## What works in a KubeSwift sandbox today
 
-With KubeSwift v0.16.0 each SpinApp is reachable through the Service Spin
-Operator creates (`http://<app>.<namespace>.svc`), and becomes `Available`
+With KubeSwift v0.16.0 or later each SpinApp is reachable through the
+Service Spin Operator creates (`http://<app>.<namespace>.svc`), and becomes `Available`
 when its replicas pass the readiness check. The KVM e2e test
 ([test/e2e](../test/e2e/README.md)) ran on a lab cluster:
 
-| Example | In a KubeSwift v0.16.0 sandbox |
+| Example | In a KubeSwift v0.16.3 sandbox |
 |---|---|
 | hello-http | tested: readiness, Service, scaling, rolling update without failed requests, warm-pool checkout, private registry with `imagePullSecrets`, `ingress-from` |
 | request-info | tested: two replicas behind the Service, literal and Secret-backed variables |
