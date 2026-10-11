@@ -347,14 +347,14 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 				} else {
 					logger.V(1).Info("SwiftSandbox create rejected again", "sandbox", sb.Name, "retryIn", wait)
 				}
-				what := "SwiftSandbox " + sb.Name
+				note := ""
 				if ord == int(app.Spec.Replicas) {
-					what += " (the surge replica of a rolling update; the old replicas keep serving)"
+					note = "; it is the surge replica of a rolling update and the old replicas keep serving"
 				}
 				if blocker == nil {
 					blocker = &status.Blocker{Reason: status.ReasonSandboxRejected,
-						Message: fmt.Sprintf("the API server rejected creating %s (%s); check ResourceQuota on SwiftSandboxes and admission policies in namespace %s, and the controller log",
-							what, reason, app.Namespace)}
+						Message: fmt.Sprintf("the API server refused to create SwiftSandbox %s (%s)%s; check ResourceQuota on SwiftSandboxes and admission policies in namespace %s, and the controller log",
+							sb.Name, reason, note, app.Namespace)}
 				}
 				rejectedWait = wait
 				break

@@ -26,7 +26,8 @@ What happens on KubeSwift v0.16.2, observed on the lab cluster
 - The endpoint stays terminating and serving for those 30 s
   (`ready=false serving=true terminating=true`), so no request failed in
   946,592 requests across six rolling updates of two replicas (three with
-  cold sandboxes, three from a warm pool).
+  cold sandboxes, three from a warm pool), measured with kubeswift-spin
+  v0.1.0-rc4 on 2026-10-10.
 
 The drain therefore works by accident: it depends on the guest ignoring
 the power button. Every sandbox deletion takes the full grace period, and

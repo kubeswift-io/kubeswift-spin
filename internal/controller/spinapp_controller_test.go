@@ -949,7 +949,7 @@ func TestRejectedSurgeKeepsTheOldReplicaAndRecovers(t *testing.T) {
 
 	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
 	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxRejected)
-	if c := findCond(a, status.TypeProgressing); !strings.Contains(c.Message, "hello-1 (the surge replica") {
+	if c := findCond(a, status.TypeProgressing); !strings.Contains(c.Message, "hello-1 (Forbidden); it is the surge replica") {
 		t.Fatalf("message %q", c.Message)
 	}
 	consistently(t, "the old replica keeps serving", time.Second, func() error {

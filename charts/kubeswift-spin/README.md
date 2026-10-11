@@ -101,6 +101,8 @@ first accepts connections (KubeSwift v0.16.2). `always` does the same for
 SpinApps that declare an HTTP readiness check, whose `initialDelaySeconds`
 then does not delay the first checks; see
 [docs/executor-contract.md](../../docs/executor-contract.md#readiness-startup).
+On KubeSwift before v0.16.2, `always` makes the executor invalid and
+`auto` changes nothing.
 
 `sandboxPool` names a SwiftSandboxPool that you create in the same
 namespace. Its `image` must equal the controller's runtime image reference

@@ -9,29 +9,29 @@ running replicas on upgrade) say so under "Upgrade notes".
 
 ## v0.1.0-rc5 (unreleased)
 
-Release candidate for KubeSwift v0.16.2. Rolling updates now keep
+Release candidate for KubeSwift v0.16.2. Rolling updates keep
 `spec.replicas` replicas available, including for a single replica, and
-replicas without a readiness check become ready within about a second of
-Spin listening instead of after the first probe period. The runtime image
-`spin-4.2.1-r2` is reused.
+replicas without a readiness check become ready about 0.1 seconds after
+Spin first answers (p50 on the lab cluster) instead of at the next
+2-second probe. The runtime image `spin-4.2.1-r2` is reused.
 
 ### Upgrade notes
 
 - On KubeSwift v0.16.2 or later, the rendered sandbox spec of a replica
   with no `spec.checks.readiness` gains `readinessStartup`, so the first
-  reconcile after upgrading kubeswift-spin (or KubeSwift to v0.16.2) replaces
-  those replicas once. With this release the replacement keeps them
-  available (see Changed). Replicas whose SpinApp sets a readiness check are
-  not replaced unless the executor sets
+  reconcile after upgrading kubeswift-spin (or KubeSwift to v0.16.2)
+  replaces those replicas once. With this release the replacement keeps
+  them available (see Changed). Replicas whose SpinApp sets a readiness
+  check are not replaced unless the executor sets
   `spin.kubeswift.io/readiness-startup: always`. On KubeSwift v0.16.1 or
   earlier the spec is unchanged.
 - A rollout now runs one extra sandbox per SpinApp, the surge replica
-  `<spinapp>-<replicas>`, labeled `spin.kubeswift.io/surge=true`. Leave room
-  for it in node capacity and in any ResourceQuota on SwiftSandboxes or
-  launcher pods. A SwiftSandbox create refused by a quota or admission
-  policy is reported as `SandboxRejected` and the rollout waits with every
-  old replica serving. When many SpinApps roll
-  at once (for example on the upgrade above), each needs that headroom.
+  `<spinapp>-<replicas>`, labeled `spin.kubeswift.io/surge=true`. Leave
+  room for it in node capacity and in any ResourceQuota on SwiftSandboxes
+  or launcher pods. A SwiftSandbox create refused by a quota or admission
+  policy is reported as `SandboxRejected`, and the rollout waits with every
+  old replica serving. When many SpinApps roll at once (for example on the
+  upgrade above), each needs that headroom.
 - Downgrading to v0.1.0-rc4 during a rollout removes the surge replica as
   a scaled-down replica and continues with rc4's delete-then-create
   replacement.
@@ -41,53 +41,76 @@ Spin listening instead of after the first probe period. The runtime image
 ### Added
 
 - The executor annotation `spin.kubeswift.io/readiness-startup` and the
-  chart value `executors[].readinessStartup`: `auto` (default) sets
-  KubeSwift's `spec.readinessStartup` with its defaults (probe every 100 ms
-  for up to 30 seconds after boot, until the first success) only on the TCP
-  readiness check kubeswift-spin adds when a SpinApp has none; `always` also
-  sets it on SpinApp readiness checks, which then ignore
-  `initialDelaySeconds` (a `PartiallySupported` Warning Event says so);
-  `never` does not set it. Requires KubeSwift v0.16.2 for `always`;
-  otherwise the field is used only when detected in the SwiftSandbox
-  schema.
+  chart value `executors[].readinessStartup`:
+  - `auto` (default) sets KubeSwift's `spec.readinessStartup` with its
+    defaults (probe every 100 ms from the start of Spin until the first
+    success, for up to 30 seconds) only on the TCP readiness check
+    kubeswift-spin adds when a SpinApp has none;
+  - `always` also sets it on SpinApp readiness checks, which then ignore
+    `initialDelaySeconds` (a `PartiallySupported` Warning Event says so);
+  - `never` does not set it.
+
+  `always` needs KubeSwift v0.16.2 or later and makes the executor invalid
+  on older versions; `auto` sets the field only when the SwiftSandbox
+  schema has it.
 - `Progressing=False` with reason `SandboxRejected`, and an Event of the
   same name, when the API server refuses to create a SwiftSandbox
   (`Forbidden` or `Invalid`, for example a ResourceQuota on SwiftSandboxes).
-  The controller stops that reconcile's creates and retries after 10
-  seconds, doubling up to 5 minutes. Previously it retried with the
-  controller's default rate limit and reported nothing.
+  The controller stops that reconcile's creates and requeues the SpinApp
+  after 10 seconds, doubling per consecutive refusal up to 5 minutes; an
+  earlier change to the SpinApp or its sandboxes also retries. Previously
+  it retried at the controller's default rate limit and reported nothing
+  in the SpinApp status.
 
 ### Changed
 
 - Rolling updates create one surge replica at the new revision before
-  removing any available replica, and delete an outdated replica only while
-  the remaining available replicas, the surge included, number
+  removing any available replica, and delete an outdated replica only
+  while the remaining available replicas, the surge included, number
   `spec.replicas` (ADR 0013). A single-replica SpinApp is no longer
-  unavailable during a rollout. A spec change during a rollout keeps an
-  earlier-revision surge replica while it is the replica serving. Replica
-  names are unchanged.
+  unavailable during a rollout. After a further spec change during a
+  rollout, an available earlier-revision surge replica is kept until the
+  replicas below `spec.replicas` alone are enough. Replica names are
+  unchanged.
 - A scale-down keeps the lowest available replicas above the new count
   while fewer than `spec.replicas` of the remaining replicas are available,
   instead of deleting them at once; replicas that are not available still
   go at once.
-- A ready surge replica counts toward `readyReplicas` (capped at
-  `spec.replicas`); a failed or waiting surge replica is reported in
-  `Progressing` like any replica.
+- A ready surge replica, and a replica a scale-down keeps, count toward
+  `readyReplicas` (capped at `spec.replicas`); a failed or waiting surge
+  replica is reported in `Progressing` like any replica.
 - The failure backoff of a replica starts over when the failing replica
-  runs a different revision than the previous failure, and a failed replica
-  from an earlier revision is replaced 10 seconds after its failure instead
-  of after its full backoff.
-- KubeSwift v0.16.2 is the tested version and the contract-test dependency.
+  runs a different revision than the previous failure, and a failed
+  replica from an earlier revision is replaced 10 seconds after its
+  failure instead of after its full backoff.
+- KubeSwift v0.16.2 is the tested version and the contract-test
+  dependency.
+- `hack/test-examples.sh` and `hack/test-runtime-image.sh` take
+  `UPSTREAM_PORT` for the local LLM test fixture; `hack/perf-startup.sh`
+  reads the whole benchmark log again when its log stream ends early.
 
 ### Documentation
 
 - ADR 0013 (surge replacement); ADR 0009 amended.
 - docs/upstream/kubeswift-sandbox-termination-drain.md: a proposal for a
-  bounded drain when an exposed sandbox is deleted. On KubeSwift v0.16.2 a
-  deleted replica keeps serving until its launcher's 30-second grace period
-  ends, which is what keeps rollouts lossless today.
+  bounded drain when an exposed sandbox is deleted, including keeping its
+  NetworkPolicy until the launcher pod is gone. On KubeSwift v0.16.2 a
+  deleted replica keeps serving until its launcher's 30-second grace
+  period ends, which is what keeps rollouts without failed requests today.
 - docs/upstream/kubeswift-sandbox-readiness-latency.md: the readiness
   requirement that KubeSwift v0.16.2 implemented.
+- performance.md: four startup measures, the origin of the earlier "19 to
+  26 seconds" figure, KubeSwift v0.16.2 results in three readiness
+  configurations, Service routing and kube-proxy's `minSyncPeriod`, and a
+  one-time Wasmtime compilation cache measurement (not provided).
+- compatibility.md: the rolling update record under traffic, KubeSwift
+  v0.16.2 as tested, and known KubeSwift v0.16.2 issues: deleted sandboxes
+  serve until the grace period ends, and a sandbox re-created under the same
+  name attaches to the old terminating launcher pod
+  ([kubeswift-io/kubeswift#772](https://github.com/kubeswift-io/kubeswift/issues/772)).
+- security-model.md: the NetworkPolicy gap while a deleted replica
+  terminates, with a namespace default-deny recommendation, and the
+  sandbox count bounds.
 
 ## v0.1.0-rc4 (2026-10-10)
 
@@ -153,11 +176,11 @@ readiness checks through as written.
   v0.1.0-rc3 controller and runtime entrypoint, has standard-library
   vulnerabilities in `net/http` (HTTP/1 and HTTP/2), `crypto/tls`,
   `mime/multipart` and `html/template` that `govulncheck` reports as
-  reachable from the controller or the entrypoint (GO-2026-6599, GO-2026-6600, GO-2026-6603,
-  GO-2026-6605, GO-2026-6607, GO-2026-6608, GO-2026-6610, GO-2026-6611,
-  GO-2026-6612, GO-2026-6613, GO-2026-6617); five of them also affect
-  `golang.org/x/net` v0.59.0. `go.mod` now names the toolchain, so CI
-  builds with the same Go version as the images.
+  reachable from the controller or the entrypoint (GO-2026-6599,
+  GO-2026-6600, GO-2026-6603, GO-2026-6605, GO-2026-6607, GO-2026-6608,
+  GO-2026-6610, GO-2026-6611, GO-2026-6612, GO-2026-6613, GO-2026-6617);
+  five of them also affect `golang.org/x/net` v0.59.0. `go.mod` now names
+  the toolchain, so CI builds with the same Go version as the images.
 
 ### Documentation
 

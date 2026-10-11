@@ -14,4 +14,4 @@
 | [0010](0010-runtime-image-versioning.md) | Version the runtime image independently of the controller |
 | [0011](0011-apache-license-and-sandbox-api.md) | Apache-2.0 license; project-owned subset of the sandbox API |
 | [0012](0012-feature-detection.md) | Use KubeSwift features only when the published schema shows them |
-| [0013](0013-surge-replacement.md) | Replace replicas with one surge replica, so rollouts keep every replica ready |
+| [0013](0013-surge-replacement.md) | Replace replicas with one surge replica, so rollouts keep `spec.replicas` replicas available |

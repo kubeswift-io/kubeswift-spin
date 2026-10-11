@@ -7,9 +7,12 @@ reaches the launcher pod in one write, and `spec.readinessStartup` is new.
 ## Problem
 
 A SpinApp started from a warm SwiftSandboxPool answers its first direct
-request about 400 ms after it is created. On KubeSwift v0.16.1 the SpinApp
-Service routed to it only after 2.8 s p50 / 3.5 s p95. The application was
-ready, and three mechanisms delayed it:
+request about 400 ms after it is created when the application comes from a
+local registry and the runtime image holds a Wasmtime compilation cache
+entry for it (with the published runtime image and `ghcr.io`, about 1.5 s;
+see [performance.md](../performance.md#current-results)). On KubeSwift
+v0.16.1 the SpinApp Service routed to it only after 2.8 s p50 / 3.5 s p95.
+The application was ready, and three mechanisms delayed it:
 
 1. **Whole-second probe times.** The readiness probe cannot run before
    `initialDelaySeconds`, and `periodSeconds` is a whole number of seconds,
@@ -103,9 +106,10 @@ interval.
 
 ## Results
 
-Warm SpinApp starts on one node: hello-http from a local registry, cached
-runtime, 1 vCPU / 256 MiB, Linux 6.6.158 sandbox kernel, slots at least 30 s
-old. All values are ms from SpinApp creation, p50 / p95.
+Warm SpinApp starts on one node: hello-http from a local registry, a runtime
+image holding a Wasmtime compilation cache entry for it, 1 vCPU / 256 MiB,
+Linux 6.6.158 sandbox kernel, slots at least 30 s old. All values are ms
+from SpinApp creation, p50 / p95.
 
 | Population | runs | direct HTTP | readiness confirmed | Pod Ready | Service HTTP |
 |---|---|---|---|---|---|
@@ -123,7 +127,7 @@ old. All values are ms from SpinApp creation, p50 / p95.
   upstream default trades CPU on large clusters for latency.
 - **kubelet relist after the claim:** the claim is a pod write. A gate set
   within the next relist waits for it: 0 to 1 s, about 1 in 3 times. This is
-  the p90 tail above. Removing it needs a kubelet change that lets a
+  the p95 tail above. Removing it needs a kubelet change that lets a
   readiness-gate-only change skip `GetNewerThan` (an upstream Kubernetes
   issue was drafted and not filed).
 - **A client's own retry spacing:** connection attempts made just before the

@@ -72,7 +72,11 @@ Do not describe mocked or kind-based tests as end-to-end tests.
 
 The example and runtime image tests start a mock OpenAI-compatible server
 on `127.0.0.1:8090`. If another process uses that port, set
-`UPSTREAM_PORT`, for example `UPSTREAM_PORT=18090 make example-test`.
+`UPSTREAM_PORT`, for example:
+
+```bash
+UPSTREAM_PORT=18090 make example-test
+```
 
 ## Writing
 

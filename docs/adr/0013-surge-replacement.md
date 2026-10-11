@@ -28,8 +28,8 @@ the old name while the old sandbox still exists.
 - The surge replica is removed (as a scale-down) once every ordinal below
   `spec.replicas` runs the new revision and is available.
 - A replica at ordinal `<replicas>` without the surge label is an ordinary
-  scaled-down replica and is removed at once. The surge replica is created
-  only once no other sandbox holds its name.
+  scaled-down replica and follows the scale-down rule below. The surge
+  replica is created only once no other sandbox holds its name.
 - If the spec changes again during a rollout, a surge replica of the
   earlier revision is replaced; while it is available and the desired
   replicas alone number fewer than `spec.replicas`, it is kept until they
@@ -72,15 +72,15 @@ the old name while the old sandbox still exists.
   start or never becomes ready, the rollout stalls with every old replica
   still serving; `Progressing` reports the failing sandbox, and the
   failed surge replica is replaced with the usual backoff.
-- Old replicas leave the Service when their launcher pod starts
-  terminating. kubeswift-spin relies on KubeSwift to keep a terminating
-  sandbox from failing connections while kube-proxy catches up. On
-  KubeSwift v0.16.2 this holds only because the guest ignores the ACPI
-  power button that swiftletd presses on SIGTERM, so it keeps serving until
-  the 30-second grace period ends and the launcher pod ends `Failed`. If a
-  later kernel or KubeSwift version stops the guest promptly, connections
-  routed during kube-proxy's next sync can fail. The KVM rollout check
-  under traffic is what would catch that; the generic fix is proposed in
+- Old replicas leave the Service when their launcher pod starts terminating.
+  kubeswift-spin relies on KubeSwift to keep a terminating sandbox from
+  failing connections while kube-proxy catches up. On KubeSwift v0.16.2 this
+  holds only because the guest ignores the ACPI power button that swiftletd
+  presses on SIGTERM, so it keeps serving until the 30-second grace period
+  ends and the launcher pod ends `Failed`. If a later kernel or KubeSwift
+  version stops the guest promptly, connections routed during kube-proxy's
+  next sync can fail. The KVM rollout check under traffic is what would
+  catch that; the generic fix is proposed in
   [kubeswift-sandbox-termination-drain.md](../upstream/kubeswift-sandbox-termination-drain.md).
 - While a deleted replica keeps serving, KubeSwift has already removed its
   NetworkPolicy, so its port is reachable from any pod in the cluster for
