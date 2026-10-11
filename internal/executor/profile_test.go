@@ -223,19 +223,19 @@ func TestParseReadinessStartup(t *testing.T) {
 	if p.ReadinessStartup != ReadinessStartupAuto {
 		t.Fatalf("default %q, want %q", p.ReadinessStartup, ReadinessStartupAuto)
 	}
-	for _, v := range []string{ReadinessStartupAuto, ReadinessStartupOn, ReadinessStartupOff} {
+	for _, v := range []string{ReadinessStartupAuto, ReadinessStartupAlways, ReadinessStartupNever} {
 		p, err := Parse(managed("kubeswift", map[string]string{AnnReadinessStartup: v}), defaults())
 		if err != nil || p.ReadinessStartup != v {
 			t.Fatalf("%q: %v %+v", v, err, p)
 		}
 	}
-	for _, v := range []string{"", "true", "ON", "100ms"} {
+	for _, v := range []string{"", "true", "on", "off", "ALWAYS", "100ms"} {
 		if _, err := Parse(managed("kubeswift", map[string]string{AnnReadinessStartup: v}), defaults()); err == nil {
 			t.Errorf("%q accepted", v)
 		}
 	}
 
-	on, err := Parse(managed("kubeswift", map[string]string{AnnReadinessStartup: ReadinessStartupOn}), defaults())
+	on, err := Parse(managed("kubeswift", map[string]string{AnnReadinessStartup: ReadinessStartupAlways}), defaults())
 	if err != nil {
 		t.Fatal(err)
 	}

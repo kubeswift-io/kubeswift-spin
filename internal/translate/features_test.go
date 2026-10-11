@@ -280,10 +280,10 @@ func TestReadinessStartup(t *testing.T) {
 		{"auto, own check", testApp(), "", v162, true},
 		{"auto explicit, own check", testApp(), executor.ReadinessStartupAuto, v162, true},
 		{"auto, SpinApp check keeps its initialDelaySeconds", withCheck(), executor.ReadinessStartupAuto, v162, false},
-		{"on, SpinApp check", withCheck(), executor.ReadinessStartupOn, v162, true},
-		{"off, own check", testApp(), executor.ReadinessStartupOff, v162, false},
+		{"always, SpinApp check", withCheck(), executor.ReadinessStartupAlways, v162, true},
+		{"never, own check", testApp(), executor.ReadinessStartupNever, v162, false},
 		{"auto, KubeSwift without readinessStartup", testApp(), executor.ReadinessStartupAuto, v16, false},
-		{"on, KubeSwift without readinessStartup", withCheck(), executor.ReadinessStartupOn, v16, false},
+		{"always, KubeSwift without readinessStartup", withCheck(), executor.ReadinessStartupAlways, v16, false},
 	}
 	for _, c := range cases {
 		p := testProfile()
@@ -303,9 +303,9 @@ func TestReadinessStartup(t *testing.T) {
 			t.Errorf("%s: no readiness probe", c.name)
 		}
 	}
-	// The user's check is passed through unchanged even when "on".
+	// The user's check is passed through unchanged even with "always".
 	p := testProfile()
-	p.ReadinessStartup = executor.ReadinessStartupOn
+	p.ReadinessStartup = executor.ReadinessStartupAlways
 	tmpl, err := BuildTemplate(withCheck(), p, DefaultResourcePolicy(), v162)
 	if err != nil {
 		t.Fatal(err)

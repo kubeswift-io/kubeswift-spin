@@ -447,6 +447,23 @@ These limits are per SpinApp, not per namespace. Use Kubernetes
 ResourceQuota on `count/swiftsandboxes.sandbox.kubeswift.io` (object count
 quota) to cap the number of sandboxes per namespace.
 
+During a rolling update a SpinApp runs one extra sandbox, the surge
+replica ([ADR 0013](adr/0013-surge-replacement.md)), so the bound is
+`spec.replicas + 1` (21 microVMs at the default `--max-replicas`). Size
+quotas and node capacity with one sandbox of headroom per SpinApp that may
+roll at the same time. A change that rolls every SpinApp at once, such as
+upgrading KubeSwift to v0.16.2 (replicas that get readiness startup are
+replaced) or changing the default runtime image, needs that headroom for
+all of them together. A surge replica that cannot be created or started
+stalls the rollout; the old replicas keep running.
+
+A rollout removes an available old replica only after its replacement is
+ready. If the new revision never becomes ready, the old replicas keep
+running with their old configuration, which matters when the change is a
+security fix (a new runtime image, a narrower network profile). To remove
+an old revision at once, scale the SpinApp to 0 or delete its
+SwiftSandboxes; each deleted ordinal is recreated at the new revision.
+
 ## Finalizers and deletion
 
 kubeswift-spin adds no finalizer. Deleting a SpinApp removes its sandboxes

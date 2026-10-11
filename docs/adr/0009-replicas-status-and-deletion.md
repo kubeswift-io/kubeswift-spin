@@ -1,6 +1,6 @@
 # 0009: StatefulSet-like replicas, owned status fields, no finalizer
 
-Status: accepted
+Status: accepted; the replacement order is amended by [0013](0013-surge-replacement.md).
 
 ## Context
 
@@ -10,8 +10,9 @@ SpinApp status is written by nobody else for external executors.
 ## Decision
 
 - Replica `i` is the sandbox `<app>-<i>`. Changes are applied by deleting
-  and recreating one available replica at a time; failed replicas are
-  replaced with exponential backoff.
+  and recreating one available replica at a time, after a surge replica
+  has taken its place (ADR 0013); failed replicas are replaced with
+  exponential backoff.
 - A controller owner reference (by UID) is the only proof of ownership;
   labels are for selection. Foreign objects are never adopted.
 - kubeswift-spin owns `activeScheduler`, `readyReplicas` and the
@@ -24,5 +25,6 @@ SpinApp status is written by nobody else for external executors.
 
 - Deterministic names and idempotent reconciliation; tested with envtest
   (including a controller restart) and kind.
-- A single-replica app has a short gap during replacement.
+- A single-replica app had a short gap during replacement; ADR 0013
+  removes it.
 - Deletion can never be blocked by kubeswift-spin.

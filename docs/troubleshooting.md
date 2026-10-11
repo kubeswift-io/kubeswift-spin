@@ -67,6 +67,7 @@ their SpinApp status.
 | `ExecutorNotFound` | The executor was deleted. Existing sandboxes keep running; recreate the executor. |
 | `WarmPoolIncompatible` | The pool is missing or its shape differs; the message names each mismatching field. Align the pool with the runtime image, CPU, memory, network mode, `network.ports` (on KubeSwift v0.16.0, `http-app` port 3000), egress allowlist and ingress peers the SpinApp gets (see [executor-contract.md](executor-contract.md#warm-pools)). The image must be the exact reference in the controller's `--runtime-image` argument; the released chart passes it by digest, so a tag does not match. If the message says the SwiftSandboxPool API was not installed at startup, restart the controller. |
 | `SandboxConflict` | A SwiftSandbox with the needed name exists and is not owned by the SpinApp. Delete or rename it. |
+| `SandboxRejected` | The API server refused to create a SwiftSandbox. The message gives the API reason (`Forbidden` or `Invalid`); the controller log has the full error. A ResourceQuota on SwiftSandboxes or launcher resources must leave room for `replicas + 1` sandboxes during a rolling update. The controller retries on the waiting interval. |
 | `RuntimeImageUnavailable` | KubeSwift could not pull, verify or materialize the runtime image. Check the image reference, pull secret and cosign key. |
 | `SandboxFailed` | Spin exited or the guest failed. Read the guest console (below). The replica is replaced after a backoff of up to 5 minutes. |
 

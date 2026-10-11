@@ -120,8 +120,14 @@ The comment at the top of the script lists every variable.
 - Cold runs use the executor `startupbench-cold`, which pins sandboxes to
   `PERF_NODE` with `spin.kubeswift.io/node-selector`.
 - Warm runs use the executor `startupbench-warm` and the one-slot pool
-  `startupbench-warm` (the controller's runtime image, 1 vCPU, 256Mi, the
-  same node), created after the cold runs. Before each warm run
+  `startupbench-warm` (the runtime image, 1 vCPU, 256Mi, the same node),
+  created after the cold runs.
+- Both executors set `spin.kubeswift.io/runtime-image` to `PERF_RUNTIME_IMAGE`
+  (default: the controller's runtime image) and, when
+  `PERF_READINESS_STARTUP` is set, `spin.kubeswift.io/readiness-startup`.
+  The canonical SpinApp declares a readiness check, so fast readiness
+  startup applies to it only with `PERF_READINESS_STARTUP=always` (see
+  [executor-contract.md](../../../docs/executor-contract.md#readiness-startup)). Before each warm run
   startupbench waits until the slot's pod is at least 30 seconds old,
   because KubeSwift v0.16.0 and v0.16.1 can hand out a slot whose guest is
   not ready yet (see

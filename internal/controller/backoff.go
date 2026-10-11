@@ -21,6 +21,7 @@ const (
 
 type ordinalState struct {
 	failures     int
+	revision     string
 	lastUID      string
 	notBefore    time.Time
 	runningUID   string
@@ -78,9 +79,11 @@ func (b *Backoff) state(app string, ord int) *ordinalState {
 	return s
 }
 
-// RecordFailure records that the sandbox with uid failed. It returns true the
-// first time a given sandbox is recorded.
-func (b *Backoff) RecordFailure(app string, ord int, uid string, now time.Time) bool {
+// RecordFailure records that the sandbox with uid, at revision, failed. It
+// returns true the first time a given sandbox is recorded. A failure at a
+// different revision than the previous one starts the count over, so a fixed
+// spec is not delayed by the failures of the broken one.
+func (b *Backoff) RecordFailure(app string, ord int, uid, revision string, now time.Time) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	s := b.state(app, ord)
@@ -90,6 +93,10 @@ func (b *Backoff) RecordFailure(app string, ord int, uid string, now time.Time) 
 	if s.runningUID == uid && now.Sub(s.runningSince) >= b.Stable {
 		// This sandbox ran long enough before failing: start over.
 		s.failures = 0
+	}
+	if s.revision != revision {
+		s.failures = 0
+		s.revision = revision
 	}
 	s.runningUID, s.runningSince = "", time.Time{}
 	s.lastUID = uid

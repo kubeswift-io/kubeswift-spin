@@ -64,6 +64,9 @@ executors:
     #     ports: [{port: 8000}]
     # ingressFrom:                # NetworkPolicy peers allowed to reach the Spin port
     #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: frontend}}
+    # KubeSwift v0.16.2 or later:
+    # readinessStartup: auto      # auto (default), always or never; see
+    #                             # docs/executor-contract.md#readiness-startup
     # otel:
     #   exporter_otlp_endpoint: http://otel-collector.observability:4318
 

@@ -68,16 +68,16 @@ const (
 	// AnnReadinessStartup selects when a replica's readiness check is
 	// retried quickly from the replica's start until it first passes
 	// (KubeSwift spec.readinessStartup, v0.16.2): "auto" (the default) for
-	// the check kubeswift-spin adds when a SpinApp sets none, "on" also for
-	// a SpinApp's own readiness check, "off" never.
+	// the check kubeswift-spin adds when a SpinApp sets none, "always" also
+	// for a SpinApp's own readiness check, "never" for none.
 	AnnReadinessStartup = Prefix + "readiness-startup"
 )
 
 // ReadinessStartup values of AnnReadinessStartup.
 const (
-	ReadinessStartupAuto = "auto"
-	ReadinessStartupOn   = "on"
-	ReadinessStartupOff  = "off"
+	ReadinessStartupAuto   = "auto"
+	ReadinessStartupAlways = "always"
+	ReadinessStartupNever  = "never"
 )
 
 // knownAnnotations is the complete set of profile annotations. Any other
@@ -143,7 +143,7 @@ type Profile struct {
 	IngressFrom []networkingv1.NetworkPolicyPeer
 
 	// ReadinessStartup is AnnReadinessStartup: ReadinessStartupAuto,
-	// ReadinessStartupOn or ReadinessStartupOff.
+	// ReadinessStartupAlways or ReadinessStartupNever.
 	ReadinessStartup string
 }
 
@@ -157,8 +157,8 @@ func (p *Profile) CheckFeatures(f capabilities.Sandbox) error {
 	if len(p.IngressFrom) > 0 && !f.Exposure() {
 		problems = append(problems, fmt.Sprintf("annotation %s needs sandbox port exposure, KubeSwift v0.16.0 or later", AnnIngressFrom))
 	}
-	if p.ReadinessStartup == ReadinessStartupOn && !f.ReadinessStartup {
-		problems = append(problems, fmt.Sprintf("annotation %s=%s needs spec.readinessStartup, KubeSwift v0.16.2 or later", AnnReadinessStartup, ReadinessStartupOn))
+	if p.ReadinessStartup == ReadinessStartupAlways && !f.ReadinessStartup {
+		problems = append(problems, fmt.Sprintf("annotation %s=%s needs spec.readinessStartup, KubeSwift v0.16.2 or later", AnnReadinessStartup, ReadinessStartupAlways))
 	}
 	if len(problems) > 0 {
 		return &ValidationError{Executor: p.ExecutorName, Problems: problems}
@@ -301,11 +301,11 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 	p.ReadinessStartup = ReadinessStartupAuto
 	if v, ok := ann[AnnReadinessStartup]; ok {
 		switch v {
-		case ReadinessStartupAuto, ReadinessStartupOn, ReadinessStartupOff:
+		case ReadinessStartupAuto, ReadinessStartupAlways, ReadinessStartupNever:
 			p.ReadinessStartup = v
 		default:
 			add("annotation %s must be %q, %q or %q, got %q", AnnReadinessStartup,
-				ReadinessStartupAuto, ReadinessStartupOn, ReadinessStartupOff, v)
+				ReadinessStartupAuto, ReadinessStartupAlways, ReadinessStartupNever, v)
 		}
 	}
 

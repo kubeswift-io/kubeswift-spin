@@ -23,10 +23,10 @@ func TestBackoffLifecycle(t *testing.T) {
 	now := time.Unix(1000, 0)
 	failed := []status.Instance{{Instance: rollout.Instance{Name: "a-0", Ordinal: 0, Health: rollout.Terminal}}}
 
-	if !b.RecordFailure("ns/a", 0, "uid-1", now) {
+	if !b.RecordFailure("ns/a", 0, "uid-1", "r1", now) {
 		t.Fatal("first failure not recorded")
 	}
-	if b.RecordFailure("ns/a", 0, "uid-1", now) {
+	if b.RecordFailure("ns/a", 0, "uid-1", "r1", now) {
 		t.Fatal("same sandbox counted twice")
 	}
 	pending, retry := b.Pending("ns/a", failed, now.Add(5*time.Second))
@@ -38,7 +38,7 @@ func TestBackoffLifecycle(t *testing.T) {
 	}
 
 	// A second, different failure doubles the delay.
-	b.RecordFailure("ns/a", 0, "uid-2", now)
+	b.RecordFailure("ns/a", 0, "uid-2", "r1", now)
 	if pending, _ := b.Pending("ns/a", failed, now.Add(15*time.Second)); !pending[0] {
 		t.Fatal("second failure did not double the delay")
 	}
@@ -74,7 +74,7 @@ func TestBackoffEscalatesForCrashLoops(t *testing.T) {
 		b.RecordRunning("ns/a", 0, uid, now) // no-op before the first failure
 		now = now.Add(5 * time.Second)
 		b.RecordRunning("ns/a", 0, uid, now)
-		b.RecordFailure("ns/a", 0, uid, now)
+		b.RecordFailure("ns/a", 0, uid, "r1", now)
 		delays = append(delays, b.apps["ns/a"][0].notBefore.Sub(now))
 		now = b.apps["ns/a"][0].notBefore
 	}
@@ -88,8 +88,20 @@ func TestBackoffEscalatesForCrashLoops(t *testing.T) {
 	// A replica that ran past the stability window starts over at the base.
 	b.RecordRunning("ns/a", 0, "uid-long", now)
 	b.RecordRunning("ns/a", 0, "uid-long", now.Add(time.Hour))
-	b.RecordFailure("ns/a", 0, "uid-long", now.Add(time.Hour))
+	b.RecordFailure("ns/a", 0, "uid-long", "r1", now.Add(time.Hour))
 	if d := b.apps["ns/a"][0].notBefore.Sub(now.Add(time.Hour)); d != 10*time.Second {
 		t.Fatalf("delay after a long healthy run = %s", d)
+	}
+}
+
+func TestBackoffStartsOverAtANewRevision(t *testing.T) {
+	b := NewBackoff()
+	now := time.Unix(1000, 0)
+	for i, uid := range []string{"u1", "u2", "u3", "u4"} {
+		b.RecordFailure("ns/a", 1, uid, "r2", now.Add(time.Duration(i)*time.Second))
+	}
+	b.RecordFailure("ns/a", 1, "u5", "r3", now.Add(10*time.Second))
+	if got := b.apps["ns/a"][1].notBefore.Sub(now.Add(10 * time.Second)); got != b.Base {
+		t.Fatalf("delay at a new revision = %s, want %s", got, b.Base)
 	}
 }

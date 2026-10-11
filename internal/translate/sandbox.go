@@ -171,16 +171,17 @@ func expose(spec *sandboxv1alpha1.SwiftSandboxSpec, app *spinv1alpha1.SpinApp, p
 
 // useReadinessStartup reports whether a replica's readiness check is retried
 // quickly until it first passes. KubeSwift skips initialDelaySeconds while it
-// does, so a SpinApp's own check gets it only when the executor says "on";
+// does, so a SpinApp's own check gets it only when the executor says
+// "always";
 // the check kubeswift-spin adds has no delay to skip.
 func useReadinessStartup(policy string, ownCheck bool, f capabilities.Sandbox) bool {
 	if !f.ReadinessStartup {
 		return false
 	}
 	switch policy {
-	case executor.ReadinessStartupOn:
+	case executor.ReadinessStartupAlways:
 		return true
-	case executor.ReadinessStartupOff:
+	case executor.ReadinessStartupNever:
 		return false
 	default:
 		return ownCheck

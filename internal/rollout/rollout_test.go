@@ -242,3 +242,90 @@ func TestReplicaLeftByScaleDownIsNotASurge(t *testing.T) {
 		t.Fatalf("plan %+v", p)
 	}
 }
+
+// A second spec change while the old-revision surge is the only available
+// replica keeps that surge until the desired replica is available again.
+func TestFixForwardKeepsTheOnlyAvailableSurge(t *testing.T) {
+	in := Input{Replicas: 1, Revision: "r3", ReadinessObservable: true, Instances: []Instance{
+		inst(0, "r2", Pending), surgeInst(1, "r2", Ready)}}
+	p := Compute(in)
+	if got := deletions(p); !reflect.DeepEqual(got, map[string]Reason{"app-0": ReasonRollout}) || !p.Waiting {
+		t.Fatalf("step 1: delete %v waiting %v", got, p.Waiting)
+	}
+	// app-0 recreated at r3, not ready yet: the r2 surge still serves.
+	in.Instances = []Instance{inst(0, "r3", Pending), surgeInst(1, "r2", Ready)}
+	if p := Compute(in); len(p.Delete) != 0 || len(p.Create) != 0 || !p.Waiting {
+		t.Fatalf("step 2: %+v", p)
+	}
+	// app-0 ready at r3: the old surge goes, and no new one is needed.
+	in.Instances = []Instance{inst(0, "r3", Ready), surgeInst(1, "r2", Ready)}
+	if got := deletions(Compute(in)); !reflect.DeepEqual(got, map[string]Reason{"app-1": ReasonScaleDown}) {
+		t.Fatalf("step 3: delete %v", got)
+	}
+}
+
+func TestFixForwardWithTwoReplicasKeepsTwoAvailable(t *testing.T) {
+	in := Input{Replicas: 2, Revision: "r3", ReadinessObservable: true, Instances: []Instance{
+		inst(0, "r1", Ready), inst(1, "r2", Pending), surgeInst(2, "r2", Ready)}}
+	p := Compute(in)
+	if got := deletions(p); !reflect.DeepEqual(got, map[string]Reason{"app-1": ReasonRollout}) {
+		t.Fatalf("delete %v", got)
+	}
+}
+
+func TestBrokenSurgeFromAnEarlierRevisionIsReplacedDespiteBackoff(t *testing.T) {
+	in := Input{Replicas: 1, Revision: "r3", ReadinessObservable: true, InBackoff: map[int]bool{1: true}, Instances: []Instance{
+		inst(0, "r1", Ready), surgeInst(1, "r2", Terminal)}}
+	if got := deletions(Compute(in)); !reflect.DeepEqual(got, map[string]Reason{"app-1": ReasonRollout}) {
+		t.Fatalf("delete %v", got)
+	}
+}
+
+// After replicas is raised during a rollout, the former surge replica is a
+// desired one; it is replaced like an outdated replica so the label does not
+// outlive the rollout.
+func TestFormerSurgeBelowReplicasIsReplacedWithoutLosingCapacity(t *testing.T) {
+	in := Input{Replicas: 2, Revision: "r2", ReadinessObservable: true, Instances: []Instance{
+		inst(0, "r2", Ready), surgeInst(1, "r2", Ready)}}
+	p := Compute(in)
+	if len(p.Delete) != 0 || !reflect.DeepEqual(p.Create, []int{2}) {
+		t.Fatalf("expected a new surge first: %+v", p)
+	}
+	in.Instances = append(in.Instances, surgeInst(2, "r2", Ready))
+	if got := deletions(Compute(in)); !reflect.DeepEqual(got, map[string]Reason{"app-1": ReasonRollout}) {
+		t.Fatalf("delete %v", got)
+	}
+	in.Instances = []Instance{inst(0, "r2", Ready), inst(1, "r2", Ready), surgeInst(2, "r2", Ready)}
+	if got := deletions(Compute(in)); !reflect.DeepEqual(got, map[string]Reason{"app-2": ReasonScaleDown}) {
+		t.Fatalf("delete %v", got)
+	}
+}
+
+// A scale-down that frees the surge ordinal does not create the surge until
+// the old sandbox with that name is gone.
+func TestSurgeWaitsForItsNameToBeFree(t *testing.T) {
+	in := Input{Replicas: 2, Revision: "r2", ReadinessObservable: true, Instances: []Instance{
+		inst(0, "r1", Ready), inst(1, "r1", Ready), inst(2, "r1", Ready)}}
+	p := Compute(in)
+	if len(p.Create) != 0 || deletions(p)["app-2"] != ReasonScaleDown {
+		t.Fatalf("step 1: %+v", p)
+	}
+	gone := inst(2, "r1", Ready)
+	gone.Deleting = true
+	in.Instances = []Instance{inst(0, "r1", Ready), inst(1, "r1", Ready), gone}
+	if p := Compute(in); len(p.Create) != 0 || !p.Waiting {
+		t.Fatalf("step 2: %+v", p)
+	}
+	in.Instances = in.Instances[:2]
+	if p := Compute(in); !reflect.DeepEqual(p.Create, []int{2}) {
+		t.Fatalf("step 3: %+v", p)
+	}
+}
+
+func TestSurgeLabeledSandboxIsRemovedAtZeroReplicas(t *testing.T) {
+	in := Input{Replicas: 0, Revision: "r2", ReadinessObservable: true, Instances: []Instance{
+		inst(0, "r2", Ready), surgeInst(1, "r2", Ready)}}
+	if got := deletions(Compute(in)); len(got) != 2 {
+		t.Fatalf("delete %v", got)
+	}
+}

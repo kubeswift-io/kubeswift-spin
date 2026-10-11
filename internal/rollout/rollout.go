@@ -56,7 +56,9 @@ type Instance struct {
 	// for example after a manual relabel. It is always removed.
 	Stale bool
 	// Surge marks the extra replica a rollout creates at ordinal Replicas.
-	// A replica left at that ordinal by a scale down is not a surge one.
+	// A replica left at that ordinal by a scale down is not a surge one,
+	// and a surge replica at a lower ordinal (after replicas was raised) is
+	// replaced like an outdated one.
 	Surge bool
 }
 
@@ -104,13 +106,16 @@ func Compute(in Input) Plan {
 	surgeOrd := in.Replicas
 	byOrdinal := map[int]Instance{}
 	var surge *Instance
-	surgeDeleting := false
+	// surgeBusy is set while the surge ordinal's name is taken by a sandbox
+	// that is being deleted or is deleted by this plan; the surge replica is
+	// created only once the name is free.
+	surgeBusy := false
 	for _, inst := range in.Instances {
 		switch {
 		case inst.Deleting:
 			p.Waiting = true
-			if inst.Ordinal == surgeOrd && inst.Surge {
-				surgeDeleting = true
+			if inst.Ordinal == surgeOrd {
+				surgeBusy = true
 			} else {
 				byOrdinal[inst.Ordinal] = inst
 			}
@@ -121,6 +126,9 @@ func Compute(in Input) Plan {
 			surge = &s
 		case inst.Ordinal >= in.Replicas:
 			p.Delete = append(p.Delete, Deletion{inst.Name, inst.Ordinal, ReasonScaleDown})
+			if inst.Ordinal == surgeOrd {
+				surgeBusy = true
+			}
 		default:
 			byOrdinal[inst.Ordinal] = inst
 		}
@@ -132,7 +140,11 @@ func Compute(in Input) Plan {
 	var outdatedAvailable []Instance
 	for ord := 0; ord < in.Replicas; ord++ {
 		inst, ok := byOrdinal[ord]
-		if !ok || inst.Deleting || inst.Revision != in.Revision || !Available(inst.Health, in.ReadinessObservable) {
+		// A surge replica that became a desired one when replicas was raised
+		// is replaced like an outdated replica, so the surge label only ever
+		// marks the extra replica of a rollout.
+		outdated := ok && (inst.Revision != in.Revision || inst.Surge)
+		if !ok || inst.Deleting || outdated || !Available(inst.Health, in.ReadinessObservable) {
 			allCurrent = false
 		}
 		switch {
@@ -140,13 +152,7 @@ func Compute(in Input) Plan {
 			p.Create = append(p.Create, ord)
 		case inst.Deleting:
 			// Recreated once the old object is gone.
-		case inst.Health == Terminal:
-			if in.InBackoff[ord] {
-				p.Waiting = true
-				continue
-			}
-			p.Delete = append(p.Delete, Deletion{inst.Name, ord, ReasonFailed})
-		case inst.Revision != in.Revision:
+		case outdated:
 			if Available(inst.Health, in.ReadinessObservable) {
 				rolling = true
 				available++
@@ -156,6 +162,12 @@ func Compute(in Input) Plan {
 				// at once; waiting would only delay recovery.
 				p.Delete = append(p.Delete, Deletion{inst.Name, ord, ReasonRollout})
 			}
+		case inst.Health == Terminal:
+			if in.InBackoff[ord] {
+				p.Waiting = true
+				continue
+			}
+			p.Delete = append(p.Delete, Deletion{inst.Name, ord, ReasonFailed})
 		default:
 			if Available(inst.Health, in.ReadinessObservable) {
 				available++
@@ -170,20 +182,28 @@ func Compute(in Input) Plan {
 	surgeAvailable := 0
 	switch {
 	case surge == nil:
-		if wantSurge && rolling && !surgeDeleting {
+		if wantSurge && rolling && !surgeBusy {
 			p.Create = append(p.Create, surgeOrd)
 		}
 	case !wantSurge:
 		p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonScaleDown})
+	case surge.Revision != in.Revision:
+		// A surge replica from an earlier revision, after the spec changed
+		// again during a rollout. Replace it, but while it serves keep it
+		// until the desired replicas alone are enough, so a second change
+		// never takes away the only available replica.
+		if Available(surge.Health, in.ReadinessObservable) && available < in.Replicas {
+			surgeAvailable = 1
+			p.Waiting = true
+		} else {
+			p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonRollout})
+		}
 	case surge.Health == Terminal:
 		if in.InBackoff[surgeOrd] {
 			p.Waiting = true
 		} else {
 			p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonFailed})
 		}
-	case surge.Revision != in.Revision:
-		// A surge replica from an earlier revision: replace it first.
-		p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonRollout})
 	case Available(surge.Health, in.ReadinessObservable):
 		surgeAvailable = 1
 	}

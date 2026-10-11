@@ -7,6 +7,79 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## v0.1.0-rc5 (unreleased)
+
+Release candidate for KubeSwift v0.16.2. Rolling updates now keep
+`spec.replicas` replicas available, including for a single replica, and
+replicas without a readiness check become ready within about a second of
+Spin listening instead of after the first probe period. The runtime image
+`spin-4.2.1-r2` is reused.
+
+### Upgrade notes
+
+- On KubeSwift v0.16.2 or later, the rendered sandbox spec of a replica
+  with no `spec.checks.readiness` gains `readinessStartup`, so the first
+  reconcile after upgrading kubeswift-spin (or KubeSwift to v0.16.2) replaces
+  those replicas once. With this release the replacement keeps them
+  available (see Changed). Replicas whose SpinApp sets a readiness check are
+  not replaced unless the executor sets
+  `spin.kubeswift.io/readiness-startup: always`. On KubeSwift v0.16.1 or
+  earlier the spec is unchanged.
+- A rollout now runs one extra sandbox per SpinApp, the surge replica
+  `<spinapp>-<replicas>`, labeled `spin.kubeswift.io/surge=true`. Leave room
+  for it in node capacity and in any ResourceQuota on SwiftSandboxes or
+  launcher pods; a rejected create is reported as `SandboxRejected` and
+  the rollout waits with every old replica serving. When many SpinApps roll
+  at once (for example on the upgrade above), each needs that headroom.
+- Downgrading to v0.1.0-rc4 during a rollout removes the surge replica as
+  a scaled-down replica and continues with rc4's delete-then-create
+  replacement.
+- `go.mod` requires Go 1.26.9 through the `go` line (the KubeSwift v0.16.2
+  test dependency needs it); the separate `toolchain` line is gone.
+
+### Added
+
+- The executor annotation `spin.kubeswift.io/readiness-startup` and the
+  chart value `executors[].readinessStartup`: `auto` (default) sets
+  KubeSwift's `spec.readinessStartup` with its defaults (probe every 100 ms
+  for up to 30 seconds after boot, until the first success) only on the TCP
+  readiness check kubeswift-spin adds when a SpinApp has none; `always` also
+  sets it on SpinApp readiness checks, which then ignore
+  `initialDelaySeconds` (a `PartiallySupported` Warning Event says so);
+  `never` does not set it. Requires KubeSwift v0.16.2 for `always`;
+  otherwise the field is used only when detected in the SwiftSandbox
+  schema.
+- `Progressing=False` with reason `SandboxRejected`, and an Event of the
+  same name, when the API server refuses to create a SwiftSandbox
+  (`Forbidden` or `Invalid`, for example a ResourceQuota). Previously the
+  controller retried without reporting it.
+
+### Changed
+
+- Rolling updates create one surge replica at the new revision before
+  removing any available replica, and delete an outdated replica only while
+  the remaining available replicas, the surge included, number
+  `spec.replicas` (ADR 0013). A single-replica SpinApp is no longer
+  unavailable during a rollout. A spec change during a rollout keeps an
+  earlier-revision surge replica while it is the replica serving. Replica
+  names are unchanged.
+- A ready surge replica counts toward `readyReplicas` (capped at
+  `spec.replicas`); a failed or waiting surge replica is reported in
+  `Progressing` like any replica.
+- The failure backoff of a replica starts over when the failing replica
+  runs a different revision than the previous failure.
+- KubeSwift v0.16.2 is the tested version and the contract-test dependency.
+
+### Documentation
+
+- ADR 0013 (surge replacement); ADR 0009 amended.
+- docs/upstream/kubeswift-sandbox-termination-drain.md: a proposal for a
+  bounded drain when an exposed sandbox is deleted. On KubeSwift v0.16.2 a
+  deleted replica keeps serving until its launcher's 30-second grace period
+  ends, which is what keeps rollouts lossless today.
+- docs/upstream/kubeswift-sandbox-readiness-latency.md: the readiness
+  requirement that KubeSwift v0.16.2 implemented.
+
 ## v0.1.0-rc4 (2026-10-10)
 
 Release candidate built with Go 1.26.9, which fixes standard-library

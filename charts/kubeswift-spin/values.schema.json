@@ -258,6 +258,15 @@
             "items": {
               "type": "object"
             }
+          },
+          "readinessStartup": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "description": "spin.kubeswift.io/readiness-startup: when readiness checks run quickly until they first pass (KubeSwift v0.16.2). auto (default) only for the check kubeswift-spin adds; always also for SpinApp checks; never for none."
           }
         }
       }

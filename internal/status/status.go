@@ -35,6 +35,7 @@ const (
 	ReasonUnsupportedConfiguration = "UnsupportedConfiguration"
 	ReasonWarmPoolIncompatible     = "WarmPoolIncompatible"
 	ReasonSandboxConflict          = "SandboxConflict"
+	ReasonSandboxRejected          = "SandboxRejected"
 	ReasonSandboxCreating          = "SandboxCreating"
 	ReasonSandboxMaterializing     = "SandboxMaterializing"
 	ReasonRollingUpdate            = "RollingUpdate"
@@ -128,10 +129,20 @@ func Compute(in Input) Result {
 			continue
 		}
 		if inst.Ordinal == int(in.Replicas) {
+			if !inst.Surge {
+				continue // left by a scale down; being removed
+			}
 			// The surge replica of a rollout (ADR 0013) serves traffic and
-			// stands in for the replica being replaced.
-			if inst.Health == rollout.Ready {
+			// stands in for the replica being replaced, also when the spec
+			// changed again and it runs an earlier revision. Its failures
+			// and waits are reported like any replica's.
+			switch {
+			case inst.Health == rollout.Ready:
 				surgeReady++
+			case inst.Health == rollout.Terminal:
+				failed = append(failed, inst)
+			case inst.Health == rollout.Pending && inst.WaitingReason != "" && waiting == nil:
+				waiting = &in.Instances[i]
 			}
 			continue
 		}

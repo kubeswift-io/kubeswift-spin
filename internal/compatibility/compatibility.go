@@ -54,7 +54,7 @@ var Matrix = []Entry{
 	{"components", Supported, "Passed as `spin up --component-id`, which Spin marks experimental."},
 	{"variables", PartiallySupported, "Literal values and secretKeyRef (KubeSwift v0.16.0 or later) become SPIN_VARIABLE_* environment variables. configMapKeyRef, fieldRef and resourceFieldRef are rejected."},
 	{"runtimeConfig", PartiallySupported, "loadFromSecret, keyValueStores, sqliteDatabases and llmCompute are rendered into the runtime-config file; Secret-backed options need KubeSwift v0.16.0. configMapKeyRef, literal credentials and llmCompute type spin are rejected."},
-	{"checks", Supported, "Become the sandbox readiness and liveness probes against the Spin HTTP port (KubeSwift v0.16.0 or later). Without a readiness check a TCP check is used."},
+	{"checks", Supported, "Become the sandbox readiness and liveness probes against the Spin HTTP port (KubeSwift v0.16.0 or later). Without a readiness check a TCP check is used. With the executor annotation spin.kubeswift.io/readiness-startup=always (KubeSwift v0.16.2 or later), readiness.initialDelaySeconds is not applied and a finding says so."},
 	{"imagePullSecrets", Supported, "Delivered as secret files to the Spin process, which pulls the application (KubeSwift v0.16.0 or later). The credentials are in the guest, outside the Wasm sandbox."},
 	{"enableAutoscaling", Unsupported, "SpinApp has no scale subresource and no Deployment exists for an HPA or KEDA to target."},
 	{"invocationLimits", PartiallySupported, "memory maps to SPIN_MAX_INSTANCE_MEMORY, as in Spin Operator. Other keys are rejected."},
@@ -196,6 +196,11 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 		}
 		if !o.Features.Exposure() {
 			note("checks", PartiallySupported, "spec.checks are accepted but cannot be enforced: "+needExposureMsg)
+		}
+		if r := s.Checks.Readiness; r != nil && r.InitialDelaySeconds > 0 && p.ReadinessStartup == executor.ReadinessStartupAlways && o.Features.ReadinessStartup {
+			note("checks", PartiallySupported,
+				"spec.checks.readiness.initialDelaySeconds is not applied: the executor sets %s=%s, so readiness is probed from boot; set it to %s to keep the delay",
+				executor.AnnReadinessStartup, executor.ReadinessStartupAlways, executor.ReadinessStartupAuto)
 		}
 	}
 

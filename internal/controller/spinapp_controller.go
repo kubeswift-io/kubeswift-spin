@@ -55,6 +55,7 @@ const (
 	EventExecutorNotFound   = "ExecutorNotFound"
 	EventWarmPool           = "WarmPoolIncompatible"
 	EventConflict           = "SandboxConflict"
+	EventRejected           = "SandboxRejected"
 	EventExecutorChanged    = "ExecutorChanged"
 )
 
@@ -330,6 +331,18 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 		if err := r.Client.Create(ctx, sb); err != nil {
+			if apierrors.IsForbidden(err) || apierrors.IsInvalid(err) {
+				// A quota, admission policy or webhook refused the object.
+				// Retrying at once does not help; report it and retry on
+				// the waiting interval. The API message can echo values,
+				// so only the log carries it.
+				logger.Error(err, "SwiftSandbox create rejected", "sandbox", sb.Name)
+				blocker = &status.Blocker{Reason: status.ReasonSandboxRejected,
+					Message: fmt.Sprintf("the API server rejected creating SwiftSandbox %s (%s); check ResourceQuota and admission policies in namespace %s, and the controller log",
+						sb.Name, apierrors.ReasonForError(err), app.Namespace)}
+				requeue = true
+				continue
+			}
 			if !apierrors.IsAlreadyExists(err) {
 				return ctrl.Result{}, fmt.Errorf("create SwiftSandbox %s: %w", sb.Name, err)
 			}
@@ -356,7 +369,11 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		r.event(&app, corev1.EventTypeNormal, EventSandboxCreated, "Create", "created sandbox %s at revision %s", sb.Name, tmpl.Revision)
 	}
 
-	if err := r.finishWithInstances(ctx, &app, instances, tmpl.Revision, blocker, exposure, retryIn, EventConflict); err != nil {
+	eventReason := EventConflict
+	if blocker != nil && blocker.Reason == status.ReasonSandboxRejected {
+		eventReason = EventRejected
+	}
+	if err := r.finishWithInstances(ctx, &app, instances, tmpl.Revision, blocker, exposure, retryIn, eventReason); err != nil {
 		return ctrl.Result{}, err
 	}
 	if retryIn != "" {
@@ -470,7 +487,7 @@ func (r *SpinAppReconciler) observe(app *spinv1alpha1.SpinApp, owned []sandboxv1
 		sb := &owned[i]
 		inst := Classify(app.Name, sb)
 		if inst.Health == rollout.Terminal && !inst.Deleting {
-			if r.Backoff.RecordFailure(key, inst.Ordinal, string(sb.UID), now) {
+			if r.Backoff.RecordFailure(key, inst.Ordinal, string(sb.UID), inst.Revision, now) {
 				metrics.SandboxFailures.Inc()
 				r.event(app, corev1.EventTypeWarning, EventSandboxFailed, "Observe", "sandbox %s reached phase %s (%s)",
 					sb.Name, sb.Status.Phase, firstNonEmpty(inst.FailureReason, "no reason reported"))

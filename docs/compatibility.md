@@ -217,16 +217,21 @@ read the SwiftSandbox features from it (see below).
 ## KubeSwift features
 
 kubeswift-spin reads the OpenAPI v3 schema of `sandbox.kubeswift.io/v1alpha1`
-and uses a SwiftSandbox feature only when its fields are present. All three
-features first appear in KubeSwift v0.16.0.
+and uses a SwiftSandbox feature only when its fields are present. Exposure,
+secrets and egress first appear in KubeSwift v0.16.0, readiness startup in
+v0.16.2.
 
 | Feature | Detected when the schema has | Enables |
 |---|---|---|
 | exposure | `spec.network.ports`, `spec.readinessProbe` and `spec.podMetadata` | reaching replicas through the SpinApp Service, `readyReplicas`, `spec.checks`, `spec.podLabels`, `spin.kubeswift.io/ingress-from` |
 | secrets | `spec.secretFiles` (the same release honors `env[].valueFrom.secretKeyRef`) | `secretKeyRef` variables and runtime-config options, `runtimeConfig.loadFromSecret`, `imagePullSecrets` |
 | egress | `spec.network.egress` | `spin.kubeswift.io/egress-allow` |
+| readiness startup | `spec.readinessStartup` | replicas reported ready about when they first answer; `spin.kubeswift.io/readiness-startup` (see [executor-contract.md](executor-contract.md#readiness-startup)) |
 
-On KubeSwift v0.15.1 none is detected. SpinApps then run without ports,
+On KubeSwift v0.16.0 and v0.16.1, readiness startup is not detected:
+readiness checks run at whole-second times, and
+`spin.kubeswift.io/readiness-startup: always` makes the executor invalid. On
+KubeSwift v0.15.1 none is detected. SpinApps then run without ports,
 probes or launcher pod labels, report `Available=False` with reason
 `NetworkUnavailable`, and Secret-backed configuration is rejected with
 `UnsupportedConfiguration`. Detection is described in
@@ -254,7 +259,7 @@ Existing sandboxes keep running.
 | `components` | supported | Passed as `spin up --component-id`, which Spin 4.2.1 marks experimental. |
 | `variables` | partially supported | Literal values and `valueFrom.secretKeyRef` (KubeSwift v0.16.0) become `SPIN_VARIABLE_*` environment variables; a Secret is passed as a reference, never as a value. `configMapKeyRef`, `fieldRef` and `resourceFieldRef` are rejected. |
 | `runtimeConfig` | partially supported | `keyValueStores`, `sqliteDatabases` and `llmCompute` are rendered into a runtime-config file; options may use `valueFrom.secretKeyRef` (KubeSwift v0.16.0). `loadFromSecret` (KubeSwift v0.16.0) delivers the Secret's `runtime-config.toml` key as a file and cannot be combined with the other fields. `configMapKeyRef`, non-empty literal credential options, URLs with embedded credentials and `llmCompute` type `spin` are rejected. |
-| `checks` | supported | Become the sandbox readiness and liveness probes against the Spin HTTP port (KubeSwift v0.16.0). Without a readiness check, a TCP check is used. Only `httpGet` checks exist in SpinKube. On older KubeSwift they are accepted with a Warning Event but not enforced. |
+| `checks` | supported | Become the sandbox readiness and liveness probes against the Spin HTTP port (KubeSwift v0.16.0). Without a readiness check, a TCP check is used. Only `httpGet` checks exist in SpinKube. On older KubeSwift they are accepted with a Warning Event but not enforced. With the executor annotation `spin.kubeswift.io/readiness-startup: always` (KubeSwift v0.16.2 or later), `readiness.initialDelaySeconds` is not applied and a Warning Event says so. |
 | `imagePullSecrets` | supported | Delivered as secret files to the guest, where Spin pulls the application (KubeSwift v0.16.0). The credentials are readable by the Spin process, not by Wasm components. |
 | `enableAutoscaling` | unsupported | SpinApp has no scale subresource and there is no Deployment for an HPA or KEDA to target. |
 | `invocationLimits` | partially supported | `memory` maps to `SPIN_MAX_INSTANCE_MEMORY` (bytes), as in Spin Operator. Other keys are rejected. |

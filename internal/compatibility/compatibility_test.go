@@ -121,6 +121,39 @@ func TestChecksArePartiallySupportedNotBlocking(t *testing.T) {
 	}
 }
 
+func TestReadinessStartupAlwaysReportsIgnoredInitialDelay(t *testing.T) {
+	o := opts()
+	o.Features = capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true}
+	a := app()
+	a.Spec.Checks.Readiness = &spinv1alpha1.HealthProbe{HTTPGet: &spinv1alpha1.HTTPHealthProbe{Path: "/healthz"}, InitialDelaySeconds: 10}
+	p := profile()
+	cases := []struct {
+		policy  string
+		delay   int32
+		feature bool
+		want    bool
+	}{
+		{executor.ReadinessStartupAlways, 10, true, true},
+		{executor.ReadinessStartupAlways, 0, true, false},
+		{executor.ReadinessStartupAlways, 10, false, false},
+		{executor.ReadinessStartupAuto, 10, true, false},
+		{executor.ReadinessStartupNever, 10, true, false},
+	}
+	for _, c := range cases {
+		p.ReadinessStartup = c.policy
+		a.Spec.Checks.Readiness.InitialDelaySeconds = c.delay
+		o.Features.ReadinessStartup = c.feature
+		fs := Analyze(a, p, o)
+		got := false
+		for _, f := range fs {
+			got = got || (f.Field == "checks" && strings.Contains(f.Message, "initialDelaySeconds is not applied"))
+		}
+		if Blocking(fs) || got != c.want {
+			t.Errorf("%s delay=%d feature=%v: reported=%v, want %v (%+v)", c.policy, c.delay, c.feature, got, c.want, fs)
+		}
+	}
+}
+
 func TestUnsupportedConfigurationBlocks(t *testing.T) {
 	secretRef := &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "db"}, Key: "url"}
 	cases := map[string]struct {
