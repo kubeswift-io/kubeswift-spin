@@ -7,7 +7,7 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.1.0-rc3, v0.1.0-rc2 | all tests below; KVM runs used a development build before rc2, then the published v0.1.0-rc2 and v0.1.0-rc3 artifacts; the KubeSwift v0.16.2 runs used a development build of v0.1.0-rc5 (commit 7cb6d55) |
+| kubeswift-spin | v0.1.0-rc5, v0.1.0-rc3, v0.1.0-rc2 | all tests below; KVM runs used a development build before rc2, then the published v0.1.0-rc2, v0.1.0-rc3 and v0.1.0-rc5 artifacts; the other KubeSwift v0.16.2 runs used a development build of v0.1.0-rc5 (commit 7cb6d55) |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
@@ -218,6 +218,32 @@ example artifacts of v0.1.0-rc4.
 - `ingress-from`: a pod outside the peers is refused while a replica runs,
   but reaches a replica that is being deleted (see
   [security-model.md](security-model.md#network-isolation)).
+
+### v0.1.0-rc5 from published artifacts (2026-10-11)
+
+Same cluster with KubeSwift v0.16.2, upgraded in place from v0.1.0-rc4 with
+`helm upgrade` from `oci://ghcr.io/kubeswift-io/charts/kubeswift-spin`
+version `0.1.0-rc5` (chart digest `sha256:3bb53e32...`); the controller ran
+the published digest `sha256:3a68ac37...` and logged version v0.1.0-rc5 at
+commit 2c6cf5a. The runtime image is the `spin-4.2.1-r2` digest
+`sha256:5af1c06c...` published with v0.1.0-rc4. The controller image, the
+chart and the hello-http example verified with cosign v3.0.6 against the
+release workflow identity of the tag; the runtime image verified against
+the v0.1.0-rc4 tag that first built it.
+
+- `test/e2e/kvm-e2e.sh` from the tag with phases 1, 2, 4 and 9 and the
+  published example artifacts passed all 29 checks in 5 minutes: hello-http
+  `Available` in 11.8 seconds cold, scaling to 3 and to 2 replicas, a
+  two-replica rolling update with 0 failed requests out of 442, a
+  Secret-backed variable, a warm-pool checkout (35.3 seconds to
+  `Available`, the first checkout of a newly created pool as in the earlier
+  runs) and teardown with nothing left in the namespace.
+- A single-replica rolling update of the hello-http example from the tag,
+  with requests through the Service the whole time: the surge replica was
+  created first, the rollout settled in 87 seconds with the surge replica
+  removed, and no request failed out of 8,544. Deleting the SpinApp left no
+  sandbox.
+- The controller logged no error.
 
 ### Zero-loss rolling updates
 
