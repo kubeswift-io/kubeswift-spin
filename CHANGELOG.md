@@ -7,7 +7,7 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## v0.1.0-rc6 (unreleased)
+## v0.1.0-rc6 (2026-10-11)
 
 Release candidate for KubeSwift v0.16.3, which is now the supported
 baseline. KubeSwift v0.16.3 drains a deleted replica and stops it
