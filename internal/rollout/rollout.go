@@ -72,6 +72,7 @@ type Input struct {
 	// health and is what gates rolling replacement.
 	ReadinessObservable bool
 	// InBackoff holds ordinals whose failed replica must not be replaced yet.
+	// The caller keeps the wait short for a replica from an earlier revision.
 	InBackoff map[int]bool
 }
 
@@ -152,6 +153,14 @@ func Compute(in Input) Plan {
 			p.Create = append(p.Create, ord)
 		case inst.Deleting:
 			// Recreated once the old object is gone.
+		case inst.Health == Terminal:
+			// The backoff of a replica from an earlier revision is short
+			// (see InBackoff), so a fixed spec is not held back.
+			if in.InBackoff[ord] {
+				p.Waiting = true
+				continue
+			}
+			p.Delete = append(p.Delete, Deletion{inst.Name, ord, ReasonFailed})
 		case outdated:
 			if Available(inst.Health, in.ReadinessObservable) {
 				rolling = true
@@ -162,12 +171,6 @@ func Compute(in Input) Plan {
 				// at once; waiting would only delay recovery.
 				p.Delete = append(p.Delete, Deletion{inst.Name, ord, ReasonRollout})
 			}
-		case inst.Health == Terminal:
-			if in.InBackoff[ord] {
-				p.Waiting = true
-				continue
-			}
-			p.Delete = append(p.Delete, Deletion{inst.Name, ord, ReasonFailed})
 		default:
 			if Available(inst.Health, in.ReadinessObservable) {
 				available++
@@ -187,6 +190,12 @@ func Compute(in Input) Plan {
 		}
 	case !wantSurge:
 		p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonScaleDown})
+	case surge.Health == Terminal:
+		if in.InBackoff[surgeOrd] {
+			p.Waiting = true
+		} else {
+			p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonFailed})
+		}
 	case surge.Revision != in.Revision:
 		// A surge replica from an earlier revision, after the spec changed
 		// again during a rollout. Replace it, but while it serves keep it
@@ -197,12 +206,6 @@ func Compute(in Input) Plan {
 			p.Waiting = true
 		} else {
 			p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonRollout})
-		}
-	case surge.Health == Terminal:
-		if in.InBackoff[surgeOrd] {
-			p.Waiting = true
-		} else {
-			p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonFailed})
 		}
 	case Available(surge.Health, in.ReadinessObservable):
 		surgeAvailable = 1

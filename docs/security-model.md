@@ -374,6 +374,21 @@ executor names a cosign key Secret.
   the annotation.
   KubeSwift's readiness and liveness probes run inside the launcher pod and
   are not affected. On KubeSwift v0.15.1 all inbound traffic is denied.
+- The per-sandbox NetworkPolicy is a child of the SwiftSandbox, not of the
+  launcher pod (KubeSwift v0.16.2 source). When a sandbox is deleted, by a
+  rolling update, a scale-down or a user, the policy is removed at once
+  while the launcher pod and its guest keep running for up to the
+  30-second termination grace period (see
+  [compatibility.md](compatibility.md#known-upstream-issues)). In that
+  window no sandbox policy selects the pod, so unless the namespace has
+  its own default-deny ingress policy, any pod in the cluster can reach the
+  Spin port by pod IP and `ingress-from` is not enforced. Egress is not
+  affected (KubeSwift enforces it inside the pod). An administrator-managed
+  default-deny ingress NetworkPolicy in each SpinApp namespace, plus a
+  policy that admits the SpinApp's clients, closes the window. The
+  upstream proposal
+  [kubeswift-sandbox-termination-drain.md](upstream/kubeswift-sandbox-termination-drain.md)
+  asks KubeSwift to keep the policy until the pod is gone.
 - kubeswift-spin creates no NetworkPolicy, Service, EndpointSlice or proxy
   and never patches, labels or execs into launcher pods. Launcher pod labels
   come only from `spec.podMetadata`, which KubeSwift applies and which
@@ -441,7 +456,13 @@ lifetime. Controls:
   sandbox spec,
 - failed replicas are replaced with exponential backoff (10 seconds to
   5 minutes), which resets only after 10 minutes of healthy running, so a
-  crashing application cannot churn microVMs.
+  crashing application cannot churn microVMs. A failed replica from an
+  earlier revision waits 10 seconds after its failure, so a spec that
+  changes often still replaces a failing replica at most once per 10
+  seconds,
+- a SwiftSandbox create that a quota or admission policy refuses stops the
+  remaining creates of that reconcile and is retried after 10 seconds,
+  doubling up to 5 minutes.
 
 These limits are per SpinApp, not per namespace. Use Kubernetes
 ResourceQuota on `count/swiftsandboxes.sandbox.kubeswift.io` (object count
@@ -449,7 +470,13 @@ quota) to cap the number of sandboxes per namespace.
 
 During a rolling update a SpinApp runs one extra sandbox, the surge
 replica ([ADR 0013](adr/0013-surge-replacement.md)), so the bound is
-`spec.replicas + 1` (21 microVMs at the default `--max-replicas`). Size
+`spec.replicas + 1` (21 microVMs at the default `--max-replicas`). The
+bound holds for replacements kubeswift-spin makes, which delete with
+foreground propagation and recreate an ordinal only when its old sandbox
+is gone. A user who deletes SwiftSandboxes with the default background
+propagation makes the object disappear at once; the ordinal is recreated
+while the old launcher still runs out its grace period, so for up to 30
+seconds more microVMs run. Size
 quotas and node capacity with one sandbox of headroom per SpinApp that may
 roll at the same time. A change that rolls every SpinApp at once, such as
 upgrading KubeSwift to v0.16.2 (replicas that get readiness startup are
@@ -461,8 +488,11 @@ A rollout removes an available old replica only after its replacement is
 ready. If the new revision never becomes ready, the old replicas keep
 running with their old configuration, which matters when the change is a
 security fix (a new runtime image, a narrower network profile). To remove
-an old revision at once, scale the SpinApp to 0 or delete its
-SwiftSandboxes; each deleted ordinal is recreated at the new revision.
+an old revision sooner, scale the SpinApp to 0 or delete its
+SwiftSandboxes with `kubectl delete swiftsandbox <name> --cascade=foreground`;
+each deleted ordinal is recreated at the new revision once the old one is
+gone. Either way a deleted replica keeps running for up to the 30-second
+termination grace period.
 
 ## Finalizers and deletion
 

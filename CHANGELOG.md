@@ -28,8 +28,9 @@ Spin listening instead of after the first probe period. The runtime image
 - A rollout now runs one extra sandbox per SpinApp, the surge replica
   `<spinapp>-<replicas>`, labeled `spin.kubeswift.io/surge=true`. Leave room
   for it in node capacity and in any ResourceQuota on SwiftSandboxes or
-  launcher pods; a rejected create is reported as `SandboxRejected` and
-  the rollout waits with every old replica serving. When many SpinApps roll
+  launcher pods. A SwiftSandbox create refused by a quota or admission
+  policy is reported as `SandboxRejected` and the rollout waits with every
+  old replica serving. When many SpinApps roll
   at once (for example on the upgrade above), each needs that headroom.
 - Downgrading to v0.1.0-rc4 during a rollout removes the surge replica as
   a scaled-down replica and continues with rc4's delete-then-create
@@ -51,8 +52,10 @@ Spin listening instead of after the first probe period. The runtime image
   schema.
 - `Progressing=False` with reason `SandboxRejected`, and an Event of the
   same name, when the API server refuses to create a SwiftSandbox
-  (`Forbidden` or `Invalid`, for example a ResourceQuota). Previously the
-  controller retried without reporting it.
+  (`Forbidden` or `Invalid`, for example a ResourceQuota on SwiftSandboxes).
+  The controller stops that reconcile's creates and retries after 10
+  seconds, doubling up to 5 minutes. Previously it retried with the
+  controller's default rate limit and reported nothing.
 
 ### Changed
 
@@ -67,7 +70,9 @@ Spin listening instead of after the first probe period. The runtime image
   `spec.replicas`); a failed or waiting surge replica is reported in
   `Progressing` like any replica.
 - The failure backoff of a replica starts over when the failing replica
-  runs a different revision than the previous failure.
+  runs a different revision than the previous failure, and a failed replica
+  from an earlier revision is replaced 10 seconds after its failure instead
+  of after its full backoff.
 - KubeSwift v0.16.2 is the tested version and the contract-test dependency.
 
 ### Documentation

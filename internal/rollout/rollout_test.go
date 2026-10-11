@@ -273,10 +273,14 @@ func TestFixForwardWithTwoReplicasKeepsTwoAvailable(t *testing.T) {
 	}
 }
 
-func TestBrokenSurgeFromAnEarlierRevisionIsReplacedDespiteBackoff(t *testing.T) {
+func TestBrokenSurgeFromAnEarlierRevisionHonorsItsBackoff(t *testing.T) {
 	in := Input{Replicas: 1, Revision: "r3", ReadinessObservable: true, InBackoff: map[int]bool{1: true}, Instances: []Instance{
 		inst(0, "r1", Ready), surgeInst(1, "r2", Terminal)}}
-	if got := deletions(Compute(in)); !reflect.DeepEqual(got, map[string]Reason{"app-1": ReasonRollout}) {
+	if p := Compute(in); len(p.Delete) != 0 || len(p.Create) != 0 || !p.Waiting {
+		t.Fatalf("in backoff: %+v", p)
+	}
+	in.InBackoff = nil
+	if got := deletions(Compute(in)); !reflect.DeepEqual(got, map[string]Reason{"app-1": ReasonFailed}) {
 		t.Fatalf("delete %v", got)
 	}
 }

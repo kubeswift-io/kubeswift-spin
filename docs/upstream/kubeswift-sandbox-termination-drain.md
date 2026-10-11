@@ -47,6 +47,14 @@ For a sandbox that exposes ports (`spec.network.ports`):
 
 A sandbox without exposed ports needs no drain and can stop at once.
 
+The sandbox's NetworkPolicy must cover the whole drain. Today it is a
+controlled child of the SwiftSandbox, so deleting the sandbox removes it at
+once, while the launcher pod keeps serving for its grace period. In that
+window no sandbox policy selects the pod, and the port is reachable from
+any pod in the cluster (the `ingress` peers are not enforced). The policy
+should live as long as the launcher pod, for example by making the pod its
+owner, or by holding it with a finalizer until the pod is gone.
+
 Alternatives:
 
 - **A `preStop` sleep on the launcher container** (Kubernetes sleep

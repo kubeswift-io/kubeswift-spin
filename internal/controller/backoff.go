@@ -22,6 +22,7 @@ const (
 type ordinalState struct {
 	failures     int
 	revision     string
+	failedAt     time.Time
 	lastUID      string
 	notBefore    time.Time
 	runningUID   string
@@ -45,11 +46,14 @@ type Backoff struct {
 
 	mu   sync.Mutex
 	apps map[string]map[int]*ordinalState
+	// rejected counts consecutive reconciles of an app whose SwiftSandbox
+	// create the API server refused (quota or admission policy).
+	rejected map[string]int
 }
 
 // NewBackoff returns an empty Backoff with the default delays.
 func NewBackoff() *Backoff {
-	return &Backoff{Base: backoffBase, Max: backoffMax, Stable: backoffStable, apps: map[string]map[int]*ordinalState{}}
+	return &Backoff{Base: backoffBase, Max: backoffMax, Stable: backoffStable, apps: map[string]map[int]*ordinalState{}, rejected: map[string]int{}}
 }
 
 func delayFor(failures int) time.Duration { return NewBackoff().delayFor(failures) }
@@ -100,6 +104,7 @@ func (b *Backoff) RecordFailure(app string, ord int, uid, revision string, now t
 	}
 	s.runningUID, s.runningSince = "", time.Time{}
 	s.lastUID = uid
+	s.failedAt = now
 	s.failures++
 	s.notBefore = now.Add(b.delayFor(s.failures))
 	return true
@@ -128,8 +133,12 @@ func (b *Backoff) RecordRunning(app string, ord int, uid string, now time.Time) 
 }
 
 // Pending returns the ordinals whose failed replica must wait, and the
-// shortest remaining wait formatted for a status message.
-func (b *Backoff) Pending(app string, instances []status.Instance, now time.Time) (map[int]bool, string) {
+// shortest remaining wait (0 when none waits). A failed replica at a revision
+// other than revision waits only Base after its failure: the spec changed, so
+// the replacement runs something else and need not wait out the old
+// revision's count, but a spec that changes often still cannot replace a
+// failing replica faster than once per Base.
+func (b *Backoff) Pending(app string, instances []status.Instance, revision string, now time.Time) (map[int]bool, time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := map[int]bool{}
@@ -143,34 +152,24 @@ func (b *Backoff) Pending(app string, instances []status.Instance, now time.Time
 			continue
 		}
 		s := m[inst.Ordinal]
-		if s == nil || !now.Before(s.notBefore) {
+		if s == nil {
+			continue
+		}
+		until := s.notBefore
+		if inst.Revision != revision {
+			if capped := s.failedAt.Add(b.Base); capped.Before(until) {
+				until = capped
+			}
+		}
+		if !now.Before(until) {
 			continue
 		}
 		out[inst.Ordinal] = true
-		if wait := s.notBefore.Sub(now); shortest == 0 || wait < shortest {
+		if wait := until.Sub(now); shortest == 0 || wait < shortest {
 			shortest = wait
 		}
 	}
-	if len(out) == 0 {
-		return out, ""
-	}
-	return out, shortest.Round(time.Second).String()
-}
-
-// NextDelay returns how long to wait before the next backoff expires.
-func (b *Backoff) NextDelay(app string, now time.Time) time.Duration {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	var shortest time.Duration
-	for _, s := range b.apps[app] {
-		if wait := s.notBefore.Sub(now); wait > 0 && (shortest == 0 || wait < shortest) {
-			shortest = wait
-		}
-	}
-	if shortest == 0 {
-		shortest = b.Base
-	}
-	return shortest + 100*time.Millisecond
+	return out, shortest
 }
 
 // Forget drops all state for an app.
@@ -178,4 +177,26 @@ func (b *Backoff) Forget(app string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.apps, app)
+	delete(b.rejected, app)
+}
+
+// RecordRejection records that a create for app was refused and returns how
+// long to wait before trying again (Base, doubling up to Max) and whether
+// this is the first refusal in a row.
+func (b *Backoff) RecordRejection(app string) (time.Duration, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.rejected == nil {
+		b.rejected = map[string]int{}
+	}
+	b.rejected[app]++
+	n := b.rejected[app]
+	return b.delayFor(n), n == 1
+}
+
+// ClearRejection forgets earlier refusals once a create for app succeeds.
+func (b *Backoff) ClearRejection(app string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.rejected, app)
 }

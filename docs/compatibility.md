@@ -315,13 +315,22 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   sandbox after the failure backoff, and the replacement is usually served by
   the same pool. Observed twice, each time on the first checkout of a newly
   created pool: during the v0.1.0-rc3 validation (v0.16.0) and in the KVM e2e
-  run of 2026-10-09 (v0.16.1). Create pools some time before relying on warm
-  starts.
+  run of 2026-10-09 (v0.16.1). The v0.16.2 release notes list no change
+  for it. Create pools some time before relying on warm starts.
 - **KubeSwift v0.16.0 and v0.16.1 log write conflicts as `Reconciler
   error`** at error level, although they retry them and converge (seen
   during the v0.16.1 benchmark runs)
   ([kubeswift-io/kubeswift#758](https://github.com/kubeswift-io/kubeswift/issues/758)).
   Do not alert on those lines alone.
+- **KubeSwift v0.16.2 keeps a deleted sandbox's guest running until the
+  launcher's termination grace period ends.** swiftletd answers SIGTERM by
+  pressing the guest's ACPI power button, which the sandbox guest ignores,
+  so the launcher is killed after 30 seconds and its pod ends in phase
+  `Failed`. Every deleted replica therefore takes about 30 seconds to
+  disappear. kubeswift-spin's lossless rolling updates currently depend on
+  this, because the old replica keeps serving while kube-proxy catches up;
+  a bounded drain is proposed in
+  [kubeswift-sandbox-termination-drain.md](upstream/kubeswift-sandbox-termination-drain.md).
 
 ## Upgrading upstream versions
 
@@ -341,3 +350,10 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   re-reads the schema at most every `--capability-refresh` (default 5
   minutes) and renders the new spec at the next reconcile of each SpinApp;
   restarting the controller applies it at once.
+- **Upgrading KubeSwift to v0.16.2** gives replicas without a readiness
+  check `spec.readinessStartup` and replaces them once (see the v0.1.0-rc5
+  upgrade notes in the CHANGELOG). The chart does not move SwiftKernels to
+  the v0.16.2 kernel artifact (`kernels/sandbox:6.6.16`, Linux 6.6.158);
+  changing `spec.ociRef.image` pulls nothing until the kernel's pull Jobs
+  are deleted, as the KubeSwift v0.16.2 upgrade notes describe. Running
+  sandboxes keep the kernel they booted with until they are replaced.

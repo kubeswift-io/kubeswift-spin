@@ -14,6 +14,7 @@ EX="$ROOT/examples"
 TMP="$(mktemp -d)"
 # UPSTREAM_PORT moves the mock upstream off 8090 when another process holds it.
 UPSTREAM_PORT="${UPSTREAM_PORT:-8090}"
+[[ "$UPSTREAM_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "UPSTREAM_PORT must be a port number" >&2; exit 1; }
 UPSTREAM="http://127.0.0.1:$UPSTREAM_PORT"
 PIDS=()
 FAILED=0

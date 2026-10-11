@@ -400,8 +400,10 @@ sandboxes; every transition below is covered by unit and envtest tests.
   The count resets only after a replica has run for 10 minutes without
   failing, because a guest is `Running` before Spin has pulled the
   application, and when the failing replica runs a different revision than
-  the previous failure, so a fixed spec is not delayed by the broken one. The backoff state is in memory and restarts from 10 seconds
-  after a controller restart. When a liveness probe fails `failureThreshold`
+  the previous failure. A failed replica from an earlier revision than the
+  current spec is replaced 10 seconds after its failure, so a fixed spec is
+  not held back by the broken one's backoff. The backoff state is in memory
+  and restarts from 10 seconds after a controller restart. When a liveness probe fails `failureThreshold`
   times, KubeSwift marks the sandbox `Failed` (`LivenessProbeFailed`) and
   restarts nothing; kubeswift-spin then replaces it with the same backoff.
   The KVM e2e test covers this, including a replacement that fails again
@@ -452,11 +454,15 @@ A ready surge replica counts toward `readyReplicas`, capped at
 replica cannot start or never becomes ready, the rollout stalls with every
 old replica still serving, `Progressing` names the failing sandbox, and the
 surge replica is replaced with the failure backoff above. A rollout needs
-room for one extra sandbox (CPU, memory and, under a ResourceQuota, one
-more SwiftSandbox and launcher pod); a create that the API server rejects
-is reported as `SandboxRejected`. With a warm pool, the surge replica takes
-a free slot or falls back to a cold boot like any replica. To remove an outdated revision at once instead, scale the SpinApp to
-0 or delete its SwiftSandboxes (see
+room for one extra sandbox: CPU and memory on a node, and room under any
+ResourceQuota on SwiftSandboxes and on launcher pods. A SwiftSandbox
+create that a quota or admission policy refuses (HTTP 403 or 422) is
+reported as `SandboxRejected` and retried with a growing delay; a launcher
+pod that a pod quota refuses shows up as a KubeSwift waiting or failure
+reason on the sandbox instead. With a warm pool, the surge replica takes a
+free slot or falls back to a cold boot like any replica. To remove an
+outdated revision sooner, scale the SpinApp to 0 or delete its
+SwiftSandboxes with `--cascade=foreground` (see
 [security-model.md](security-model.md#denial-of-service-and-capacity)).
 
 A deleted replica leaves the SpinApp Service when its launcher pod starts

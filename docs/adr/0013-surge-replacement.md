@@ -82,6 +82,12 @@ the old name while the old sandbox still exists.
   routed during kube-proxy's next sync can fail. The KVM rollout check
   under traffic is what would catch that; the generic fix is proposed in
   [kubeswift-sandbox-termination-drain.md](../upstream/kubeswift-sandbox-termination-drain.md).
+- While a deleted replica keeps serving, KubeSwift has already removed its
+  NetworkPolicy, so its port is reachable from any pod in the cluster for
+  up to the grace period unless the namespace has its own default-deny
+  ingress policy (see
+  [security-model.md](../security-model.md#network-isolation)). Rollouts
+  make this window routine; it existed before for every deleted replica.
 - Scaling during a rollout composes with it: a scale-down removes the
   highest ordinals (an unlabeled replica at the new surge ordinal first),
   and a scale-up replaces a former surge replica as described above.

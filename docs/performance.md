@@ -12,31 +12,47 @@ request from them. Request latency is not covered here.
 
 ## Terms
 
-**First-response latency**: the time from SpinApp creation until the
-application returns the expected HTTP response. Two variants:
+The project reports four measures, each from SpinApp creation, and never
+merges them into one "startup time":
 
-- *first direct response*: a request to the launcher pod IP on the Spin
-  HTTP port (3000). It shows when the application can serve.
-- *first Service response*: a request through the SpinApp Service, as an
-  in-cluster client sends it. It also needs the pod to be `Ready` and listed
-  as ready in the Service's EndpointSlice, and the node's Service routing
-  to be updated.
+1. **First direct response**: the time until the application returns the
+   expected HTTP response to a request sent to the launcher pod IP on the
+   Spin HTTP port (3000). It shows when the application can serve.
+2. **SpinApp `Available`**: the time until the SpinApp condition
+   `Available` is `True` (reason `ApplicationReady`). kubeswift-spin sets it
+   when enough sandboxes pass their readiness probe, so it follows the
+   readiness configuration (see [Readiness configuration](#readiness-configuration)).
+3. **First Service response**: the time until a request through the SpinApp
+   Service, as an in-cluster client sends it, returns the expected response.
+   It also needs the launcher pod to be `Ready`, its EndpointSlice entry to
+   be ready, and the client node's Service rules (kube-proxy) to be updated.
+4. **Artifact propagation**: the time from publishing a new application
+   artifact until the registry the sandboxes pull from serves it. With
+   `ghcr.io` it is zero; with a mirror it is the mirror's sync delay. It is
+   paid once per application version, not per replica, and is not part of
+   the other three.
 
-**Control-plane availability latency**: the time from SpinApp creation
-until the SpinApp condition `Available` is `True` (reason
-`ApplicationReady`). kubeswift-spin sets it when the sandbox's readiness
-probe has passed, so it depends on the readiness check's
-`initialDelaySeconds` and `periodSeconds` (see
-[Readiness configuration](#readiness-configuration)).
+Two stage terms are used below:
 
-**Warm-pool slot-claim latency**: the time from SwiftSandbox creation until
-KubeSwift reports that it assigned an already running slot of a
-SwiftSandboxPool to it (`CheckedOut`). The workload starts in the slot
-afterwards, so slot claim is not workload readiness.
+- **Warm-pool slot claim**: the time from SwiftSandbox creation until
+  KubeSwift reports that it assigned an already running slot of a
+  SwiftSandboxPool to it (`CheckedOut`). The workload starts in the slot
+  afterwards, so slot claim is not workload readiness.
+- **Spin runtime startup**: the time from the start of the Spin process
+  until its HTTP listener answers. For an application referenced from a
+  registry it includes the pull, which Spin performs at every start.
 
-**Spin runtime startup latency**: the time from the start of the Spin
-process until its HTTP listener answers. For an application referenced
-from a registry it includes the pull, which Spin performs at every start.
+### The 19 to 26 second figure
+
+Releases before v0.1.0-rc4 quoted "19 to 26 seconds" for a cold start. That
+was the time to `Available` printed by the KVM e2e test, which then polled
+every 3 seconds, for a hello-http SpinApp whose readiness check used Spin
+Operator's default `initialDelaySeconds` of 10. Measured afterwards with
+startupbench on the same cluster with that default, a cold hello-http
+replica first answered directly after 9.98 seconds and was `Available`
+after 18.87 seconds (p50, KubeSwift v0.16.0; see
+[Readiness configuration](#readiness-configuration)); the rest of the
+quoted figure was the polling. It was never the time until the application could serve.
 
 ## How it is measured
 
@@ -49,10 +65,8 @@ from one clock, and it deletes everything a run created before the next run
 starts. `make perf-startup` runs 10 cold and 10 warm runs by default.
 
 The durations printed by the KVM e2e test (`test/e2e/kvm-e2e.sh`) are
-functional indicators: until 2026-10-06 it polled every 3 seconds, and the
-"19 to 26 seconds" to `Available` reported for earlier releases in
-[compatibility.md](compatibility.md) include that polling and Spin
-Operator's default readiness delay of 10 seconds.
+functional indicators, not benchmark results (see
+[The 19 to 26 second figure](#the-19-to-26-second-figure)).
 
 Spin runtime startup latency and the stages inside the guest are not
 visible to startupbench. They were measured once, on 2026-10-06, with a

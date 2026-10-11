@@ -141,6 +141,7 @@ curl -fsS -X PUT --data-binary v2 http://127.0.0.1:3203/kv/k >/dev/null
 (cd "$ROOT" && go build -o "$TMP/upstream" ./examples/tools/upstream)
 # UPSTREAM_PORT moves the fixture off 8090 when another process holds it.
 UPSTREAM_PORT="${UPSTREAM_PORT:-8090}"
+[[ "$UPSTREAM_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "UPSTREAM_PORT must be a port number" >&2; exit 1; }
 "$TMP/upstream" --listen "127.0.0.1:$UPSTREAM_PORT" >"$TMP/upstream.log" 2>&1 &
 UPSTREAM_PID=$!
 wait_http "http://127.0.0.1:$UPSTREAM_PORT/" || fail "upstream did not start"
