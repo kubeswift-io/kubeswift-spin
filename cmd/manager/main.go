@@ -123,7 +123,11 @@ func run(o options) error {
 	if err != nil {
 		return fmt.Errorf("detect SwiftSandbox features from the OpenAPI v3 schema of sandbox.kubeswift.io/v1alpha1: %w", err)
 	}
-	setupLog.Info("SwiftSandbox features detected", "exposure", features.Exposure(), "secrets", features.Secrets(), "egress", features.Egress)
+	setupLog.Info("SwiftSandbox features detected", "exposure", features.Exposure(), "secrets", features.Secrets(), "egress", features.Egress,
+		"readinessStartup", features.ReadinessStartup, "termination", features.Termination)
+	if features.Exposure() && !features.Termination {
+		setupLog.Info("KubeSwift is older than v0.16.3 (no spec.termination): a deleted replica is not drained and loses its NetworkPolicy while it can still serve; upgrade KubeSwift to v0.16.3 or later")
+	}
 
 	cacheOpts := controller.CacheOptions(namespaces)
 

@@ -977,3 +977,52 @@ func TestRejectedSurgeKeepsTheOldReplicaAndRecovers(t *testing.T) {
 	expectSandboxes(t, ns, "hello-0", "hello-1")
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonRollingUpdate)
 }
+
+// KubeSwift v0.16.3 keeps a deleted sandbox under a termination finalizer
+// until its launcher has stopped. A SpinApp re-created under the same name
+// waits for it instead of reporting a conflict, and creates its own sandbox
+// once the name is free.
+func TestTerminatingSandboxOfTheSameNameIsWaitedFor(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	old := &sandboxv1alpha1.SwiftSandbox{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "hello-0", Labels: translate.Labels("hello", "kubeswift", "deadbeef00", 0),
+			Finalizers: []string{"kubeswift.io/sandbox-termination"}},
+		Spec: sandboxv1alpha1.SwiftSandboxSpec{Image: "ghcr.io/example/old:v1", Memory: resource.MustParse("512Mi")},
+	}
+	mustCreate(t, old)
+	if err := testClient.Delete(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	consistently(t, "no conflict reported while the old sandbox terminates", 1500*time.Millisecond, func() error {
+		if c := findCond(getApp(t, ns, "hello"), status.TypeProgressing); c != nil && c.Reason == status.ReasonSandboxConflict {
+			return fmt.Errorf("conflict reported: %s", c.Message)
+		}
+		if sb := getSandbox(t, ns, "hello-0"); sb.UID != old.UID {
+			return fmt.Errorf("old sandbox replaced early")
+		}
+		return nil
+	})
+	// KubeSwift lets go once the launcher has stopped.
+	sb := getSandbox(t, ns, "hello-0")
+	sb.Finalizers = nil
+	if err := testClient.Update(ctx, sb); err != nil {
+		t.Fatal(err)
+	}
+	app := getApp(t, ns, "hello")
+	start := time.Now()
+	eventually(t, "hello-0 created by the SpinApp", func() error {
+		var sb sandboxv1alpha1.SwiftSandbox
+		if err := testClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "hello-0"}, &sb); err != nil {
+			return err
+		}
+		if !metav1.IsControlledBy(&sb, app) {
+			return fmt.Errorf("not owned yet")
+		}
+		return nil
+	})
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("created %s after the name was free", d)
+	}
+}

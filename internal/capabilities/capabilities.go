@@ -106,6 +106,12 @@ type Sandbox struct {
 	// ReadinessStartup is true when spec.readinessStartup exists: the
 	// readiness probe can run at a sub-second interval until its first pass.
 	ReadinessStartup bool
+	// Termination is true when spec.termination exists (KubeSwift v0.16.3):
+	// a deleted sandbox leaves Service endpoints, drains, stops its microVM
+	// and keeps its NetworkPolicy until the launcher has stopped.
+	// kubeswift-spin does not set the field; it only reports whether the
+	// installed KubeSwift has this behavior.
+	Termination bool
 }
 
 // Exposure reports whether every feature needed to put sandboxes behind a
@@ -207,8 +213,9 @@ func ParseSandboxSchema(raw []byte) (Sandbox, error) {
 	_, podMeta := spec.Properties["podMetadata"]
 	_, secretFiles := spec.Properties["secretFiles"]
 	_, startup := spec.Properties["readinessStartup"]
+	_, termination := spec.Properties["termination"]
 	return Sandbox{Ports: ports, ReadinessProbe: probe, PodMetadata: podMeta, SecretFiles: secretFiles, Egress: egress,
-		ReadinessStartup: startup}, nil
+		ReadinessStartup: startup, Termination: termination}, nil
 }
 
 // Static is a SandboxDetector returning fixed features, for tests and for

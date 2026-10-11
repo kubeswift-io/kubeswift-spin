@@ -65,6 +65,10 @@ const v0162Schema = `{"components":{"schemas":{"io.kubeswift.sandbox.v1alpha1.Sw
   "network":{"properties":{"mode":{"type":"string"},"ports":{"type":"array"},"egress":{"type":"object"}}},
   "readinessProbe":{"type":"object"},"readinessStartup":{"type":"object"},"podMetadata":{"type":"object"},"secretFiles":{"type":"array"}}}}}}}}`
 
+const v0163Schema = `{"components":{"schemas":{"io.kubeswift.sandbox.v1alpha1.SwiftSandbox":{"properties":{"spec":{"properties":{
+  "network":{"properties":{"mode":{"type":"string"},"ports":{"type":"array"},"egress":{"type":"object"}}},
+  "readinessProbe":{"type":"object"},"readinessStartup":{"type":"object"},"termination":{"type":"object"},"podMetadata":{"type":"object"},"secretFiles":{"type":"array"}}}}}}}}`
+
 func TestParseSandboxSchema(t *testing.T) {
 	s, err := ParseSandboxSchema([]byte(v0151Schema))
 	if err != nil {
@@ -84,8 +88,15 @@ func TestParseSandboxSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.Exposure() || !s.ReadinessStartup {
+	if !s.Exposure() || !s.ReadinessStartup || s.Termination {
 		t.Fatalf("v0.16.2 schema not detected: %+v", s)
+	}
+	s, err = ParseSandboxSchema([]byte(v0163Schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Exposure() || !s.ReadinessStartup || !s.Termination {
+		t.Fatalf("v0.16.3 schema not detected: %+v", s)
 	}
 	if _, err := ParseSandboxSchema([]byte(`{"components":{"schemas":{}}}`)); err == nil {
 		t.Fatal("missing schema accepted")
