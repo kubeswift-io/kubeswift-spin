@@ -16,22 +16,25 @@ KubeSwift.
 
 ## Status
 
-v0.1.0-rc5 is a release candidate for KubeSwift v0.16.2. Rolling updates
-keep `spec.replicas` replicas available, including for a single replica,
-and on KubeSwift v0.16.2 a replica without a readiness check is ready
-about 0.1 seconds after Spin first answers. The runtime image
-`spin-4.2.1-r2` is unchanged from v0.1.0-rc4. It validates the initial
-architecture and the core execution path on real KVM hardware and is meant
-for evaluation and integration testing while the project builds broader
-compatibility and operational experience. It is not production-ready.
+v0.1.0-rc6 is a release candidate for KubeSwift v0.16.3, the supported
+baseline: KubeSwift drains a deleted replica and stops it explicitly, keeps
+its network isolation until it has stopped, and never gives a re-created
+sandbox the previous one's launcher. Rolling updates keep `spec.replicas`
+replicas available, including for a single replica, and a replica without a
+readiness check is ready about 0.1 seconds after Spin first answers. The
+runtime image `spin-4.2.1-r2` is unchanged from v0.1.0-rc4. It validates the
+initial architecture and the core execution path on real KVM hardware and is
+meant for evaluation and integration testing while the project builds
+broader compatibility and operational experience. It is not
+production-ready.
 
-Tested on linux/amd64 only, with KubeSwift v0.16.2 (earlier releases also on
-v0.16.0 and v0.16.1), Spin Operator v0.6.1 and Kubernetes 1.34 (one k0s lab
+Tested on linux/amd64 only, with KubeSwift v0.16.3 (earlier releases also
+on v0.16.0 to v0.16.2), Spin Operator v0.6.1 and Kubernetes 1.34 (one k0s lab
 cluster with Calico). arm64 images are built and published but not
 validated. [docs/compatibility.md](docs/compatibility.md) lists what was
 tested and the support status of every SpinApp field.
 
-What works on KubeSwift v0.16.2, exercised by the KVM end-to-end test
+What works on KubeSwift v0.16.3, exercised by the KVM end-to-end test
 ([test/e2e](test/e2e/README.md)) and the lab runs in
 [docs/compatibility.md](docs/compatibility.md):
 
@@ -122,7 +125,7 @@ kubectl create namespace demo
 Install the chart with a `kubeswift` executor in `demo`:
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc5 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0-rc6 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -137,7 +140,7 @@ Chart values are documented in
 ## Run hello-http
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc5/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0-rc6/examples/hello-http/spinapp.yaml
 ```
 
 ```bash
