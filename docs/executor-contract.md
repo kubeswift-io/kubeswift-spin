@@ -424,15 +424,15 @@ sandboxes; every transition below is covered by unit and envtest tests.
   the surge name `<spinapp>-<replicas>`: a foreign object with that name
   stalls rollouts, while the existing replicas keep serving. The SpinApp is
   rechecked every 30 seconds, so the replica is created once the name is
-  free. A foreign sandbox that is already being deleted, such as one left by
-  a SpinApp of the same name that was just deleted and is still draining
-  under KubeSwift's termination finalizer, is not a conflict: the SpinApp
-  waits, without a condition of its own, and creates its replica once the
-  name is free. Only a sandbox controlled by a SpinApp of the same name
-  (another UID) is waited for, and only for 2 minutes after its deletion
-  started; after that `Progressing` reports `SandboxConflict` with the
-  sandbox's finalizers, which usually means the KubeSwift controller is not
-  running.
+  free. One case is not a conflict: a sandbox that is being deleted and is
+  controlled by an earlier SpinApp with the same name (another UID), as left
+  when a SpinApp is deleted and created again while KubeSwift still
+  terminates its sandbox. The SpinApp then waits with `Progressing=True`
+  (`SandboxCreating`), rechecking at least every 5 seconds, and creates its
+  replica once the name is free. If the old sandbox is still there 2 minutes
+  after its deletion started, `Progressing` reports `SandboxConflict` with
+  the sandbox's finalizers, which usually means the KubeSwift controller is
+  not running. Any other terminating object is a conflict at once.
 
 While a SpinApp has unsupported configuration, an invalid executor or an
 incompatible warm pool, kubeswift-spin creates and deletes nothing for it;
@@ -490,25 +490,29 @@ SwiftSandbox:
 2. keeps the workload serving for the drain period
    (`spec.termination.drainPeriod`; kubeswift-spin leaves it unset, so
    KubeSwift's default of 5 seconds for sandboxes with exposed ports
-   applies), long enough for kube-proxy on every node to stop routing new
-   connections to it. Requests still running when the drain ends are cut:
-   a request that takes longer than about 5 seconds can fail when its
-   replica is replaced, scaled down or deleted (on KubeSwift v0.16.2 and
-   earlier such a request had up to about 30 seconds);
+   applies), meant to cover kube-proxy's next rule sync on every node
+   (`minSyncPeriod` is 1 second by default). Requests still running when the
+   drain ends are cut: a request that takes longer than about 5 seconds can
+   fail when its replica is replaced, scaled down or deleted (on KubeSwift
+   v0.16.2 and earlier such a request had up to about 30 seconds);
 3. stops the microVM; the launcher pod exits and ends `Succeeded`;
 4. removes the NetworkPolicy and the SwiftSandbox only after the launcher
    has stopped (KubeSwift lets the SwiftSandbox go anyway 30 seconds after
    the launcher's grace period, for example when its node is unreachable;
    the NetworkPolicy stays until the pod is gone).
 
-On the lab cluster the old replica left the ready endpoints within 45 ms of
-its deletion, its launcher exited 5.4 to 5.8 seconds after it (the 5-second
-drain, then the stop), its NetworkPolicy was removed within 20 ms of the
-launcher's exit, and the SwiftSandbox was gone within 6.5 seconds. The
-SwiftSandbox `Terminating` condition reports `Draining`, then `Stopping`;
-KubeSwift computes the time of `Stopping` from the pod's deletion timestamp,
-which has one-second resolution, so the condition can change up to a second
-before the drain in the launcher ends.
+In the KubeSwift v0.16.3 rolling-update runs
+([compatibility.md](compatibility.md#zero-loss-rolling-updates)) the old
+replica was marked not ready within 91 ms of its deletion, left the ready
+endpoints within 17 ms of its launcher pod's deletion, and its launcher
+exited 5.4 to 6.8 seconds after the deletion (the 5-second drain, then the
+stop); its NetworkPolicy was removed 5 to 70 ms after the launcher exited,
+and the SwiftSandbox was gone 5.6 to 7.1 seconds after the deletion. The
+SwiftSandbox `Terminating` condition reports `Draining`, then `Stopping` (or
+`LauncherGone` if the pod is already gone); KubeSwift computes the time of
+`Stopping` from the pod's deletion timestamp, which has one-second
+resolution, so the condition can change up to a second before the drain in
+the launcher ends.
 
 On KubeSwift v0.16.2 and earlier there is no explicit drain: the guest keeps
 serving until the launcher's 30-second termination grace period ends, the

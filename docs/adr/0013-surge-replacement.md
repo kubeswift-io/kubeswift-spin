@@ -72,20 +72,22 @@ the old name while the old sandbox still exists.
   start or never becomes ready, the rollout stalls with every old replica
   still serving; `Progressing` reports the failing sandbox, and the
   failed surge replica is replaced with the usual backoff.
-- Old replicas leave the Service through KubeSwift's termination, not
-  through anything kubeswift-spin does. From KubeSwift v0.16.3 a deleted
-  sandbox is taken out of Service endpoints, drains for
-  `spec.termination.drainPeriod` (kubeswift-spin leaves the default of 5
-  seconds for exposed sandboxes) while kube-proxy catches up, and then has
-  its microVM stopped; its NetworkPolicy stays until the launcher has
-  stopped. kubeswift-spin adds no sleep, drain or endpoint handling of its
-  own. On KubeSwift v0.16.2 and earlier there was no explicit drain: the
-  guest happened to keep serving until the 30-second grace period ended,
-  because it ignores the ACPI power button that swiftletd pressed on
-  SIGTERM, and the NetworkPolicy was removed while it could still serve.
-  KubeSwift v0.16.3 is therefore the supported baseline (amended 2026-10-11;
-  the proposal was
-  [kubeswift-sandbox-termination-drain.md](../upstream/kubeswift-sandbox-termination-drain.md)).
+- Old replicas leave the Service when their launcher pod starts terminating.
+  kubeswift-spin relies on KubeSwift to keep a terminating sandbox from
+  failing connections while kube-proxy catches up. On KubeSwift v0.16.2 this
+  holds only because the guest ignores the ACPI power button that swiftletd
+  presses on SIGTERM, so it keeps serving until the 30-second grace period
+  ends and the launcher pod ends `Failed`. If a later kernel or KubeSwift
+  version stops the guest promptly, connections routed during kube-proxy's
+  next sync can fail. The KVM rollout check under traffic is what would
+  catch that; the generic fix is proposed in
+  [kubeswift-sandbox-termination-drain.md](../upstream/kubeswift-sandbox-termination-drain.md).
+- While a deleted replica keeps serving, KubeSwift has already removed its
+  NetworkPolicy, so its port is reachable from any pod in the cluster for
+  up to the grace period unless the namespace has its own default-deny
+  ingress policy (see
+  [security-model.md](../security-model.md#network-isolation)). Rollouts
+  make this window routine; it existed before for every deleted replica.
 - Scaling during a rollout composes with it. A scale-down removes the
   replicas above the new count, but keeps the lowest available ones while
   fewer than `spec.replicas` of the remaining replicas are available, so
@@ -98,3 +100,19 @@ the old name while the old sandbox still exists.
   delete-then-create.
 - A controller restart resumes from the observed sandboxes and labels; the
   planner keeps no state of its own.
+
+## Update (KubeSwift v0.16.3, 2026-10-11)
+
+Old replicas leave the Service through KubeSwift's termination, not through
+anything kubeswift-spin does. From KubeSwift v0.16.3 a deleted sandbox is
+taken out of Service endpoints, drains for `spec.termination.drainPeriod`
+(kubeswift-spin leaves the default of 5 seconds for exposed sandboxes) while
+kube-proxy catches up, and then has its microVM stopped; its NetworkPolicy
+stays until the launcher has stopped. kubeswift-spin adds no sleep, drain or
+endpoint handling of its own. The reliance on the guest ignoring the ACPI
+power button and the NetworkPolicy window described above apply to KubeSwift
+v0.16.2 and earlier only. KubeSwift v0.16.3 is therefore the supported
+baseline; the proposal was
+[kubeswift-sandbox-termination-drain.md](../upstream/kubeswift-sandbox-termination-drain.md).
+A request still running when the 5-second drain ends is cut, where v0.16.2
+let it run for up to about 30 seconds.

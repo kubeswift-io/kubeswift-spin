@@ -1052,7 +1052,7 @@ func TestStuckTerminatingSandboxIsReported(t *testing.T) {
 	predecessorSandbox(t, ns, "hello", "hello-0", true)
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
 	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxConflict)
-	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, "has been deleting for") || !strings.Contains(m, "kubeswift.io/sandbox-termination") {
+	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, "has been terminating for") || !strings.Contains(m, "kubeswift.io/sandbox-termination") {
 		t.Fatalf("message %q", m)
 	}
 	releaseFinalizer(t, ns, "hello-0")

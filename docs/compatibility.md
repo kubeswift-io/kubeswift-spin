@@ -7,7 +7,7 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.1.0-rc5, v0.1.0-rc3, v0.1.0-rc2 | all tests below; KVM runs used a development build before rc2, then the published v0.1.0-rc2, v0.1.0-rc3 and v0.1.0-rc5 artifacts; the other KubeSwift v0.16.2 runs used a development build of v0.1.0-rc5 (commit 7cb6d55) |
+| kubeswift-spin | v0.1.0-rc5, v0.1.0-rc3, v0.1.0-rc2 | all tests below; KVM runs used a development build before rc2, then the published v0.1.0-rc2, v0.1.0-rc3 and v0.1.0-rc5 artifacts; the other KubeSwift v0.16.2 runs used a development build of v0.1.0-rc5 (commit 7cb6d55); the KubeSwift v0.16.3 runs used the published v0.1.0-rc5 and a development build of v0.1.0-rc6 (commit 29d8bed) |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
@@ -25,8 +25,9 @@ that ran; nothing else is implied.
 ### Startup latency
 
 Newer results (KubeSwift v0.16.2, v0.1.0-rc5 code, three readiness
-configurations) are in [performance.md](performance.md#current-results);
-the figures below are kept for comparison.
+configurations, and a KubeSwift v0.16.3 sanity check) are in
+[performance.md](performance.md#current-results); the figures below are kept
+for comparison.
 
 
 Measured with `make perf-startup` on the lab cluster below, with the
@@ -261,9 +262,11 @@ The published kubeswift-spin v0.1.0-rc5, unchanged, first:
   secrets, egress and readiness startup.
 - `test/e2e/kvm-e2e.sh` passed every check of all nine phases: 23 in a run
   of phases 1 and 2, and 55 in a run of phases 3 to 9 (each run with its
-  preflight checks), the second after the test's
-  `http` helper was made to retry a connection refused right after an
-  endpoint turned ready, a race in the test, not in kubeswift-spin). The
+  preflight checks). The second run used the test's `http` helpers with
+  retries (3, 1 second apart) for a refused connection, a timeout or a
+  transient HTTP error, because a request right after an endpoint turned
+  ready could reach a node whose kube-proxy had not programmed it yet: a
+  race in the test, not in kubeswift-spin. The
   first cold start after the upgrade took 16.8 seconds to `Available`
   (about 11 seconds afterwards): each node read the runtime image's layers
   once (cache repository authorization). The private registry phase passed.
@@ -335,6 +338,11 @@ retried with backoff while the old replicas kept serving (`Available=True`,
 the same cluster lost 68 of 105,634 requests in one single-replica rollout
 and none with two replicas.
 
+These KubeSwift v0.16.2 results depended on its termination behavior
+described under [Known upstream issues](#known-upstream-issues): a deleted
+replica kept serving until its grace period ended. The KubeSwift v0.16.3
+runs below rely on its explicit drain instead.
+
 On KubeSwift v0.16.3 (2026-10-11), with the same method, KubeSwift drains
 each deleted replica explicitly (see
 [executor-contract.md](executor-contract.md#rolling-updates)). The client
@@ -355,23 +363,26 @@ first two seconds of the client, before any rollout.
 | the same with 2 replicas | 273,182 / 0 | 272,800 / 0 |
 | 2 rollouts with a controller restart 15 s into each | 177,131 / 16 (client start) | 177,619 / 0 |
 
-In every replacement of a serving replica (49 with rc5, 50 with rc6) the old
-replica was deleted 1 to 276 ms after its replacement was ready, was marked
-not ready (`Terminating=Draining`) within 91 ms of the deletion and left the
-ready endpoints within 17 ms of its launcher pod's deletion (where the watch
-recorded both), drained, and its launcher exited 0 5.4 to 6.8 seconds after
-the deletion; the NetworkPolicy was removed 5 to 70 ms after the launcher
-exited. With the broken revision the surge replica failed and was retried
-with backoff while the old replicas kept serving and the SpinApp stayed
-`Available`.
-
-The results above, on KubeSwift v0.16.2, depended on its termination
-behavior described under [Known upstream issues](#known-upstream-issues): a
-deleted replica kept serving until its grace period ended. The KubeSwift
-v0.16.3 runs below rely on its explicit drain instead.
+In every replacement of a serving replica that the watch recorded (49 with
+rc5, 50 with rc6; scale-downs and replicas replaced before they were ready
+are not counted) the old replica was deleted 1 to 276 ms after its
+replacement was ready, was marked not ready (`Terminating=Draining`) within
+91 ms of the deletion and left the ready endpoints within 17 ms of its
+launcher pod's deletion (where the watch recorded both), drained, and its
+launcher exited successfully 5.4 to 6.8 seconds after the deletion; the
+NetworkPolicy was removed 5 to 70 ms after the launcher exited. With the
+broken revision the surge replica failed and was retried with backoff while
+the old replicas kept serving and the SpinApp stayed `Available`.
 
 ### Not tested
 
+- On KubeSwift v0.16.3: a request longer than the 5-second drain during a
+  replacement (that it is cut follows from the KubeSwift source), a
+  launcher pod on an unreachable node (KubeSwift's release 30 seconds past
+  the grace period), `LauncherPodConflict`, a force-deleted launcher pod,
+  and downgrading KubeSwift after removing its finalizers. The 2-minute
+  `SandboxConflict` for a terminating same-named sandbox ran only in
+  envtest.
 - arm64 (images are built and published but not validated), other CNIs
   than Calico, other Kubernetes distributions, and more than one cluster.
 - A Wasm component actively trying to read guest files or credentials; the
@@ -415,7 +426,7 @@ ownership behavior described below.
 | secrets | `spec.secretFiles` (the same release honors `env[].valueFrom.secretKeyRef`) | `secretKeyRef` variables and runtime-config options, `runtimeConfig.loadFromSecret`, `imagePullSecrets` |
 | egress | `spec.network.egress` | `spin.kubeswift.io/egress-allow` |
 | readiness startup | `spec.readinessStartup` | replicas reported ready about when they first answer; `spin.kubeswift.io/readiness-startup` (see [executor-contract.md](executor-contract.md#readiness-startup)) |
-| termination | `spec.termination` | nothing to configure: kubeswift-spin reports the feature at startup and logs a message when it is missing. KubeSwift drains and stops deleted replicas itself (see below) |
+| termination | `spec.termination` | nothing to configure: kubeswift-spin reports the feature at startup and, on KubeSwift v0.16.0 to v0.16.2 (exposure detected, termination not), logs that KubeSwift is older than v0.16.3. KubeSwift drains and stops deleted replicas itself (see below) |
 
 KubeSwift v0.16.3 also changes behavior that kubeswift-spin relies on but
 does not configure, so no schema field marks it:
@@ -523,7 +534,8 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   ```
 
 - **KubeSwift v0.16.0 and v0.16.1 can hand out a warm-pool slot before its
-  guest is ready.** A slot counts as warm, and can be checked out, as soon
+  guest is ready** (`ExecFailed` not observed on v0.16.2 or v0.16.3, and
+  not listed as fixed). A slot counts as warm, and can be checked out, as soon
   as its launcher container is running. A checkout in the first seconds
   after a slot is created can fail with `ExecFailed`; kubeswift-spin then
   replaces the sandbox after the failure backoff, and the replacement is

@@ -532,8 +532,10 @@ cleanup.
 
 KubeSwift v0.16.3 adds its own finalizers: `kubeswift.io/sandbox-termination`
 on every SwiftSandbox and `kubeswift.io/launcher-isolation` on every
-launcher NetworkPolicy. Deleting SwiftSandboxes, and so SpinApps and their
-namespaces, then needs the KubeSwift controller running; the sandbox
+launcher NetworkPolicy. Deleting SwiftSandboxes, and so namespaces that
+contain them (and SpinApps deleted with `--cascade=foreground`), then needs
+the KubeSwift controller running; a SpinApp deleted with the default
+propagation goes at once and leaves its sandboxes terminating. the sandbox
 finalizer is released by KubeSwift at the latest 30 seconds after the
 launcher's grace period, and the NetworkPolicy finalizer only once the
 launcher pod has finished. Before downgrading KubeSwift, remove these

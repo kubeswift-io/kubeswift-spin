@@ -31,10 +31,14 @@ kubectl -n kubeswift-spin-system logs deploy/kubeswift-spin | grep "SwiftSandbox
 
 `exposure`, `secrets` and `egress` are all `true` on KubeSwift v0.16.0 and
 all `false` on v0.15.1; `readinessStartup` is `true` from v0.16.2 and
-`termination` from v0.16.3. Without `termination` the controller also logs
-that KubeSwift is older than v0.16.3: upgrade it, because deleted replicas
-are then not drained and lose their NetworkPolicy while they can still
-serve.
+`termination` from v0.16.3. On v0.16.0 to v0.16.2 the controller also logs
+a line saying that KubeSwift is older than v0.16.3: upgrade it, because
+deleted replicas are then not drained and lose their NetworkPolicy while
+they can still serve.
+
+```bash
+kubectl -n kubeswift-spin-system logs deploy/kubeswift-spin | grep "older than v0.16.3"
+```
 
 ## The SpinApp is refused by admission
 
@@ -85,9 +89,9 @@ The `Progressing` message carries KubeSwift's reason:
 - `PreviousLauncherStopping` (KubeSwift v0.16.3): a launcher pod with the
   sandbox's name, left by a deleted sandbox, is still stopping; the sandbox
   starts its own launcher once that pod is gone, normally within seconds.
-- `LauncherPodConflict` (KubeSwift v0.16.3): a running pod with the
-  sandbox's name belongs to something else. KubeSwift does not adopt it;
-  remove or rename that pod.
+- `LauncherPodConflict` (KubeSwift v0.16.3): a pod with the sandbox's name
+  that is not terminating belongs to something else. KubeSwift does not
+  adopt it; delete that pod, or re-create the SpinApp under another name.
 - No reason, pod unschedulable: no node is labelled
   `kubeswift.io/kernel-node=true`, or the executor's node selector matches
   none. Check the launcher pod, which has the sandbox's name:

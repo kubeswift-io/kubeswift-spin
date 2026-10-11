@@ -21,14 +21,14 @@ implements none of them. The runtime image `spin-4.2.1-r2` is reused.
 - Upgrading from v0.1.0-rc5 changes no rendered SwiftSandbox spec, so it
   replaces no replica. kubeswift-spin does not set
   `spec.termination.drainPeriod`; KubeSwift's default of 5 seconds for
-  sandboxes with exposed ports applies. A request still running 5 seconds
-  after its replica is deleted (rolling update, scale-down, deletion) is
+  sandboxes with exposed ports applies. A request still running about 5
+seconds after its replica is deleted (rolling update, scale-down, deletion) is
   cut; on KubeSwift v0.16.2 and earlier it had up to about 30 seconds.
 - Upgrade KubeSwift to v0.16.3 as its release notes describe (apply its
   CRDs first). That changes no SwiftSandbox kubeswift-spin renders either.
   The first start of the runtime image on each node afterwards reads the
   image's layers once.
-- On KubeSwift v0.16.2 and earlier, kubeswift-spin still runs, but a
+- On KubeSwift v0.16.0 to v0.16.2, kubeswift-spin still runs, but a
   deleted replica is not drained, its NetworkPolicy is removed while it can
   still serve, and a SpinApp re-created under the same name within about 30
   seconds can be attached to the old launcher; the controller logs that
@@ -38,22 +38,25 @@ implements none of them. The runtime image `spin-4.2.1-r2` is reused.
 
 - A SpinApp re-created under the name of one that is still being deleted
   waits for the old sandbox instead of reporting `SandboxConflict` while
-  KubeSwift drains it. Only a sandbox controlled by a SpinApp of the same
+  KubeSwift terminates it. Only a sandbox controlled by a SpinApp of the same
   name is waited for, for at most 2 minutes; then `SandboxConflict` names
   its finalizers.
 - The startup log line `SwiftSandbox features detected` also reports
   `readinessStartup` and `termination`.
 - KubeSwift v0.16.3 is the tested version and the contract-test
   dependency.
-- The KVM e2e test retries a refused connection right after an endpoint
-  turns ready, while kube-proxy may not have programmed it yet.
+- The KVM e2e test's HTTP helpers retry up to 3 times, 1 second apart, on
+  a refused connection (kube-proxy may not have programmed an endpoint that
+  just turned ready), a timeout or HTTP 408, 429 or 5xx. Checks that must
+  fail do not retry.
 
 ### Documentation
 
-- compatibility.md, executor-contract.md, security-model.md, ADR 0013 and
-  the README describe KubeSwift v0.16.3 termination, isolation, launcher
-  ownership and cache authorization, record the v0.16.3 validation, and mark
-  the v0.16.2 limitations as fixed upstream
+- compatibility.md, executor-contract.md, security-model.md,
+  troubleshooting.md, performance.md, ADR 0013 and the README describe
+  KubeSwift v0.16.3 termination, isolation, launcher ownership and cache
+  authorization, record the v0.16.3 validation, and mark the v0.16.2
+  limitations as fixed upstream
   ([kubeswift-io/kubeswift#772](https://github.com/kubeswift-io/kubeswift/issues/772),
   [kubeswift-io/kubeswift#774](https://github.com/kubeswift-io/kubeswift/pull/774),
   [kubeswift-io/kubeswift#775](https://github.com/kubeswift-io/kubeswift/pull/775)).

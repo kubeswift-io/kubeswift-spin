@@ -405,7 +405,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 				}
 				if blocker == nil {
 					blocker = &status.Blocker{Reason: status.ReasonSandboxConflict,
-						Message: fmt.Sprintf("SwiftSandbox %s of a deleted SpinApp with this name has been deleting for %s and still has finalizers %s; check that KubeSwift is running",
+						Message: fmt.Sprintf("SwiftSandbox %s of a deleted SpinApp with this name has been terminating for %s and still has finalizers %s; check that KubeSwift is running",
 							sb.Name, age.Round(time.Second), strings.Join(held.Finalizers, ", "))}
 				}
 				continue
