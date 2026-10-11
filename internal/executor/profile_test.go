@@ -267,7 +267,7 @@ func TestParseDrainPeriod(t *testing.T) {
 			t.Fatalf("%q: %v %+v", v, err, p.DrainPeriod)
 		}
 	}
-	for _, v := range []string{"", "30", "-1s", "11m", "1h", "soon"} {
+	for _, v := range []string{"", "30", "-1s", "11m", "1h", "soon", "500us", "1.0005s"} {
 		if _, err := Parse(managed("kubeswift", map[string]string{AnnDrainPeriod: v}), defaults()); err == nil {
 			t.Errorf("%q accepted", v)
 		}

@@ -92,8 +92,9 @@ type SpinAppReconciler struct {
 	WaitingRequeue time.Duration
 	// LeavingTimeout is how long a sandbox of a deleted SpinApp with the
 	// same name may keep a sandbox name while it terminates before it is
-	// reported as SandboxConflict. KubeSwift v0.16.3 releases it within its
-	// drain, a 15 s stop allowance and a 30 s slack. Defaults to 2 minutes.
+	// reported as SandboxConflict, on top of the drain period in that
+	// sandbox's spec. KubeSwift v0.16.3 releases it within its drain, a 15 s
+	// stop allowance and a 30 s slack. Defaults to 2 minutes.
 	LeavingTimeout time.Duration
 }
 
@@ -398,15 +399,15 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 				// terminating under KubeSwift's finalizer: not a conflict,
 				// unless it takes far longer than KubeSwift allows.
 				age := now.Sub(held.DeletionTimestamp.Time)
-				if age < r.leavingTimeout(profile) {
+				if age < r.leavingTimeout(held) {
 					logger.V(1).Info("waiting for a terminating sandbox of the same name", "sandbox", sb.Name)
 					waitForName = true
 					continue
 				}
 				if blocker == nil {
 					blocker = &status.Blocker{Reason: status.ReasonSandboxConflict,
-						Message: fmt.Sprintf("SwiftSandbox %s of a deleted SpinApp with this name has been terminating for %s and still has finalizers %s; check that KubeSwift is running",
-							sb.Name, age.Round(time.Second), strings.Join(held.Finalizers, ", "))}
+						Message: fmt.Sprintf("SwiftSandbox %s of a deleted SpinApp with this name has been terminating since %s and still has finalizers %s; check that KubeSwift is running",
+							sb.Name, held.DeletionTimestamp.UTC().Format(time.RFC3339), strings.Join(held.Finalizers, ", "))}
 				}
 				continue
 			}
@@ -465,11 +466,12 @@ func rejectionReason(err error) (string, bool) {
 }
 
 // leavingTimeout is how long a predecessor's terminating sandbox may hold a
-// name: LeavingTimeout plus the executor's drain period, so a long drain is
-// not reported as a stuck sandbox.
-func (r *SpinAppReconciler) leavingTimeout(p *executor.Profile) time.Duration {
-	if p != nil && p.DrainPeriod != nil {
-		return r.LeavingTimeout + *p.DrainPeriod
+// name: LeavingTimeout plus the drain period in that sandbox's own spec, so
+// a long drain is not reported as a stuck sandbox whatever the current
+// executor says.
+func (r *SpinAppReconciler) leavingTimeout(sb *sandboxv1alpha1.SwiftSandbox) time.Duration {
+	if t := sb.Spec.Termination; t != nil && t.DrainPeriod != nil && t.DrainPeriod.Duration > 0 {
+		return r.LeavingTimeout + min(t.DrainPeriod.Duration, executor.MaxDrainPeriod)
 	}
 	return r.LeavingTimeout
 }

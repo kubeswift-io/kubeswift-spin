@@ -145,6 +145,10 @@ func TestSurgeReplicaCountsTowardReadyUpToReplicas(t *testing.T) {
 	if r.ReadyReplicas != 1 || r.Available.Status != metav1.ConditionTrue {
 		t.Fatalf("ready %d available %+v", r.ReadyReplicas, r.Available)
 	}
+	// While the old replica drains, Progressing says what it waits for.
+	if m := r.Progressing.Message; !strings.Contains(m, "waiting for deleted sandbox app-0 to finish terminating") {
+		t.Fatalf("progressing %q", m)
+	}
 	// Never more than spec.replicas, even with every replica and the surge ready.
 	r = Compute(Input{Replicas: 1, Revision: "r2", Exposure: Exposure{Detected: true},
 		Instances: []Instance{si(0, "r1", rollout.Ready), surgeSI(1, "r2", rollout.Ready), si(2, "r2", rollout.Ready)}})

@@ -108,8 +108,10 @@ On KubeSwift before v0.16.2, `always` makes the executor invalid and
 `spin.kubeswift.io/drain-period`: how long a deleted replica keeps serving
 after it has left the Service before KubeSwift stops it. Without it
 KubeSwift's 5 seconds apply, and requests running longer than that are cut
-when a replica is replaced. It needs KubeSwift v0.16.3; setting or changing
-it replaces the executor's replicas once; see
+when a replica is replaced. A rolling update of N replicas takes at least
+N times the drain period, and values below about 2 seconds can fail
+requests during rolling updates. It needs KubeSwift v0.16.3; setting or
+changing it replaces the executor's replicas once; see
 [docs/executor-contract.md](../../docs/executor-contract.md#rolling-updates).
 
 `sandboxPool` names a SwiftSandboxPool that you create in the same

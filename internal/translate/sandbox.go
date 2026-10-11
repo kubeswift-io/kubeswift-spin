@@ -110,6 +110,14 @@ func BuildTemplate(app *spinv1alpha1.SpinApp, p *executor.Profile, policy Resour
 		}
 		spec.Network.Egress = &sandboxv1alpha1.SandboxEgress{Allow: append([]sandboxv1alpha1.SandboxEgressRule(nil), p.EgressAllow...)}
 	}
+	if p.DrainPeriod != nil {
+		if !f.Termination {
+			return nil, fmt.Errorf("executor %q sets %s, but the installed KubeSwift has no spec.termination", p.ExecutorName, executor.AnnDrainPeriod)
+		}
+		// Only when the executor asks for it, so executors without the
+		// annotation keep the spec, and their replicas, unchanged.
+		spec.Termination = &sandboxv1alpha1.SandboxTermination{DrainPeriod: &metav1.Duration{Duration: *p.DrainPeriod}}
+	}
 	if f.Exposure() {
 		expose(&spec, app, p, f)
 	}
@@ -166,11 +174,6 @@ func expose(spec *sandboxv1alpha1.SwiftSandboxSpec, app *spinv1alpha1.SpinApp, p
 		// replica's start; failures before the first pass do not count, and
 		// after the window the check runs every periodSeconds as usual.
 		spec.ReadinessStartup = &sandboxv1alpha1.SandboxReadinessStartup{}
-	}
-	if p.DrainPeriod != nil && f.Termination {
-		// Only when the executor asks for it, so executors without the
-		// annotation keep the spec, and their replicas, unchanged.
-		spec.Termination = &sandboxv1alpha1.SandboxTermination{DrainPeriod: &metav1.Duration{Duration: *p.DrainPeriod}}
 	}
 }
 

@@ -331,7 +331,9 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 		case err != nil:
 			add("annotation %s must be a duration such as 30s or 2m, got %q", AnnDrainPeriod, v)
 		case d < 0 || d > MaxDrainPeriod:
-			add("annotation %s must be between 0s and %s, got %s", AnnDrainPeriod, MaxDrainPeriod, d)
+			add("annotation %s must be between 0s and 10m, got %s", AnnDrainPeriod, d)
+		case d%time.Millisecond != 0:
+			add("annotation %s must be a whole number of milliseconds, got %s", AnnDrainPeriod, d)
 		default:
 			p.DrainPeriod = &d
 		}

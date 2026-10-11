@@ -982,7 +982,7 @@ func TestRejectedSurgeKeepsTheOldReplicaAndRecovers(t *testing.T) {
 
 // predecessorSandbox is a sandbox left by a deleted SpinApp named app (another
 // UID), still held by KubeSwift's termination finalizer.
-func predecessorSandbox(t *testing.T, ns, app, name string, owned bool) *sandboxv1alpha1.SwiftSandbox {
+func predecessorSandbox(t *testing.T, ns, app, name string, owned bool, mutate ...func(*sandboxv1alpha1.SwiftSandbox)) *sandboxv1alpha1.SwiftSandbox {
 	t.Helper()
 	sb := &sandboxv1alpha1.SwiftSandbox{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: translate.Labels(app, "kubeswift", "deadbeef00", 0),
@@ -992,6 +992,9 @@ func predecessorSandbox(t *testing.T, ns, app, name string, owned bool) *sandbox
 	if owned {
 		sb.OwnerReferences = []metav1.OwnerReference{{APIVersion: spinv1alpha1.GroupVersion.String(), Kind: "SpinApp",
 			Name: app, UID: "00000000-0000-0000-0000-000000000001", Controller: ptr.To(true)}}
+	}
+	for _, m := range mutate {
+		m(sb)
 	}
 	mustCreate(t, sb)
 	if err := testClient.Delete(ctx, sb); err != nil {
@@ -1053,11 +1056,31 @@ func TestStuckTerminatingSandboxIsReported(t *testing.T) {
 	predecessorSandbox(t, ns, "hello", "hello-0", true)
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
 	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxConflict)
-	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, "has been terminating for") || !strings.Contains(m, "kubeswift.io/sandbox-termination") {
+	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, "has been terminating since") || !strings.Contains(m, "kubeswift.io/sandbox-termination") {
 		t.Fatalf("message %q", m)
 	}
 	releaseFinalizer(t, ns, "hello-0")
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxCreating)
+}
+
+// The wait for a predecessor's sandbox grows by the drain period in that
+// sandbox's own spec, not the current executor's: a predecessor that drains
+// longer than the wait is not reported while it drains.
+func TestLeavingWaitUsesThePredecessorsDrain(t *testing.T) {
+	startManager(t, harnessOpts{leavingTimeout: 2 * time.Second})
+	ns := newNamespace(t)
+	predecessorSandbox(t, ns, "hello", "hello-0", true, func(sb *sandboxv1alpha1.SwiftSandbox) {
+		sb.Spec.Termination = &sandboxv1alpha1.SandboxTermination{DrainPeriod: &metav1.Duration{Duration: time.Hour}}
+	})
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	consistently(t, "no conflict reported while the old sandbox drains", 4*time.Second, func() error {
+		if c := findCond(getApp(t, ns, "hello"), status.TypeProgressing); c != nil && c.Reason == status.ReasonSandboxConflict {
+			return fmt.Errorf("conflict reported: %s", c.Message)
+		}
+		return nil
+	})
+	releaseFinalizer(t, ns, "hello-0")
+	expectSandboxes(t, ns, "hello-0")
 }
 
 // A terminating sandbox that no same-named SpinApp owned is a conflict at

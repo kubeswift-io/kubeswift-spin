@@ -341,13 +341,21 @@ func TestDrainPeriod(t *testing.T) {
 	if tmpl.Revision == base.Revision {
 		t.Fatal("drain period does not change the revision")
 	}
-	// Without spec.termination in the schema nothing is rendered (the
-	// executor is reported invalid instead, see executor.CheckFeatures).
-	old, err := BuildTemplate(testApp(), set, DefaultResourcePolicy(), v16)
+	// 0s is a value (stop right after leaving the Service), not unset.
+	var zero time.Duration
+	set0 := testProfile()
+	set0.DrainPeriod = &zero
+	z, err := BuildTemplate(testApp(), set0, DefaultResourcePolicy(), v163)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if old.Spec.Termination != nil {
-		t.Fatal("termination rendered for KubeSwift without spec.termination")
+	if z.Spec.Termination == nil || z.Spec.Termination.DrainPeriod == nil || z.Spec.Termination.DrainPeriod.Duration != 0 || z.Revision == base.Revision {
+		t.Fatalf("0s: termination %+v, revision %s (unset %s)", z.Spec.Termination, z.Revision, base.Revision)
+	}
+	// Without spec.termination in the schema the value is never dropped
+	// silently (the reconciler reports the executor invalid first, see
+	// executor.CheckFeatures).
+	if _, err := BuildTemplate(testApp(), set, DefaultResourcePolicy(), v16); err == nil || !strings.Contains(err.Error(), executor.AnnDrainPeriod) {
+		t.Fatalf("err = %v, want one naming %s", err, executor.AnnDrainPeriod)
 	}
 }

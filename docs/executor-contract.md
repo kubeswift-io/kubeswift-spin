@@ -72,9 +72,9 @@ for example `kubeswift`, `kubeswift-open` and `kubeswift-warm`.
 Any other annotation with the `spin.kubeswift.io/` prefix makes the executor
 invalid, so a misspelled key is reported rather than ignored. Network mode
 `none` is rejected because Spin downloads the application over the network
-when it starts. `egress-allow`, `ingress-from` and `readiness-startup: always`
-on a cluster whose KubeSwift lacks the feature also make the executor
-invalid (`ExecutorInvalid`).
+when it starts. `egress-allow`, `ingress-from`, `readiness-startup: always`
+and `drain-period` on a cluster whose KubeSwift lacks the feature also make
+the executor invalid (`ExecutorInvalid`).
 
 An egress rule names exactly one destination, a Service or an IPv4 CIDR,
 and optionally ports (`protocol` `TCP` or `UDP`, default `TCP`). A Service
@@ -145,6 +145,7 @@ Each replica is one SwiftSandbox in the SpinApp's namespace:
 | `podMetadata.labels` | `core.spinkube.dev/app.<name>.status: ready`, `core.spinkube.dev/app-name: <name>`, plus `spec.podLabels`; KubeSwift v0.16.0 |
 | `readinessProbe` | from `spec.checks.readiness`, else a TCP check; KubeSwift v0.16.0 |
 | `readinessStartup` | `{}` (KubeSwift defaults) when [readiness startup](#readiness-startup) applies; KubeSwift v0.16.2 |
+| `termination.drainPeriod` | profile `drain-period`; unset otherwise; KubeSwift v0.16.3 |
 | `livenessProbe` | from `spec.checks.liveness`, else unset; KubeSwift v0.16.0 |
 | `rootfsMode` | profile rootfs mode |
 | `kernelProfileRef` | profile kernel profile |
@@ -431,7 +432,7 @@ sandboxes; every transition below is covered by unit and envtest tests.
   terminates its sandbox. The SpinApp then waits with `Progressing=True`
   (`SandboxCreating`), rechecking at least every 5 seconds, and creates its
   replica once the name is free. If the old sandbox is still there 2 minutes
-  after its deletion started, `Progressing` reports `SandboxConflict` with
+  plus the drain period in its own spec after its deletion started, `Progressing` reports `SandboxConflict` with
   the sandbox's finalizers, which usually means the KubeSwift controller is
   not running. Any other terminating object is a conflict at once.
 
@@ -499,8 +500,19 @@ SwiftSandbox:
    is replaced, scaled down or deleted (on KubeSwift v0.16.2 and earlier
    such a request had up to about 30 seconds). Set the annotation to the
    longest request the application must be able to finish, plus a few
-   seconds; a longer drain also keeps each old replica, and the capacity it
-   uses, for that long;
+   seconds. A longer drain keeps each old replica, and the capacity it
+   uses, for that long, and makes rolling updates slower: a replica is
+   recreated at the new revision only once its old sandbox is gone, so a
+   rolling update of N replicas takes at least N times the drain period,
+   and a replica of a broken revision that runs but never becomes ready
+   also holds its ordinal for the whole drain. The pace comes from the drain
+   in the old replicas' specs, so the rolling update that shortens the
+   drain still runs at the old one. The surge replica removed at the end of
+   a rolling update, and a replica removed by a scale-down, keep their names
+   for their drain too: the next rolling update or scale-up waits for them.
+   Values below about 2 seconds
+   do not cover kube-proxy's rule sync and can fail requests during
+   rolling updates;
 3. stops the microVM; the launcher pod exits and ends `Succeeded`;
 4. removes the NetworkPolicy and the SwiftSandbox only after the launcher
    has stopped (KubeSwift lets the SwiftSandbox go anyway 30 seconds after
@@ -682,7 +694,7 @@ v0.15.1 sandboxes have no probe, so `readyReplicas` stays 0.
 | Progressing | False | `ExecutorInvalid` | the executor profile is invalid |
 | Progressing | False | `ExecutorNotFound` | the executor no longer exists |
 | Progressing | False | `WarmPoolIncompatible` | the selected pool is missing or has another shape |
-| Progressing | False | `SandboxConflict` | a sandbox name is taken by a foreign object, or by a deleted same-named SpinApp's sandbox still terminating after 2 minutes |
+| Progressing | False | `SandboxConflict` | a sandbox name is taken by a foreign object, or by a deleted same-named SpinApp's sandbox still terminating 2 minutes plus its drain period after its deletion |
 | Progressing | False | `SandboxRejected` | the API server refused to create a sandbox (Forbidden or Invalid), for example a ResourceQuota |
 | Progressing | False | `RuntimeImageUnavailable` | KubeSwift could not pull, verify or materialize the runtime image |
 | Progressing | False | `SandboxFailed` | Spin exited or the guest failed; the replica is replaced after backoff |

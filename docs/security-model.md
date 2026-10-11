@@ -519,8 +519,11 @@ kubectl delete swiftsandbox <name> -n <namespace> --cascade=foreground
 
 Each deleted ordinal is recreated at the new revision once the old one is
 gone, and the surge replica at the new revision too while the rollout lasts.
-A deleted replica drains for 5 seconds and is then stopped (KubeSwift
-v0.16.3; up to 30 seconds on earlier releases). `spec.replicas: 0` is not
+A deleted replica drains for 5 seconds, or for the executor's
+`spin.kubeswift.io/drain-period` (up to 10 minutes), and is then stopped
+(KubeSwift v0.16.3; up to 30 seconds on earlier releases). Until then it
+keeps its node capacity, so a long drain period also delays the release of
+capacity on scale-down and rolling updates. `spec.replicas: 0` is not
 supported and leaves every sandbox in place.
 
 ## Finalizers and deletion
