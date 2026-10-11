@@ -48,7 +48,8 @@ KubeSwift v0.16.0 facts were also exercised by the KVM e2e lab run (see
 [compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05)). They
 constrain the design.
 
-**Spin Operator v0.6.1, `createDeployment: false`** (`internal/controller/spinapp_controller.go`):
+**Spin Operator v0.6.1, `createDeployment: false`**
+(`internal/controller/spinapp_controller.go`):
 
 - `updateStatus` returns before touching status, so the operator writes no
   SpinApp status for such executors.
@@ -61,11 +62,11 @@ constrain the design.
   for such executors and requires `replicas >= 1` unless autoscaling is
   enabled.
 
-**KubeSwift v0.15.1 SwiftSandbox** (`api/sandbox/v1alpha1`, `internal/controller/swiftsandbox`).
-These describe the degraded mode kubeswift-spin uses when the v0.16.0
-features are not detected. KubeSwift v0.16.0 changes the items on `env`,
-networking, launcher pod labels and warm-pool checkout (next list); the
-others still hold.
+**KubeSwift v0.15.1 SwiftSandbox** (`api/sandbox/v1alpha1`,
+`internal/controller/swiftsandbox`). These describe the degraded mode
+kubeswift-spin uses when the v0.16.0 features are not detected. KubeSwift
+v0.16.0 changes the items on `env`, networking, launcher pod labels and
+warm-pool checkout (next list); the others still hold.
 
 - CPU (integer vCPUs), memory, command, args, environment, working
   directory, network mode (`restricted`, `open`, `none`), rootfs mode, kernel
@@ -272,8 +273,10 @@ stateDiagram-v2
 
 Replicas follow a StatefulSet-like model: ordinal `i` is always the sandbox
 named `<app>-i`. Immutable sandbox specs mean replacement is delete then
-recreate, gated so at most one available replica (ready on KubeSwift
-v0.16.0) is replaced at a time.
+recreate. A rollout first adds one surge replica `<app>-<replicas>` at the
+new revision and deletes an available outdated replica only while
+`spec.replicas` other replicas are available ([ADR
+0013](adr/0013-surge-replacement.md)).
 
 ## Networking
 
@@ -308,10 +311,10 @@ reason `ApplicationNotReady`. See
 ## Warm pools
 
 A profile can name a SwiftSandboxPool. Pools hold pre-booted runtime rootfs
-microVMs; a SwiftSandbox with `poolRef` claims one and receives its
-command and environment over vsock, skipping the cold boot. The pool is
-capacity, not the replica set: kubeswift-spin still creates one SwiftSandbox
-per replica. kubeswift-spin verifies the full slot shape, including exposed
+microVMs; a SwiftSandbox with `poolRef` claims one and receives its command
+and environment over vsock, skipping the cold boot. The pool is capacity,
+not the replica set: kubeswift-spin still creates one SwiftSandbox per
+replica. kubeswift-spin verifies the full slot shape, including exposed
 ports and the egress allowlist, before it sets `poolRef`, and refuses an
 incompatible pool with `WarmPoolIncompatible`. KubeSwift v0.16.0 also
 compares the full shape at checkout; v0.15.1 did not (see

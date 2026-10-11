@@ -84,7 +84,8 @@ executors:
 Fields: `networkMode`, `rootfsMode`, `kernelProfile`, `sandboxPool`,
 `nodeSelector`, `defaultCPU`, `defaultMemory`, `runtimeImage`,
 `runtimeImagePullSecret`, `runtimeImageVerifyKeySecret`, `egressAllow`,
-`ingressFrom`, `otel`. The namespaces must exist before installing.
+`ingressFrom`, `readinessStartup`, `otel`. The namespaces must exist before
+installing.
 
 `egressAllow` (1 to 32 rules, each a `service` with `name` and optional
 `namespace`, or a `cidr`, with optional `ports`) renders the
@@ -92,6 +93,16 @@ Fields: `networkMode`, `rootfsMode`, `kernelProfile`, `sandboxPool`,
 mode `restricted`. `ingressFrom` (1 to 16 NetworkPolicy peers) renders
 `spin.kubeswift.io/ingress-from`. Both are JSON-encoded into the annotation
 and need KubeSwift v0.16.0; on older KubeSwift the executor is invalid.
+
+`readinessStartup` (`auto`, `always` or `never`) renders
+`spin.kubeswift.io/readiness-startup`. With the default `auto`, a replica
+of a SpinApp without a readiness check is reported ready about when Spin
+first accepts connections (KubeSwift v0.16.2). `always` does the same for
+SpinApps that declare an HTTP readiness check, whose `initialDelaySeconds`
+then does not delay the first checks; see
+[docs/executor-contract.md](../../docs/executor-contract.md#readiness-startup).
+On KubeSwift before v0.16.2, `always` makes the executor invalid and
+`auto` changes nothing.
 
 `sandboxPool` names a SwiftSandboxPool that you create in the same
 namespace. Its `image` must equal the controller's runtime image reference

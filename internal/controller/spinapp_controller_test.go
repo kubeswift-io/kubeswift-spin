@@ -63,11 +63,16 @@ func TestCreateTranslatesSpinApp(t *testing.T) {
 	if len(sb.Spec.Env) != 1 || sb.Spec.Env[0].Name != "SPIN_VARIABLE_GREETING" {
 		t.Fatalf("env %+v", sb.Spec.Env)
 	}
-	// The envtest API server serves the KubeSwift v0.16.0 CRDs, so the
+	// The envtest API server serves the KubeSwift v0.16.2 CRDs, so the
 	// detector finds exposure and the sandbox is built for a Service.
 	if len(sb.Spec.Network.Ports) != 1 || sb.Spec.Network.Ports[0].Name != "http-app" || sb.Spec.ReadinessProbe == nil ||
 		sb.Spec.PodMetadata == nil || sb.Spec.PodMetadata.Labels["core.spinkube.dev/app.hello.status"] != "ready" {
 		t.Fatalf("sandbox not exposed: ports %+v probe %+v pod metadata %+v", sb.Spec.Network.Ports, sb.Spec.ReadinessProbe, sb.Spec.PodMetadata)
+	}
+	// The SpinApp sets no readiness check, so the check kubeswift-spin adds
+	// is retried quickly until it first passes (KubeSwift defaults).
+	if rs := sb.Spec.ReadinessStartup; rs == nil || rs.Interval != nil || rs.Window != nil {
+		t.Fatalf("readinessStartup %+v", rs)
 	}
 	for k, v := range map[string]string{
 		translate.LabelManagedBy: translate.ManagedByValue, translate.LabelApp: "hello",
@@ -120,7 +125,7 @@ func TestLegacyKubeSwiftReportsNetworkUnavailable(t *testing.T) {
 	ns := newNamespace(t)
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
 	expectSandboxes(t, ns, "hello-0")
-	if sb := getSandbox(t, ns, "hello-0"); sb.Spec.Network.Ports != nil || sb.Spec.ReadinessProbe != nil || sb.Spec.PodMetadata != nil {
+	if sb := getSandbox(t, ns, "hello-0"); sb.Spec.Network.Ports != nil || sb.Spec.ReadinessProbe != nil || sb.Spec.PodMetadata != nil || sb.Spec.ReadinessStartup != nil {
 		t.Fatalf("v0.16.0 fields used without the feature: %+v", sb.Spec)
 	}
 	setReady(t, ns, "hello-0")
@@ -266,7 +271,23 @@ func TestRollingReplacementOnImageChange(t *testing.T) {
 
 	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
 
-	// The highest ordinal goes first; replica 0 keeps running meanwhile.
+	// A surge replica at the new revision comes first; nothing is deleted
+	// until it is ready.
+	expectSandboxes(t, ns, "hello-0", "hello-1", "hello-2")
+	if sb := getSandbox(t, ns, "hello-2"); sb.Labels[translate.LabelSurge] != "true" || sb.Labels[translate.LabelRevision] == oldRev {
+		t.Fatalf("surge replica labels %v", sb.Labels)
+	}
+	consistently(t, "no replica deleted before the surge replica is ready", time.Second, func() error {
+		for _, n := range []string{"hello-0", "hello-1"} {
+			if !getSandbox(t, ns, n).DeletionTimestamp.IsZero() {
+				return fmt.Errorf("%s deleting", n)
+			}
+		}
+		return nil
+	})
+	setReady(t, ns, "hello-2")
+
+	// Then the highest ordinal is replaced; replica 0 keeps running.
 	eventually(t, "hello-1 deleting", func() error {
 		if getSandbox(t, ns, "hello-1").DeletionTimestamp.IsZero() {
 			return fmt.Errorf("not deleting")
@@ -289,10 +310,12 @@ func TestRollingReplacementOnImageChange(t *testing.T) {
 		if sb.Labels[translate.LabelRevision] == oldRev || !strings.Contains(strings.Join(sb.Spec.Args, " "), "hello-http:v2") {
 			return fmt.Errorf("old revision")
 		}
+		if sb.Labels[translate.LabelSurge] != "" {
+			return fmt.Errorf("desired replica labeled as surge")
+		}
 		return nil
 	})
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonRollingUpdate)
-
 	setReady(t, ns, "hello-1")
 	eventually(t, "hello-0 replaced", func() error {
 		simulateGC(t, ns)
@@ -302,6 +325,67 @@ func TestRollingReplacementOnImageChange(t *testing.T) {
 		}
 		if sb.UID == uid0 {
 			return fmt.Errorf("not replaced yet")
+		}
+		return nil
+	})
+	setReady(t, ns, "hello-0")
+
+	// Every desired replica runs the new revision: the surge replica goes.
+	eventually(t, "surge replica removed", func() error {
+		simulateGC(t, ns)
+		names := []string{}
+		for _, sb := range listSandboxes(t, ns) {
+			names = append(names, sb.Name)
+		}
+		if strings.Join(names, ",") != "hello-0,hello-1" {
+			return fmt.Errorf("sandboxes %v", names)
+		}
+		return nil
+	})
+}
+
+func TestSingleReplicaRolloutKeepsAReadyReplica(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	setReady(t, ns, "hello-0")
+	uid0 := getSandbox(t, ns, "hello-0").UID
+
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	consistently(t, "hello-0 kept until the new replica is ready", time.Second, func() error {
+		if sb := getSandbox(t, ns, "hello-0"); !sb.DeletionTimestamp.IsZero() || sb.UID != uid0 {
+			return fmt.Errorf("hello-0 deleted")
+		}
+		return nil
+	})
+	a := expectCondition(t, ns, "hello", status.TypeAvailable, metav1.ConditionTrue, status.ReasonApplicationReady)
+	if a.Status.ReadyReplicas != 1 {
+		t.Fatalf("readyReplicas %d", a.Status.ReadyReplicas)
+	}
+	setReady(t, ns, "hello-1")
+	eventually(t, "hello-0 replaced", func() error {
+		simulateGC(t, ns)
+		var sb sandboxv1alpha1.SwiftSandbox
+		if err := testClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "hello-0"}, &sb); err != nil {
+			return err
+		}
+		if sb.UID == uid0 {
+			return fmt.Errorf("not replaced yet")
+		}
+		return nil
+	})
+	// While the new hello-0 starts, the surge replica keeps the app available.
+	a = expectCondition(t, ns, "hello", status.TypeAvailable, metav1.ConditionTrue, status.ReasonApplicationReady)
+	if a.Status.ReadyReplicas != 1 {
+		t.Fatalf("readyReplicas %d during replacement", a.Status.ReadyReplicas)
+	}
+	setReady(t, ns, "hello-0")
+	eventually(t, "surge replica removed", func() error {
+		simulateGC(t, ns)
+		if n := len(listSandboxes(t, ns)); n != 1 {
+			return fmt.Errorf("%d sandboxes", n)
 		}
 		return nil
 	})
@@ -656,4 +740,240 @@ func expectEvent(t *testing.T, ns, app, reason string) {
 		}
 		return fmt.Errorf("no %s event among %d events", reason, len(l.Items))
 	})
+}
+
+func TestFailedSurgeIsReportedAndKeepsTheOldReplica(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	setReady(t, ns, "hello-0")
+	uid0 := getSandbox(t, ns, "hello-0").UID
+
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	setPhase(t, ns, "hello-1", sandboxv1alpha1.SwiftSandboxFailed, metav1.Condition{
+		Type: sandboxv1alpha1.SwiftSandboxConditionGuestRunning, Status: metav1.ConditionFalse,
+		Reason: "WorkloadFailed", Message: "workload exited 1"})
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxFailed)
+	if c := findCond(a, status.TypeProgressing); !strings.Contains(c.Message, "hello-1") {
+		t.Fatalf("message %q", c.Message)
+	}
+	consistently(t, "the old replica keeps serving", time.Second, func() error {
+		if sb := getSandbox(t, ns, "hello-0"); !sb.DeletionTimestamp.IsZero() || sb.UID != uid0 {
+			return fmt.Errorf("hello-0 deleted")
+		}
+		if a := getApp(t, ns, "hello"); a.Status.ReadyReplicas != 1 {
+			return fmt.Errorf("readyReplicas %d", a.Status.ReadyReplicas)
+		}
+		return nil
+	})
+}
+
+func TestScaleUpDuringRolloutDropsTheSurgeLabel(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	setReady(t, ns, "hello-0")
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	if getSandbox(t, ns, "hello-1").Labels[translate.LabelSurge] != "true" {
+		t.Fatal("hello-1 is not labeled as the surge replica")
+	}
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Replicas = 2 })
+	eventually(t, "hello-1 recreated as a desired replica", func() error {
+		simulateGC(t, ns)
+		var sb sandboxv1alpha1.SwiftSandbox
+		if err := testClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "hello-1"}, &sb); err != nil {
+			return err
+		}
+		if _, ok := sb.Labels[translate.LabelSurge]; ok {
+			return fmt.Errorf("hello-1 still labeled")
+		}
+		return nil
+	})
+	eventually(t, "two current replicas and no surge", func() error {
+		simulateGC(t, ns)
+		for _, sb := range listSandboxes(t, ns) {
+			if sb.DeletionTimestamp.IsZero() && sb.Status.Phase != sandboxv1alpha1.SwiftSandboxRunning {
+				setReady(t, ns, sb.Name)
+			}
+		}
+		items := listSandboxes(t, ns)
+		if names := liveNames(items); len(names) != 2 || names[0] != "hello-0" || names[1] != "hello-1" {
+			return fmt.Errorf("sandboxes %v", names)
+		}
+		for _, sb := range items {
+			if _, ok := sb.Labels[translate.LabelSurge]; ok {
+				return fmt.Errorf("%s labeled", sb.Name)
+			}
+		}
+		return nil
+	})
+}
+
+func TestControllerRestartMidRolloutKeepsTheSurge(t *testing.T) {
+	h := startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 2))
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	setReady(t, ns, "hello-0")
+	setReady(t, ns, "hello-1")
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
+	expectSandboxes(t, ns, "hello-0", "hello-1", "hello-2")
+	uid2 := getSandbox(t, ns, "hello-2").UID
+	h.stop()
+
+	startManager(t, harnessOpts{})
+	consistently(t, "surge and old replicas kept across a restart", time.Second, func() error {
+		if sb := getSandbox(t, ns, "hello-2"); sb.UID != uid2 || !sb.DeletionTimestamp.IsZero() {
+			return fmt.Errorf("surge replaced")
+		}
+		for _, n := range []string{"hello-0", "hello-1"} {
+			if !getSandbox(t, ns, n).DeletionTimestamp.IsZero() {
+				return fmt.Errorf("%s deleting", n)
+			}
+		}
+		return nil
+	})
+	setReady(t, ns, "hello-2")
+	eventually(t, "the rollout resumes", func() error {
+		if getSandbox(t, ns, "hello-1").DeletionTimestamp.IsZero() {
+			return fmt.Errorf("hello-1 not deleting")
+		}
+		return nil
+	})
+}
+
+func TestRejectedCreateIsReported(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "sandboxes"},
+		Spec:       corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{"count/swiftsandboxes.sandbox.kubeswift.io": resource.MustParse("0")}},
+	}
+	mustCreate(t, quota)
+	// No quota controller runs under envtest: publish the status it would.
+	quota.Status = corev1.ResourceQuotaStatus{Hard: quota.Spec.Hard, Used: corev1.ResourceList{"count/swiftsandboxes.sandbox.kubeswift.io": resource.MustParse("0")}}
+	if err := testClient.Status().Update(ctx, quota); err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxRejected)
+	if c := findCond(a, status.TypeProgressing); !strings.Contains(c.Message, "hello-0") || !strings.Contains(c.Message, "Forbidden") {
+		t.Fatalf("message %q", c.Message)
+	}
+	expectEvent(t, ns, "hello", EventRejected)
+}
+
+func TestSecondChangeMidRolloutKeepsTheOnlyReadyReplica(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	setReady(t, ns, "hello-0")
+	uid0 := getSandbox(t, ns, "hello-0").UID
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	setReady(t, ns, "hello-1")
+	uid1 := getSandbox(t, ns, "hello-1").UID
+	eventually(t, "hello-0 recreated at v2", func() error {
+		simulateGC(t, ns)
+		var sb sandboxv1alpha1.SwiftSandbox
+		if err := testClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "hello-0"}, &sb); err != nil {
+			return err
+		}
+		if sb.UID == uid0 {
+			return fmt.Errorf("not replaced yet")
+		}
+		return nil
+	})
+
+	// The surge hello-1 is now the only ready replica.
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v3" })
+	consistently(t, "the old-revision surge keeps serving", 1500*time.Millisecond, func() error {
+		simulateGC(t, ns)
+		if sb := getSandbox(t, ns, "hello-1"); sb.UID != uid1 || !sb.DeletionTimestamp.IsZero() {
+			return fmt.Errorf("hello-1 deleted")
+		}
+		if a := getApp(t, ns, "hello"); a.Status.ReadyReplicas != 1 {
+			return fmt.Errorf("readyReplicas %d", a.Status.ReadyReplicas)
+		}
+		return nil
+	})
+	eventually(t, "hello-0 at v3", func() error {
+		simulateGC(t, ns)
+		var sb sandboxv1alpha1.SwiftSandbox
+		if err := testClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "hello-0"}, &sb); err != nil {
+			return err
+		}
+		if !sb.DeletionTimestamp.IsZero() {
+			return fmt.Errorf("hello-0 deleting")
+		}
+		if !strings.Contains(strings.Join(sb.Spec.Args, " "), "hello-http:v3") {
+			return fmt.Errorf("hello-0 args %v", sb.Spec.Args)
+		}
+		return nil
+	})
+	setReady(t, ns, "hello-0")
+	eventually(t, "the old surge removed", func() error {
+		simulateGC(t, ns)
+		if names := liveNames(listSandboxes(t, ns)); len(names) != 1 {
+			return fmt.Errorf("sandboxes %v", names)
+		}
+		return nil
+	})
+}
+
+func TestRejectedSurgeKeepsTheOldReplicaAndRecovers(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	setReady(t, ns, "hello-0")
+	uid0 := getSandbox(t, ns, "hello-0").UID
+
+	// Room for exactly the one replica. No quota controller runs under
+	// envtest: publish the status it would.
+	count := corev1.ResourceName("count/swiftsandboxes.sandbox.kubeswift.io")
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "sandboxes"},
+		Spec:       corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{count: resource.MustParse("1")}},
+	}
+	mustCreate(t, quota)
+	quota.Status = corev1.ResourceQuotaStatus{Hard: quota.Spec.Hard, Used: corev1.ResourceList{count: resource.MustParse("1")}}
+	if err := testClient.Status().Update(ctx, quota); err != nil {
+		t.Fatal(err)
+	}
+
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxRejected)
+	if c := findCond(a, status.TypeProgressing); !strings.Contains(c.Message, "hello-1 (Forbidden); it is the surge replica") {
+		t.Fatalf("message %q", c.Message)
+	}
+	consistently(t, "the old replica keeps serving", time.Second, func() error {
+		if sb := getSandbox(t, ns, "hello-0"); !sb.DeletionTimestamp.IsZero() || sb.UID != uid0 {
+			return fmt.Errorf("hello-0 deleted")
+		}
+		if a := getApp(t, ns, "hello"); a.Status.ReadyReplicas != 1 || findCond(a, status.TypeAvailable).Status != metav1.ConditionTrue {
+			return fmt.Errorf("readyReplicas %d", a.Status.ReadyReplicas)
+		}
+		return nil
+	})
+
+	// Raise the quota: the surge replica is created on the next retry.
+	if err := testClient.Get(ctx, client.ObjectKeyFromObject(quota), quota); err != nil {
+		t.Fatal(err)
+	}
+	quota.Spec.Hard[count] = resource.MustParse("2")
+	if err := testClient.Update(ctx, quota); err != nil {
+		t.Fatal(err)
+	}
+	quota.Status.Hard = quota.Spec.Hard
+	if err := testClient.Status().Update(ctx, quota); err != nil {
+		t.Fatal(err)
+	}
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonRollingUpdate)
 }

@@ -120,19 +120,25 @@ The comment at the top of the script lists every variable.
 - Cold runs use the executor `startupbench-cold`, which pins sandboxes to
   `PERF_NODE` with `spin.kubeswift.io/node-selector`.
 - Warm runs use the executor `startupbench-warm` and the one-slot pool
-  `startupbench-warm` (the controller's runtime image, 1 vCPU, 256Mi, the
-  same node), created after the cold runs. Before each warm run
-  startupbench waits until the slot's pod is at least 30 seconds old,
-  because KubeSwift v0.16.0 and v0.16.1 can hand out a slot whose guest is
-  not ready yet (see
+  `startupbench-warm` (the runtime image, 1 vCPU, 256Mi, the same node),
+  created after the cold runs.
+- Both executors set `spin.kubeswift.io/runtime-image` to
+  `PERF_RUNTIME_IMAGE` (default: the controller's runtime image) and, when
+  `PERF_READINESS_STARTUP` is set, `spin.kubeswift.io/readiness-startup`.
+  The canonical SpinApp declares a readiness check, so fast readiness
+  startup applies to it only with `PERF_READINESS_STARTUP=always` (see
+  [executor-contract.md](../../../docs/executor-contract.md#readiness-startup)).
+  Before each warm run startupbench waits until the slot's pod is at least
+  30 seconds old, because KubeSwift v0.16.0 and v0.16.1 can hand out a slot
+  whose guest is not ready yet (see
   [compatibility.md](../../../docs/compatibility.md#known-upstream-issues)),
-  and then a random time below 2 seconds
-  (`-start-jitter`). KubeSwift v0.16.0 checks a slot for new work every 2
-  seconds; without the jitter every run would start at about the same point
-  of that cycle and the warm results would be biased. KubeSwift v0.16.1
-  starts the work as soon as the API server delivers it; the jitter is kept
-  so that results stay comparable across versions. A warm run that did not
-  check out a slot is reported but excluded from the summary.
+  and then a random time below 2 seconds (`-start-jitter`). KubeSwift
+  v0.16.0 checks a slot for new work every 2 seconds; without the jitter
+  every run would start at about the same point of that cycle and the warm
+  results would be biased. KubeSwift v0.16.1 starts the work as soon as the
+  API server delivers it; the jitter is kept so that results stay comparable
+  across versions. A warm run that did not check out a slot is reported but
+  excluded from the summary.
 
 Cold runs measure a cold boot with the runtime image already cached on the
 node; the first cold run after a runtime image change also includes the
@@ -163,9 +169,9 @@ go run ./test/perf/startupbench summarize -baseline bin/perf/<old run>/cold.json
 Percentiles interpolate linearly between the closest ranks. With
 `-baseline`, the p50 and p95 of `direct_http`, `service_http`, `available`
 and `slot_claim` are compared per mode, and a p50 or p95 that grew by more
-than 25% and by more than 100 ms is marked `REGRESSION`. The comparison only means something when the hardware,
-cluster, versions and registry conditions are comparable;
-`environment.txt` records them.
+than 25% and by more than 100 ms is marked `REGRESSION`. The comparison only
+means something when the hardware, cluster, versions and registry conditions
+are comparable; `environment.txt` records them.
 
 ## Permissions and cleanup
 

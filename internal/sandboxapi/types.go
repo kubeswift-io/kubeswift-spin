@@ -149,6 +149,14 @@ type SwiftSandboxSpec struct {
 	PodMetadata        *SandboxPodMetadata          `json:"podMetadata,omitempty"`
 	ReadinessProbe     *corev1.Probe                `json:"readinessProbe,omitempty"`
 	LivenessProbe      *corev1.Probe                `json:"livenessProbe,omitempty"`
+	ReadinessStartup   *SandboxReadinessStartup     `json:"readinessStartup,omitempty"`
+}
+
+// SandboxReadinessStartup runs the readiness probe every Interval from the
+// workload's start until its first pass, for at most Window.
+type SandboxReadinessStartup struct {
+	Interval *metav1.Duration `json:"interval,omitempty"`
+	Window   *metav1.Duration `json:"window,omitempty"`
 }
 
 // SwiftSandboxPhase is the sandbox lifecycle phase.

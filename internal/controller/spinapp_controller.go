@@ -55,6 +55,7 @@ const (
 	EventExecutorNotFound   = "ExecutorNotFound"
 	EventWarmPool           = "WarmPoolIncompatible"
 	EventConflict           = "SandboxConflict"
+	EventRejected           = "SandboxRejected"
 	EventExecutorChanged    = "ExecutorChanged"
 )
 
@@ -298,7 +299,11 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	now := r.Now()
 	instances := r.observe(&app, owned, tmpl.Revision, now)
-	inBackoff, retryIn := r.Backoff.Pending(key, instances, now)
+	inBackoff, backoffWait := r.Backoff.Pending(key, instances, tmpl.Revision, now)
+	retryIn := ""
+	if backoffWait > 0 {
+		retryIn = backoffWait.Round(time.Second).String()
+	}
 
 	plan := rollout.Compute(rollout.Input{
 		Replicas:            int(app.Spec.Replicas),
@@ -320,13 +325,40 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	var blocker *status.Blocker
+	var rejectedWait time.Duration
 	requeue := plan.Waiting
 	for _, ord := range plan.Create {
 		sb := translate.NewSandbox(&app, profile.ExecutorName, tmpl, ord)
+		if ord == int(app.Spec.Replicas) {
+			sb.Labels[translate.LabelSurge] = "true"
+		}
 		if err := controllerutil.SetControllerReference(&app, sb, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
 		if err := r.Client.Create(ctx, sb); err != nil {
+			if reason, ok := rejectionReason(err); ok {
+				// A quota or admission policy refused the object; it would
+				// refuse the other creates too. Report it, stop, and retry
+				// with a growing delay. The API message can echo values, so
+				// only the log carries it.
+				wait, first := r.Backoff.RecordRejection(key)
+				if first {
+					logger.Error(err, "SwiftSandbox create rejected", "sandbox", sb.Name)
+				} else {
+					logger.V(1).Info("SwiftSandbox create rejected again", "sandbox", sb.Name, "retryIn", wait)
+				}
+				note := ""
+				if ord == int(app.Spec.Replicas) {
+					note = "; it is the surge replica of a rolling update and the old replicas keep serving"
+				}
+				if blocker == nil {
+					blocker = &status.Blocker{Reason: status.ReasonSandboxRejected,
+						Message: fmt.Sprintf("the API server refused to create SwiftSandbox %s (%s)%s; check ResourceQuota on SwiftSandboxes and admission policies in namespace %s, and the controller log",
+							sb.Name, reason, note, app.Namespace)}
+				}
+				rejectedWait = wait
+				break
+			}
 			if !apierrors.IsAlreadyExists(err) {
 				return ctrl.Result{}, fmt.Errorf("create SwiftSandbox %s: %w", sb.Name, err)
 			}
@@ -344,20 +376,31 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 			// Never adopt it. Such an object has no owner reference to this
 			// SpinApp and may not even be cached, so its removal triggers
 			// no event: requeue to notice when the name is free.
+			if blocker != nil {
+				continue // report the first blocker; the rest need it resolved too
+			}
 			blocker = &status.Blocker{Reason: status.ReasonSandboxConflict,
 				Message: fmt.Sprintf("SwiftSandbox %s already exists and is not controlled by this SpinApp; delete or rename it", sb.Name)}
 			continue
 		}
+		r.Backoff.ClearRejection(key)
 		metrics.SandboxCreations.Inc()
 		logger.Info("created sandbox", "sandbox", sb.Name, "revision", tmpl.Revision)
 		r.event(&app, corev1.EventTypeNormal, EventSandboxCreated, "Create", "created sandbox %s at revision %s", sb.Name, tmpl.Revision)
 	}
 
-	if err := r.finishWithInstances(ctx, &app, instances, tmpl.Revision, blocker, exposure, retryIn, EventConflict); err != nil {
+	eventReason := EventConflict
+	if blocker != nil && blocker.Reason == status.ReasonSandboxRejected {
+		eventReason = EventRejected
+	}
+	if err := r.finishWithInstances(ctx, &app, instances, tmpl.Revision, blocker, exposure, retryIn, eventReason); err != nil {
 		return ctrl.Result{}, err
 	}
-	if retryIn != "" {
-		return ctrl.Result{RequeueAfter: r.Backoff.NextDelay(key, now)}, nil
+	if rejectedWait > 0 && (backoffWait == 0 || rejectedWait < backoffWait) {
+		return ctrl.Result{RequeueAfter: rejectedWait}, nil
+	}
+	if backoffWait > 0 {
+		return ctrl.Result{RequeueAfter: backoffWait + 100*time.Millisecond}, nil
 	}
 	if requeue {
 		// Watches normally trigger the next step (owned sandbox events);
@@ -365,6 +408,19 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: r.WaitingRequeue}, nil
 	}
 	return ctrl.Result{}, nil
+}
+
+// rejectionReason reports whether err is a refusal by a quota or an admission
+// policy, as a fixed word: an admission webhook chooses the reason text, so
+// it is never echoed.
+func rejectionReason(err error) (string, bool) {
+	switch {
+	case apierrors.IsForbidden(err):
+		return "Forbidden", true
+	case apierrors.IsInvalid(err):
+		return "Invalid", true
+	}
+	return "", false
 }
 
 // controlledByApp reads a sandbox from the API server, bypassing the cache,
@@ -467,7 +523,7 @@ func (r *SpinAppReconciler) observe(app *spinv1alpha1.SpinApp, owned []sandboxv1
 		sb := &owned[i]
 		inst := Classify(app.Name, sb)
 		if inst.Health == rollout.Terminal && !inst.Deleting {
-			if r.Backoff.RecordFailure(key, inst.Ordinal, string(sb.UID), now) {
+			if r.Backoff.RecordFailure(key, inst.Ordinal, string(sb.UID), inst.Revision, now) {
 				metrics.SandboxFailures.Inc()
 				r.event(app, corev1.EventTypeWarning, EventSandboxFailed, "Observe", "sandbox %s reached phase %s (%s)",
 					sb.Name, sb.Status.Phase, firstNonEmpty(inst.FailureReason, "no reason reported"))
@@ -487,6 +543,7 @@ func Classify(appName string, sb *sandboxv1alpha1.SwiftSandbox) status.Instance 
 		Name:     sb.Name,
 		Revision: sb.Labels[translate.LabelRevision],
 		Deleting: !sb.DeletionTimestamp.IsZero(),
+		Surge:    sb.Labels[translate.LabelSurge] == "true",
 	}}
 	ord, err := translate.ParseOrdinal(sb.Labels[translate.LabelOrdinal])
 	if err != nil || translate.SandboxName(appName, ord) != sb.Name {

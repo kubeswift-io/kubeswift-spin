@@ -12,31 +12,47 @@ request from them. Request latency is not covered here.
 
 ## Terms
 
-**First-response latency**: the time from SpinApp creation until the
-application returns the expected HTTP response. Two variants:
+The project reports four measures, each from SpinApp creation, and never
+merges them into one "startup time":
 
-- *first direct response*: a request to the launcher pod IP on the Spin
-  HTTP port (3000). It shows when the application can serve.
-- *first Service response*: a request through the SpinApp Service, as an
-  in-cluster client sends it. It also needs the pod to be `Ready` and listed
-  as ready in the Service's EndpointSlice, and the node's Service routing
-  to be updated.
+1. **First direct response**: the time until the application returns the
+   expected HTTP response to a request sent to the launcher pod IP on the
+   Spin HTTP port (3000). It shows when the application can serve.
+2. **SpinApp `Available`**: the time until the SpinApp condition `Available`
+   is `True` (reason `ApplicationReady`). kubeswift-spin sets it when enough
+   sandboxes pass their readiness probe, so it follows the readiness
+   configuration (see [Readiness configuration](#readiness-configuration)).
+3. **First Service response**: the time until a request through the SpinApp
+   Service, as an in-cluster client sends it, returns the expected response.
+   It also needs the launcher pod to be `Ready`, its EndpointSlice entry to
+   be ready, and the client node's Service rules (kube-proxy) to be updated.
+4. **Artifact propagation**: the time from publishing a new application
+   artifact until the registry the sandboxes pull from serves it. With
+   `ghcr.io` it is zero; with a mirror it is the mirror's sync delay. It is
+   paid once per application version, not per replica, and is not part of
+   the other three.
 
-**Control-plane availability latency**: the time from SpinApp creation
-until the SpinApp condition `Available` is `True` (reason
-`ApplicationReady`). kubeswift-spin sets it when the sandbox's readiness
-probe has passed, so it depends on the readiness check's
-`initialDelaySeconds` and `periodSeconds` (see
-[Readiness configuration](#readiness-configuration)).
+Two stage terms are used below:
 
-**Warm-pool slot-claim latency**: the time from SwiftSandbox creation until
-KubeSwift reports that it assigned an already running slot of a
-SwiftSandboxPool to it (`CheckedOut`). The workload starts in the slot
-afterwards, so slot claim is not workload readiness.
+- **Warm-pool slot claim**: the time from SwiftSandbox creation until
+  KubeSwift reports that it assigned an already running slot of a
+  SwiftSandboxPool to it (`CheckedOut`). The workload starts in the slot
+  afterwards, so slot claim is not workload readiness.
+- **Spin runtime startup**: the time from the start of the Spin process
+  until its HTTP listener answers. For an application referenced from a
+  registry it includes the pull, which Spin performs at every start.
 
-**Spin runtime startup latency**: the time from the start of the Spin
-process until its HTTP listener answers. For an application referenced
-from a registry it includes the pull, which Spin performs at every start.
+### The 19 to 26 second figure
+
+Releases before v0.1.0-rc4 quoted "19 to 26 seconds" for a cold start. That
+was the time to `Available` printed by the KVM e2e test, which then polled
+every 3 seconds, for a hello-http SpinApp whose readiness check used Spin
+Operator's default `initialDelaySeconds` of 10. Measured afterwards with
+startupbench on the same cluster with that default, a cold hello-http
+replica first answered directly after 9.98 seconds and was `Available` after
+18.87 seconds (p50, KubeSwift v0.16.0; see [Readiness
+configuration](#readiness-configuration)); the rest of the quoted figure was
+the polling. It was never the time until the application could serve.
 
 ## How it is measured
 
@@ -49,10 +65,8 @@ from one clock, and it deletes everything a run created before the next run
 starts. `make perf-startup` runs 10 cold and 10 warm runs by default.
 
 The durations printed by the KVM e2e test (`test/e2e/kvm-e2e.sh`) are
-functional indicators: until 2026-10-06 it polled every 3 seconds, and the
-"19 to 26 seconds" to `Available` reported for earlier releases in
-[compatibility.md](compatibility.md) include that polling and Spin
-Operator's default readiness delay of 10 seconds.
+functional indicators, not benchmark results (see
+[The 19 to 26 second figure](#the-19-to-26-second-figure)).
 
 Spin runtime startup latency and the stages inside the guest are not
 visible to startupbench. They were measured once, on 2026-10-06, with a
@@ -61,7 +75,63 @@ Spin's own tracing; that build is not part of the repository.
 
 ## Current results
 
-Environment for both result sets below:
+### KubeSwift v0.16.2, kubeswift-spin v0.1.0-rc5 (2026-10-11)
+
+Environment:
+
+- cluster: k0s Kubernetes v1.34.3, Calico, containerd 1.7.30, Ubuntu 24.04
+  with kernel 6.8; benchmark and sandboxes on one KVM node with 8 CPUs
+  and 64 GiB; kube-proxy in iptables mode with its default `minSyncPeriod`
+  of 1 second
+- KubeSwift v0.16.2 release images, SwiftKernel `kernels/sandbox:6.6.16`
+  (Linux 6.6.158); Spin Operator v0.6.1; a development build of
+  kubeswift-spin commit 7cb6d55 (v0.1.0-rc5 code, before release) and the
+  `spin-4.2.1-r2` runtime image
+- the canonical [hello-http SpinApp](../examples/hello-http/spinapp.yaml)
+  (1 vCPU, 256Mi), application artifact `sha256:5016dcb7...` pulled from
+  `ghcr.io` by Spin at every start
+- cold: the sandbox boots a microVM; the runtime image is already cached
+  on the node. Warm: a one-slot SwiftSandboxPool with a slot started at
+  least 30 seconds earlier, and a random start delay below 2 seconds
+
+Three readiness configurations, 30 warm runs and 10 cold runs each:
+
+- *shipped*: the example as published, with its `/healthz` readiness check
+  (`initialDelaySeconds: 1`, `periodSeconds: 2`) and the default
+  `spin.kubeswift.io/readiness-startup: auto`. kubeswift-spin passes an
+  explicit check through unchanged, so this is the same configuration as
+  in v0.1.0-rc4.
+- *no check*: the same SpinApp without `spec.checks`. kubeswift-spin adds a
+  TCP readiness check on the Spin port and, with `auto`, KubeSwift's
+  readiness startup (probe every 100 ms from the start of Spin until the
+  first success, for up to 30 seconds).
+- *always*: the shipped example on an executor with
+  `spin.kubeswift.io/readiness-startup: always`, which applies readiness
+  startup to the `/healthz` check and ignores its `initialDelaySeconds`.
+
+| Seconds from SpinApp creation, p50 / p95 | Shipped, warm | No check, warm | Always, warm | Shipped, cold | No check, cold | Always, cold |
+|---|---:|---:|---:|---:|---:|---:|
+| first direct response | 1.46 / 1.67 | 1.45 / 1.71 | 1.47 / 1.68 | 9.04 / 10.14 | 8.95 / 9.98 | 8.97 / 9.18 |
+| `Available` | 3.13 / 3.17 | 1.53 / 1.80 | 1.54 / 1.74 | 10.74 / 11.64 | 9.01 / 10.07 | 9.13 / 9.28 |
+| first Service response | 3.31 / 3.33 | 2.20 / 2.40 | 2.20 / 2.56 | 10.96 / 11.90 | 9.26 / 10.38 | 9.27 / 9.65 |
+
+With readiness startup, `Available` follows the first direct response by 68
+to 108 ms (p50) instead of about 1.65 seconds, because the probe no longer
+waits for `initialDelaySeconds` and the next whole `periodSeconds`. The
+first direct response does not change: the application starts the same way.
+The first Service response follows `Available` by 0.19 seconds (p50, warm)
+in the shipped configuration but by 0.66 seconds (p50, warm) with readiness
+startup: kube-proxy syncs at most once per `minSyncPeriod`, and an endpoint
+that becomes ready soon after kube-proxy's previous sync of the Service
+waits for the rest of that period (see [Service routing](#service-routing)).
+The cold runs are a sanity check; 10 runs give no meaningful p95.
+
+The raw results are in
+[performance-results/2026-10-11-kubeswift-v0.16.2](performance-results/2026-10-11-kubeswift-v0.16.2/).
+
+## Earlier results
+
+Environment for the KubeSwift v0.16.1 and v0.16.0 result sets below:
 
 - cluster: k0s Kubernetes v1.34.3, Calico, containerd 1.7.30, Ubuntu 24.04
   with kernel 6.8; benchmark and sandboxes on one KVM node with 8 CPUs
@@ -77,8 +147,8 @@ Environment for both result sets below:
 - cold: the sandbox boots a microVM; the runtime image is already cached
   on the node
 - warm: a one-slot SwiftSandboxPool with a slot started at least 30 seconds
-  earlier, and a random start delay below 2 seconds (see the
-  [startupbench README](../test/perf/startupbench/README.md#running-the-benchmark))
+  earlier, and a random start delay below 2 seconds (see the [startupbench
+  README](../test/perf/startupbench/README.md#running-the-benchmark))
 
 ### Warm pool, KubeSwift v0.16.1 (2026-10-08)
 
@@ -117,8 +187,8 @@ response 9.90 seconds p50).
 
 ### KubeSwift v0.16.0 (2026-10-06)
 
-The cold results below are the current cold baseline; the warm results are
-superseded by the v0.16.1 results above. 20 cold and 20 warm runs:
+Superseded by the v0.16.2 results above; the warm results were already
+superseded by the v0.16.1 results. 20 cold and 20 warm runs:
 
 | Seconds from SpinApp creation | Cold min | Cold p50 | Cold p95 | Cold max | Warm min | Warm p50 | Warm p95 | Warm max |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -155,6 +225,31 @@ came within 0.12 seconds of the first response. The pod becomes `Ready`
 after the kubelet sees KubeSwift's readiness gate. Service traffic then
 needs the EndpointSlice and the node's Service rules to be updated.
 
+## Service routing
+
+A request through the SpinApp Service reaches a new replica only after the
+launcher pod is `Ready`, its EndpointSlice entry is ready, and kube-proxy on
+the client's node has rewritten its rules. kube-proxy (iptables and nftables
+modes) syncs at most once per `minSyncPeriod`, 1 second by default. A
+replica that becomes ready less than `minSyncPeriod` after kube-proxy's
+previous sync of that Service (for a new SpinApp, the sync for the Service's
+creation or for the pod joining it as a not-ready endpoint) waits for the
+rest of that period; that is the 0.66 seconds (p50, warm) between
+`Available` and the first Service response with readiness startup above.
+With a stock kube-proxy, a new SpinApp therefore cannot serve through its
+Service much sooner than about one second after it is created, however fast
+the application starts.
+
+Lowering `minSyncPeriod` is a cluster-wide operator choice: kube-proxy then
+rewrites rules more often, which costs CPU on large clusters. It was
+measured once, during the KubeSwift readiness investigation and not with
+this release: a development build of KubeSwift before v0.16.2 with
+readiness startup at a 50 ms interval, the trusted compilation cache
+fixture described below and a local registry, 30 warm runs each. The first
+Service response went from 1.15 / 1.49 seconds (p50 / p95) with the default
+to 0.83 / 1.15 seconds with `minSyncPeriod: 100ms`. kubeswift-spin does not
+require or recommend the change.
+
 ## Readiness configuration
 
 When a check omits `initialDelaySeconds`, the Spin Operator CRD defaults it
@@ -187,6 +282,62 @@ value, so a client that rewrites the SpinApp spec through that type
 restores the default of 10. Applications that take longer to start should
 use a delay close to their own startup time; `periodSeconds` sets how soon
 after the application is ready a probe notices it.
+
+### Readiness startup (KubeSwift v0.16.2)
+
+KubeSwift v0.16.2 can probe a sandbox's readiness every `interval` from the
+workload's start until the first success, for at most `window`
+(`spec.readinessStartup`); failures in that phase do not count, and after
+the first success or the window the probe runs at `periodSeconds` with its
+usual thresholds. kubeswift-spin sets it with KubeSwift's defaults (100 ms,
+30 seconds) according to the executor annotation
+`spin.kubeswift.io/readiness-startup`:
+
+| Value | Readiness startup is set on |
+|---|---|
+| `auto` (default) | the TCP check kubeswift-spin adds when a SpinApp has no readiness check |
+| `always` | also SpinApp readiness checks; their `initialDelaySeconds` is not applied |
+| `never` | nothing |
+
+`auto` never changes a readiness check the user wrote. A check with
+`initialDelaySeconds` may encode a known startup cost, so overriding it is
+left to the operator (`always`), which kubeswift-spin reports with a
+`PartiallySupported` Warning Event when the check sets
+`initialDelaySeconds`.
+
+The window bounds the fast probing. Tested on the lab cluster with a
+hello-http build that starts listening late (no readiness check, `auto`,
+cold):
+
+- listening about 30 seconds after creation, inside the window: the
+  replica was ready 0.07 seconds after the listener first answered;
+- listening after the window: fast probing stopped at the window, the probe
+  went on at `periodSeconds` (2 seconds) and its `failureThreshold` (3)
+  applied; the replica was ready 0.84 seconds after the listener, at the
+  next periodic probe;
+- never listening: readiness reported `ProbeFailed` after the window and
+  three failed periodic probes (about 38 seconds), and the replica never
+  received Service traffic.
+
+## Wasmtime compilation cache (measured once, not provided)
+
+Spin compiles the application's WebAssembly with Wasmtime at every start
+unless Wasmtime's compilation cache already holds the result. In a fresh
+sandbox the cache is empty, and compiling hello-http took about 410 ms of
+the warm path. A runtime image prepared outside this project, holding a
+normally generated cache entry for hello-http, was measured as a
+diagnostic: with readiness startup (`always`), a local registry and that
+image, 30 warm runs gave a first direct response of 0.378 / 0.454 seconds
+(p50 / p95), `Available` of 0.462 / 0.566 seconds and a first Service
+response of 1.448 / 1.869 seconds, against 1.47, 1.54 and 2.20 seconds
+(p50) for the published runtime image pulling from `ghcr.io`.
+
+This is not a supported mechanism and kubeswift-spin does not provide one.
+A cache entry is executable code that Wasmtime maps without checking it
+against the WebAssembly it was compiled from, so a shared cache has to be
+produced by a trusted compiler, protected against modification, keyed by
+the application digest and the runtime and CPU, and delivered read-only.
+Cross-node reuse was not tested.
 
 ## Where the time goes
 
@@ -274,7 +425,7 @@ have a long tail: one container run in 20 took 7.4 seconds.
 Before each release, run the benchmark on the lab cluster:
 
 ```bash
-make perf-startup PERF_NODE=<node> PERF_REGISTRY=ttl.sh PERF_BASELINE=docs/performance-results/<previous-results>
+make perf-startup PERF_NODE=<node> PERF_REGISTRY=<registry> PERF_BASELINE=docs/performance-results/<previous-results>
 ```
 
 - 10 cold and 10 warm runs (`PERF_RUNS`, default 10).
@@ -291,7 +442,12 @@ make perf-startup PERF_NODE=<node> PERF_REGISTRY=ttl.sh PERF_BASELINE=docs/perfo
   vary, so rerun before drawing conclusions.
 - Keep each release's `environment.txt`, `summary.txt` and JSONL results in
   a directory under `docs/performance-results/`, named by date or version.
+  With several configurations, keep one subdirectory per configuration and
+  pass one of them as `PERF_BASELINE`, for example
+  `docs/performance-results/2026-10-11-kubeswift-v0.16.2/shipped`.
 
+The KubeSwift v0.16.2 results (three readiness configurations) are in
+[performance-results/2026-10-11-kubeswift-v0.16.2](performance-results/2026-10-11-kubeswift-v0.16.2/).
 The KubeSwift v0.16.1 results are in
 [performance-results/2026-10-08-kubeswift-v0.16.1](performance-results/2026-10-08-kubeswift-v0.16.1/);
 the KubeSwift v0.16.0 results, and the runs without `initialDelaySeconds`,

@@ -139,10 +139,14 @@ curl -fsS -X PUT --data-binary v2 http://127.0.0.1:3203/kv/k >/dev/null
 
 # 6. LLM runtime config against the local OpenAI-compatible fixture.
 (cd "$ROOT" && go build -o "$TMP/upstream" ./examples/tools/upstream)
-"$TMP/upstream" --listen 127.0.0.1:8090 >"$TMP/upstream.log" 2>&1 &
+# UPSTREAM_PORT moves the fixture off 8090 when another process holds it.
+UPSTREAM_PORT="${UPSTREAM_PORT:-8090}"
+[[ "$UPSTREAM_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "UPSTREAM_PORT must be a port number" >&2; exit 1; }
+"$TMP/upstream" --listen "127.0.0.1:$UPSTREAM_PORT" >"$TMP/upstream.log" 2>&1 &
 UPSTREAM_PID=$!
-wait_http http://127.0.0.1:8090/ || fail "upstream did not start"
-llm_config=$'[llm_compute]\ntype = "remote_http"\nurl = "http://127.0.0.1:8090"\napi_type = "open_ai"\nauth_token = ""\n'
+wait_http "http://127.0.0.1:$UPSTREAM_PORT/" || fail "upstream did not start"
+kill -0 "$UPSTREAM_PID" 2>/dev/null || fail "upstream exited; is 127.0.0.1:$UPSTREAM_PORT in use? Set UPSTREAM_PORT"
+llm_config="$(printf '[llm_compute]\ntype = "remote_http"\nurl = "http://127.0.0.1:%s"\napi_type = "open_ai"\nauth_token = ""\n' "$UPSTREAM_PORT")"
 run_sandbox kss-test-ai 3204 "localhost:$REG_PORT/serverless-ai:test" \
   --runtime-config-file=/var/lib/kubeswift-spin/runtime-config.toml \
   -- "KUBESWIFT_SPIN_RUNTIME_CONFIG_B64=$(printf '%s' "$llm_config" | base64 -w0)" SPIN_VARIABLE_LLM_MODEL=default-model

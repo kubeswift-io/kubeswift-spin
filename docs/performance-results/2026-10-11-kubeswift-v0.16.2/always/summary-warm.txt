@@ -1,0 +1,17 @@
+mode warm: 30 runs
+metric (ms)                      n      min      p50      p90      p95      max     mean   stdev
+sandbox_created                 30       20       31       50       53       72       34      12
+direct_http                     30     1397     1471     1610     1679     1722     1498      79
+service_http                    30     2193     2204     2549     2563     2577     2255     123
+available                       30     1491     1542     1716     1738     1832     1576      83
+pod_ready                       30     1494     1544     1721     1741     1834     1578      83
+endpointslice_ready             30     1498     1553     1726     1748     1842     1585      84
+slot_claim                      30       17       28       36       43       55       29       8
+create_to_claim                 30       40       63       89       95      102       63      18
+claim_to_direct_http            30     1338     1415     1564     1598     1672     1435      78
+sandbox_workload_ready          30     1455     1496     1672     1685     1795     1531      82
+direct_to_available             30       31       68      123      136      145       78      32
+available_to_pod_ready          30       -9        2        7       11       14        1       6
+pod_ready_to_endpointslice      30        3        7       12       13       15        7       3
+endpointslice_to_service_http   30      362      663      812      871      981      670     113
+

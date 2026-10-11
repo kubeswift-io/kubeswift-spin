@@ -134,3 +134,75 @@ func TestMessagesAreBounded(t *testing.T) {
 		t.Fatalf("message not bounded: %d bytes", len(r.Progressing.Message))
 	}
 }
+
+func TestSurgeReplicaCountsTowardReadyUpToReplicas(t *testing.T) {
+	old := si(0, "r1", rollout.Ready)
+	old.Deleting = true
+	surge := si(1, "r2", rollout.Ready)
+	surge.Surge = true
+	r := Compute(Input{Replicas: 1, Revision: "r2", Exposure: Exposure{Detected: true},
+		Instances: []Instance{old, surge}})
+	if r.ReadyReplicas != 1 || r.Available.Status != metav1.ConditionTrue {
+		t.Fatalf("ready %d available %+v", r.ReadyReplicas, r.Available)
+	}
+	// Never more than spec.replicas, even with every replica and the surge ready.
+	r = Compute(Input{Replicas: 1, Revision: "r2", Exposure: Exposure{Detected: true},
+		Instances: []Instance{si(0, "r1", rollout.Ready), surgeSI(1, "r2", rollout.Ready), si(2, "r2", rollout.Ready)}})
+	if r.ReadyReplicas != 1 {
+		t.Fatalf("ready %d", r.ReadyReplicas)
+	}
+	// A replica a scale-down keeps while the remaining one starts serves
+	// and counts; one being deleted does not.
+	r = Compute(Input{Replicas: 1, Revision: "r2", Exposure: Exposure{Detected: true},
+		Instances: []Instance{si(0, "r2", rollout.Running), si(1, "r2", rollout.Ready)}})
+	if r.ReadyReplicas != 1 {
+		t.Fatalf("kept scale-down replica not counted: ready %d", r.ReadyReplicas)
+	}
+	gone := si(1, "r2", rollout.Ready)
+	gone.Deleting = true
+	r = Compute(Input{Replicas: 1, Revision: "r2", Exposure: Exposure{Detected: true},
+		Instances: []Instance{si(0, "r2", rollout.Running), gone}})
+	if r.ReadyReplicas != 0 {
+		t.Fatalf("deleting replica counted: ready %d", r.ReadyReplicas)
+	}
+}
+
+func surgeSI(ord int, rev string, h rollout.Health) Instance {
+	i := si(ord, rev, h)
+	i.Surge = true
+	return i
+}
+
+func TestFailedSurgeIsReported(t *testing.T) {
+	f := surgeSI(1, "r2", rollout.Terminal)
+	f.FailureReason, f.FailureMessage = "GuestFailed", "spin exited"
+	r := Compute(Input{Namespace: "apps", Replicas: 1, Revision: "r2", Exposure: Exposure{Detected: true}, RetryIn: "20s",
+		Instances: []Instance{si(0, "r1", rollout.Ready), f}})
+	if r.Progressing.Status != metav1.ConditionFalse || r.Progressing.Reason != ReasonSandboxFailed ||
+		!strings.Contains(r.Progressing.Message, "app-1") || !strings.Contains(r.Progressing.Message, "replacing in 20s") {
+		t.Fatalf("progressing %+v", r.Progressing)
+	}
+	if r.ReadyReplicas != 1 || r.Available.Status != metav1.ConditionTrue {
+		t.Fatalf("old replica not counted: ready %d available %+v", r.ReadyReplicas, r.Available)
+	}
+}
+
+// After a second spec change the old-revision surge may be the only replica
+// serving; it still counts, as an outdated desired replica does.
+func TestOutdatedSurgeStillCountsAsReady(t *testing.T) {
+	res := Compute(Input{Namespace: "ns", Generation: 3, Replicas: 1, Revision: "r3", Exposure: Exposure{Detected: true},
+		Instances: []Instance{si(0, "r3", rollout.Pending), surgeSI(1, "r2", rollout.Ready)}})
+	if res.ReadyReplicas != 1 || res.Available.Status != metav1.ConditionTrue {
+		t.Fatalf("ready %d available %s/%s", res.ReadyReplicas, res.Available.Status, res.Available.Reason)
+	}
+}
+
+// A surge replica below spec.replicas (after a scale-up) is reported as
+// outdated, as the planner replaces it.
+func TestFormerSurgeBelowReplicasIsOutdated(t *testing.T) {
+	r := Compute(Input{Namespace: "ns", Replicas: 2, Revision: "r2", Exposure: Exposure{Detected: true},
+		Instances: []Instance{si(0, "r2", rollout.Ready), surgeSI(1, "r2", rollout.Ready)}})
+	if r.Progressing.Reason != ReasonRollingUpdate {
+		t.Fatalf("progressing %s: %s", r.Progressing.Reason, r.Progressing.Message)
+	}
+}

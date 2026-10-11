@@ -10,7 +10,8 @@
 | [0006](0006-secrets.md) | Reject secret-backed configuration instead of copying values (updated for KubeSwift v0.16.0) |
 | [0007](0007-warm-pools.md) | Warm pools are optional capacity, checked for compatibility (updated for KubeSwift v0.16.0) |
 | [0008](0008-executor-profiles-without-crd.md) | Executor profiles as labels and annotations, no new CRD |
-| [0009](0009-replicas-status-and-deletion.md) | StatefulSet-like replicas, owned status fields, no finalizer |
+| [0009](0009-replicas-status-and-deletion.md) | StatefulSet-like replicas, owned status fields, no finalizer (amended by 0013) |
 | [0010](0010-runtime-image-versioning.md) | Version the runtime image independently of the controller |
 | [0011](0011-apache-license-and-sandbox-api.md) | Apache-2.0 license; project-owned subset of the sandbox API |
 | [0012](0012-feature-detection.md) | Use KubeSwift features only when the published schema shows them |
+| [0013](0013-surge-replacement.md) | Replace replicas with one surge replica, so rollouts keep `spec.replicas` replicas available |

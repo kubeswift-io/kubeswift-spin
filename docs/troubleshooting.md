@@ -67,8 +67,9 @@ their SpinApp status.
 | `ExecutorNotFound` | The executor was deleted. Existing sandboxes keep running; recreate the executor. |
 | `WarmPoolIncompatible` | The pool is missing or its shape differs; the message names each mismatching field. Align the pool with the runtime image, CPU, memory, network mode, `network.ports` (on KubeSwift v0.16.0, `http-app` port 3000), egress allowlist and ingress peers the SpinApp gets (see [executor-contract.md](executor-contract.md#warm-pools)). The image must be the exact reference in the controller's `--runtime-image` argument; the released chart passes it by digest, so a tag does not match. If the message says the SwiftSandboxPool API was not installed at startup, restart the controller. |
 | `SandboxConflict` | A SwiftSandbox with the needed name exists and is not owned by the SpinApp. Delete or rename it. |
+| `SandboxRejected` | The API server refused to create a SwiftSandbox: `Forbidden` (HTTP 403, for example a ResourceQuota on `count/swiftsandboxes.sandbox.kubeswift.io`) or `Invalid` (HTTP 422, for example an admission policy). The controller log has the full error, logged at the first refusal. A quota must leave room for `replicas + 1` sandboxes during a rolling update. The SpinApp is requeued after 10 seconds, doubling per consecutive refusal up to 5 minutes; an earlier change to the SpinApp or its sandboxes also retries. A pod quota that refuses the launcher pod appears as a KubeSwift reason on the sandbox instead. |
 | `RuntimeImageUnavailable` | KubeSwift could not pull, verify or materialize the runtime image. Check the image reference, pull secret and cosign key. |
-| `SandboxFailed` | Spin exited or the guest failed. Read the guest console (below). The replica is replaced after a backoff of up to 5 minutes. |
+| `SandboxFailed` | Spin exited or the guest failed. Read the guest console (below). The replica is replaced after a backoff of up to 5 minutes. If the SpinApp was deleted and created again under the same name less than 30 seconds earlier, the sandbox may have been attached to the previous replica's terminating launcher pod (a KubeSwift v0.16.2 issue, see [compatibility.md](compatibility.md#known-upstream-issues)); delete with `--cascade=foreground` before re-creating. |
 
 ## Sandboxes stay Pending
 
@@ -167,8 +168,8 @@ See
 
 Secret values are delivered when a sandbox starts, and rotating a Secret
 does not replace replicas. Replace them by changing the SpinApp spec, for
-example a variable, or delete the sandboxes one at a time; kubeswift-spin
-recreates them.
+example a variable, or delete the sandboxes one at a time with
+`--cascade=foreground`; kubeswift-spin recreates them.
 
 ## Replicas are replaced unexpectedly
 

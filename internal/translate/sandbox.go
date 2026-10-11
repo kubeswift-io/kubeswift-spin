@@ -39,6 +39,9 @@ const (
 	LabelOrdinal   = executor.Prefix + "ordinal"
 	LabelRevision  = executor.Prefix + "revision"
 	LabelExecutor  = executor.Prefix + "executor"
+	// LabelSurge marks the extra replica a rollout adds at ordinal
+	// <replicas> (ADR 0013); it is removed when the rollout completes.
+	LabelSurge = executor.Prefix + "surge"
 	// LabelSpinKubeAppName mirrors the label Spin Operator puts on the objects
 	// it creates, so `kubectl get swiftsandbox -l core.spinkube.dev/app-name=x`
 	// works the way SpinKube users expect.
@@ -108,7 +111,7 @@ func BuildTemplate(app *spinv1alpha1.SpinApp, p *executor.Profile, policy Resour
 		spec.Network.Egress = &sandboxv1alpha1.SandboxEgress{Allow: append([]sandboxv1alpha1.SandboxEgressRule(nil), p.EgressAllow...)}
 	}
 	if f.Exposure() {
-		expose(&spec, app, p)
+		expose(&spec, app, p, f)
 	}
 
 	rev, err := Fingerprint(&spec)
@@ -128,7 +131,7 @@ func StatusLabelKey(app string) string {
 // Operator creates: the Spin listener becomes the named port the Service
 // targets, the launcher pod gets the label the Service selects, and the
 // readiness probe decides when the replica is an endpoint.
-func expose(spec *sandboxv1alpha1.SwiftSandboxSpec, app *spinv1alpha1.SpinApp, p *executor.Profile) {
+func expose(spec *sandboxv1alpha1.SwiftSandboxSpec, app *spinv1alpha1.SpinApp, p *executor.Profile, f capabilities.Sandbox) {
 	spec.Network.Ports = []sandboxv1alpha1.SandboxPort{{
 		Name: runtimecontract.HTTPPortName, Port: runtimecontract.ListenPort, Protocol: corev1.ProtocolTCP,
 	}}
@@ -145,7 +148,8 @@ func expose(spec *sandboxv1alpha1.SwiftSandboxSpec, app *spinv1alpha1.SpinApp, p
 
 	port := intstr.FromString(runtimecontract.HTTPPortName)
 	spec.ReadinessProbe = probe(app.Spec.Checks.Readiness, port)
-	if spec.ReadinessProbe == nil {
+	ownCheck := spec.ReadinessProbe == nil
+	if ownCheck {
 		// Without a check, the replica is ready once Spin accepts TCP
 		// connections on its listener.
 		spec.ReadinessProbe = &corev1.Probe{
@@ -157,6 +161,31 @@ func expose(spec *sandboxv1alpha1.SwiftSandboxSpec, app *spinv1alpha1.SpinApp, p
 		}
 	}
 	spec.LivenessProbe = probe(app.Spec.Checks.Liveness, port)
+	if useReadinessStartup(p.ReadinessStartup, ownCheck, f) {
+		// KubeSwift defaults: retried every 100ms for at most 30s from the
+		// replica's start; failures before the first pass do not count, and
+		// after the window the check runs every periodSeconds as usual.
+		spec.ReadinessStartup = &sandboxv1alpha1.SandboxReadinessStartup{}
+	}
+}
+
+// useReadinessStartup reports whether a replica's readiness check is retried
+// quickly until it first passes. KubeSwift skips initialDelaySeconds while it
+// does, so a SpinApp's own check gets it only when the executor says
+// "always";
+// the check kubeswift-spin adds has no delay to skip.
+func useReadinessStartup(policy string, ownCheck bool, f capabilities.Sandbox) bool {
+	if !f.ReadinessStartup {
+		return false
+	}
+	switch policy {
+	case executor.ReadinessStartupAlways:
+		return true
+	case executor.ReadinessStartupNever:
+		return false
+	default:
+		return ownCheck
+	}
 }
 
 // probe maps a SpinKube HTTP health check onto a probe against the guest.

@@ -17,8 +17,11 @@
 #                       (name@sha256:...); or
 #   PERF_REGISTRY       registry to build and push startupbench to (for
 #                       example ttl.sh) when PERF_IMAGE is not set
-#   PERF_RUNTIME_IMAGE  runtime image for the warm pool (default: the
-#                       controller's --runtime-image argument)
+#   PERF_RUNTIME_IMAGE  runtime image for the executors and the warm pool
+#                       (default: the controller's --runtime-image argument)
+#   PERF_READINESS_STARTUP  executor annotation spin.kubeswift.io/readiness-startup
+#                       (auto, always or never; default: unset, which means auto)
+#   PERF_INTERVAL       HTTP probe interval of startupbench (default 50ms)
 #   PERF_NAMESPACE      namespace with a Ready SwiftKernel "sandbox"
 #                       (default kubeswift-spin-e2e)
 #   PERF_RUNS           runs per mode (default 10)
@@ -84,6 +87,11 @@ runtime_image() {
 }
 RUNTIME_IMAGE="${PERF_RUNTIME_IMAGE:-$(runtime_image)}"
 [[ -n "$RUNTIME_IMAGE" ]] || die "cannot find the kubeswift-spin controller's --runtime-image argument; set PERF_RUNTIME_IMAGE"
+READINESS_STARTUP="${PERF_READINESS_STARTUP:-}"
+[[ -z "$READINESS_STARTUP" || "$READINESS_STARTUP" =~ ^(auto|always|never)$ ]] || die "PERF_READINESS_STARTUP must be auto, always or never"
+[[ -z "${PERF_INTERVAL:-}" || "${PERF_INTERVAL}" =~ ^[0-9]+(ms|s)$ ]] || die "PERF_INTERVAL must be like 20ms"
+EXEC_EXTRA="    spin.kubeswift.io/runtime-image: $(sq "$RUNTIME_IMAGE")"
+[[ -n "$READINESS_STARTUP" ]] && EXEC_EXTRA+=$'\n'"    spin.kubeswift.io/readiness-startup: $READINESS_STARTUP"
 
 if [[ -z "${PERF_IMAGE:-}" ]]; then
   [[ -n "${PERF_REGISTRY:-}" ]] || die "set PERF_IMAGE, or PERF_REGISTRY to build and push startupbench"
@@ -117,6 +125,8 @@ log "recording the environment in $OUT/environment.txt"
   kubectl get deploy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {.spec.template.spec.containers[0].image}{"\n"}{end}' \
     | grep -E ' (ghcr\.io/kubeswift-io/kubeswift-spin[@:]|ghcr\.io/kubeswift-io/kubeswift/controller-manager:|[^ ]*/spin-operator:)' | sed 's/^/  /'
   echo "runtime image: $RUNTIME_IMAGE"
+  echo "readiness startup: ${READINESS_STARTUP:-auto (default)}"
+  echo "probe interval: ${PERF_INTERVAL:-50ms}"
   echo "startupbench image: $PERF_IMAGE"
   echo "manifest: $MANIFEST (sha256 $(sha256sum "$MANIFEST" | cut -c1-64))"
   echo "app image override: ${APP_IMAGE:-none}"
@@ -167,6 +177,7 @@ metadata:
   labels: {spin.kubeswift.io/managed-by: kubeswift-spin}
   annotations:
     spin.kubeswift.io/node-selector: $(sq "kubernetes.io/hostname=$NODE")
+$EXEC_EXTRA
 spec:
   createDeployment: false
 ---
@@ -178,6 +189,7 @@ metadata:
   annotations:
     spin.kubeswift.io/node-selector: $(sq "kubernetes.io/hostname=$NODE")
     spin.kubeswift.io/sandbox-pool: startupbench-warm
+$EXEC_EXTRA
 spec:
   createDeployment: false
 YAML
@@ -213,6 +225,7 @@ for mode in $MODES; do
   [[ -n "$APP_IMAGE" ]] && args+=(-image "$APP_IMAGE")
   [[ "$mode" == warm ]] && args+=(-warm-pool startupbench-warm -start-jitter 2s)
   [[ "${PERF_LAUNCHER_LOGS:-}" == "1" ]] && args+=(-launcher-logs)
+  [[ -n "${PERF_INTERVAL:-}" ]] && args+=(-interval "$PERF_INTERVAL")
   yaml_args=""
   for a in "${args[@]}"; do yaml_args+="            - $(sqarg "$a")"$'\n'; done
   "${K[@]}" delete job "startupbench-$mode" --ignore-not-found --wait=true >/dev/null
@@ -258,6 +271,14 @@ YAML
   # Progress goes to standard error and results (JSON lines) to standard
   # output; the pod log has both.
   "${K[@]}" logs -f "job/startupbench-$mode" | tee "$OUT/$mode.log" | grep -v '^{' || true
+  # A log stream can end before the Job does (a dropped connection): wait
+  # for the Job to finish, then read the whole log again.
+  for _ in $(seq $((RUNS * 60))); do
+    done_="$("${K[@]}" get job "startupbench-$mode" -o jsonpath='{.status.succeeded}{.status.failed}' 2>/dev/null || true)"
+    [[ -n "$done_" ]] && break
+    sleep 2
+  done
+  "${K[@]}" logs "job/startupbench-$mode" >"$OUT/$mode.log" 2>/dev/null || true
   grep '^{' "$OUT/$mode.log" >"$OUT/$mode.jsonl" || die "the $mode Job produced no results; see $OUT/$mode.log"
   "${K[@]}" wait --for=condition=Complete --timeout=60s "job/startupbench-$mode" >/dev/null \
     || die "the $mode Job did not complete; see $OUT/$mode.log"

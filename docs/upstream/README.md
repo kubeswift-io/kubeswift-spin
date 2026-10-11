@@ -15,6 +15,13 @@ issues below.
 | [kubeswift-sandbox-egress-allowlist.md](kubeswift-sandbox-egress-allowlist.md) | [#732](https://github.com/kubeswift-io/kubeswift/issues/732) | `spec.network.egress.allow` | `spin.kubeswift.io/egress-allow`: calling in-cluster services without the `open` mode |
 | [kubeswift-sandbox-pool-shape-enforcement.md](kubeswift-sandbox-pool-shape-enforcement.md) | [#733](https://github.com/kubeswift-io/kubeswift/issues/733) | full slot shape compared at checkout | nothing new: kubeswift-spin still checks the shape itself |
 
+Later requirements:
+
+| Document | KubeSwift | Used by kubeswift-spin for |
+|---|---|---|
+| [kubeswift-sandbox-readiness-latency.md](kubeswift-sandbox-readiness-latency.md) | implemented in v0.16.2 ([#770](https://github.com/kubeswift-io/kubeswift/pull/770)): one pod write for readiness, `spec.readinessStartup` | `spin.kubeswift.io/readiness-startup`: a replica is ready about when it answers |
+| [kubeswift-sandbox-termination-drain.md](kubeswift-sandbox-termination-drain.md) | proposal, not implemented in v0.16.2 | removing an old replica during a rollout without relying on the guest ignoring the ACPI power button |
+
 kubeswift-spin uses these features only when the installed KubeSwift
 serves them ([ADR 0012](../adr/0012-feature-detection.md)). On v0.15.1 it
 runs in the degraded mode described in

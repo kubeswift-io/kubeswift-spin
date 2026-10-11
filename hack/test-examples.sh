@@ -12,6 +12,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPIN="${SPIN:-$ROOT/bin/spin}"
 EX="$ROOT/examples"
 TMP="$(mktemp -d)"
+# UPSTREAM_PORT moves the mock upstream off 8090 when another process holds it.
+UPSTREAM_PORT="${UPSTREAM_PORT:-8090}"
+[[ "$UPSTREAM_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "UPSTREAM_PORT must be a port number" >&2; exit 1; }
+UPSTREAM="http://127.0.0.1:$UPSTREAM_PORT"
 PIDS=()
 FAILED=0
 
@@ -76,9 +80,12 @@ expect_absent() {
 }
 
 start_upstream() {
-  "$TMP/upstream" --listen 127.0.0.1:8090 >"$TMP/upstream.log" 2>&1 &
+  "$TMP/upstream" --listen "127.0.0.1:$UPSTREAM_PORT" >"$TMP/upstream.log" 2>&1 &
   PIDS+=("$!")
-  wait_http "http://127.0.0.1:8090/" || { cat "$TMP/upstream.log" >&2; fail "upstream did not start"; exit 1; }
+  wait_http "$UPSTREAM/" || { cat "$TMP/upstream.log" >&2; fail "upstream did not start"; exit 1; }
+  # Another process on the port would answer wait_http while the mock exits
+  # on the bind error, and later checks would then fail confusingly.
+  kill -0 "${PIDS[-1]}" 2>/dev/null || { cat "$TMP/upstream.log" >&2; fail "upstream exited; is 127.0.0.1:$UPSTREAM_PORT in use? Set UPSTREAM_PORT"; exit 1; }
 }
 
 test_hello_http() {
@@ -105,7 +112,7 @@ test_request_info() {
 }
 
 test_outbound_http() {
-  start_app "$EX/outbound-http/spin.toml" 3103
+  start_app "$EX/outbound-http/spin.toml" 3103 SPIN_VARIABLE_TARGET_URL="$UPSTREAM/" SPIN_VARIABLE_TARGET_ORIGIN="$UPSTREAM"
   expect_contains "outbound-http allowed target" "$(curl -sS http://127.0.0.1:3103/fetch)" '"ok":true'
 
   # Nothing listens on 8091: the request is allowed by Spin but fails.
@@ -114,7 +121,7 @@ test_outbound_http() {
   expect_eq "outbound-http unreachable target status" "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3104/fetch)" "502"
 
   # The target is reachable but not in allowed_outbound_hosts: Spin refuses.
-  start_app "$EX/outbound-http/spin.toml" 3105 SPIN_VARIABLE_TARGET_ORIGIN=http://127.0.0.1:9999
+  start_app "$EX/outbound-http/spin.toml" 3105 SPIN_VARIABLE_TARGET_URL="$UPSTREAM/" SPIN_VARIABLE_TARGET_ORIGIN=http://127.0.0.1:9999
   local body
   body="$(curl -sS http://127.0.0.1:3105/fetch)"
   expect_contains "outbound-http denied by Spin allowlist" "$body" '"ok":false'
@@ -132,7 +139,8 @@ test_key_value() {
 }
 
 test_serverless_ai() {
-  start_app "$EX/serverless-ai/spin.toml" 3107 -- --runtime-config-file "$EX/serverless-ai/runtime-config.toml"
+  sed "s#http://127.0.0.1:8090#$UPSTREAM#" "$EX/serverless-ai/runtime-config.toml" >"$TMP/llm-runtime-config.toml"
+  start_app "$EX/serverless-ai/spin.toml" 3107 -- --runtime-config-file "$TMP/llm-runtime-config.toml"
   local body
   body="$(curl -sS -X POST --data-binary 'hello from the test' http://127.0.0.1:3107/ask)"
   expect_contains "serverless-ai completion" "$body" 'mock completion from model \"default-model\" for a 4-word prompt'

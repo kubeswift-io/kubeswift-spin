@@ -35,6 +35,7 @@ const (
 	ReasonUnsupportedConfiguration = "UnsupportedConfiguration"
 	ReasonWarmPoolIncompatible     = "WarmPoolIncompatible"
 	ReasonSandboxConflict          = "SandboxConflict"
+	ReasonSandboxRejected          = "SandboxRejected"
 	ReasonSandboxCreating          = "SandboxCreating"
 	ReasonSandboxMaterializing     = "SandboxMaterializing"
 	ReasonRollingUpdate            = "RollingUpdate"
@@ -118,16 +119,39 @@ type Result struct {
 
 // Compute derives the SpinApp conditions and ready replica count.
 func Compute(in Input) Result {
-	var ready, running, current int32
+	var ready, running, current, surgeReady int32
 	var failed []Instance
 	pending, materializing, outdated := 0, 0, 0
 	var waiting *Instance
 	for i := range in.Instances {
 		inst := in.Instances[i]
-		if inst.Deleting || inst.Stale || inst.Ordinal >= int(in.Replicas) {
+		if inst.Deleting || inst.Stale {
 			continue
 		}
-		if inst.Revision == in.Revision {
+		if inst.Ordinal >= int(in.Replicas) {
+			// The surge replica of a rollout, and a replica a scale-down
+			// keeps until the remaining ones are ready (ADR 0013), serve
+			// traffic and stand in for desired replicas that are not
+			// ready, also when they run an earlier revision.
+			if inst.Health == rollout.Ready {
+				surgeReady++
+			}
+			if inst.Ordinal != int(in.Replicas) || !inst.Surge {
+				continue
+			}
+			// The surge replica's failures and waits are reported like
+			// any replica's.
+			switch {
+			case inst.Health == rollout.Terminal:
+				failed = append(failed, inst)
+			case inst.Health == rollout.Pending && inst.WaitingReason != "" && waiting == nil:
+				waiting = &in.Instances[i]
+			}
+			continue
+		}
+		if inst.Revision == in.Revision && !inst.Surge {
+			// A surge replica below spec.replicas (after a scale-up) is
+			// replaced like an outdated one.
 			current++
 		} else {
 			outdated++
@@ -151,6 +175,7 @@ func Compute(in Input) Result {
 		}
 	}
 
+	ready = min(ready+surgeReady, in.Replicas)
 	r := Result{ReadyReplicas: ready}
 	cond := func(t string, s metav1.ConditionStatus, reason, msg string) metav1.Condition {
 		return metav1.Condition{Type: t, Status: s, Reason: reason, Message: Truncate(msg, maxMessage), ObservedGeneration: in.Generation}

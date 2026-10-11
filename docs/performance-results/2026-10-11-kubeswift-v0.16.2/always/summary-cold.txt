@@ -1,0 +1,14 @@
+mode cold: 10 runs
+metric (ms)                      n      min      p50      p90      p95      max     mean   stdev
+sandbox_created                 10       19       32       46       52       58       33      13
+direct_http                     10     8592     8970     9164     9180     9197     8965     173
+service_http                    10     8911     9265     9624     9645     9667     9304     210
+available                       10     8701     9126     9266     9277     9288     9083     170
+pod_ready                       10     8698     9121     9262     9269     9276     9079     169
+endpointslice_ready             10     8705     9131     9271     9280     9288     9087     171
+sandbox_workload_ready          10     8668     9070     9214     9229     9244     9036     169
+direct_to_available             10       69      108      157      164      171      118      32
+available_to_pod_ready          10      -12       -4       -1        1        4       -4       4
+pod_ready_to_endpointslice      10        4        8       12       12       12        8       2
+endpointslice_to_service_http   10       78      218      353      366      379      217     106
+

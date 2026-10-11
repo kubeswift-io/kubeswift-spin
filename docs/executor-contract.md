@@ -66,13 +66,14 @@ for example `kubeswift`, `kubeswift-open` and `kubeswift-warm`.
 | `spin.kubeswift.io/default-memory` | quantity | controller `--default-memory` (512Mi) |
 | `spin.kubeswift.io/egress-allow` | JSON list of 1 to 32 KubeSwift egress rules; only with network mode `restricted`; needs KubeSwift v0.16.0 | none |
 | `spin.kubeswift.io/ingress-from` | JSON list of 1 to 16 NetworkPolicy peers allowed to reach the Spin HTTP port; needs KubeSwift v0.16.0 | any source |
+| `spin.kubeswift.io/readiness-startup` | `auto`, `always`, `never`; see [Readiness startup](#readiness-startup); `always` needs KubeSwift v0.16.2 | `auto` |
 
 Any other annotation with the `spin.kubeswift.io/` prefix makes the executor
 invalid, so a misspelled key is reported rather than ignored. Network mode
 `none` is rejected because Spin downloads the application over the network
-when it starts. `egress-allow` and `ingress-from` on a cluster whose
-KubeSwift lacks the feature also make the executor invalid
-(`ExecutorInvalid`).
+when it starts. `egress-allow`, `ingress-from` and `readiness-startup: always`
+on a cluster whose KubeSwift lacks the feature also make the executor
+invalid (`ExecutorInvalid`).
 
 An egress rule names exactly one destination, a Service or an IPv4 CIDR,
 and optionally ports (`protocol` `TCP` or `UDP`, default `TCP`). A Service
@@ -117,6 +118,7 @@ Each replica is one SwiftSandbox in the SpinApp's namespace:
   | `spin.kubeswift.io/ordinal` | replica ordinal |
   | `spin.kubeswift.io/revision` | hash of the sandbox spec |
   | `spin.kubeswift.io/executor` | executor name (label-safe form) |
+  | `spin.kubeswift.io/surge` | `true` on the extra replica of a rollout (see [Rolling updates](#rolling-updates)); absent otherwise |
 
   Labels are used for selection only. A sandbox is owned only if its
   controller owner reference points to the SpinApp's UID, so an object with
@@ -141,6 +143,7 @@ Each replica is one SwiftSandbox in the SpinApp's namespace:
 | `network.ingress.from` | profile `ingress-from`; unset means any source; KubeSwift v0.16.0 |
 | `podMetadata.labels` | `core.spinkube.dev/app.<name>.status: ready`, `core.spinkube.dev/app-name: <name>`, plus `spec.podLabels`; KubeSwift v0.16.0 |
 | `readinessProbe` | from `spec.checks.readiness`, else a TCP check; KubeSwift v0.16.0 |
+| `readinessStartup` | `{}` (KubeSwift defaults) when [readiness startup](#readiness-startup) applies; KubeSwift v0.16.2 |
 | `livenessProbe` | from `spec.checks.liveness`, else unset; KubeSwift v0.16.0 |
 | `rootfsMode` | profile rootfs mode |
 | `kernelProfileRef` | profile kernel profile |
@@ -183,6 +186,38 @@ Without `spec.checks.readiness`, the readiness probe is a TCP check on
 Spin Operator v0.6.1 rejects a check whose `httpGet` has no `httpHeaders`;
 set `httpHeaders: []` (see
 [compatibility.md](compatibility.md#known-upstream-issues)).
+
+### Readiness startup
+
+On KubeSwift v0.16.2 or later, a replica's readiness check can run quickly
+from the replica's start until it first passes (SwiftSandbox
+`spec.readinessStartup`), so a replica that answers a few hundred
+milliseconds after it starts is reported ready then, not at the next
+whole-second check time. kubeswift-spin sets `readinessStartup: {}`, which
+uses KubeSwift's defaults:
+
+- the check is retried every 100 ms, for at most 30 s from the replica's
+  start (the window);
+- failures before the first pass do not count toward `failureThreshold`;
+- after the first pass, or once the window has passed, the check runs every
+  `periodSeconds` with the usual thresholds, so a replica that never
+  becomes ready is not checked every 100 ms forever;
+- `initialDelaySeconds` does not apply before the first pass.
+
+The executor annotation `spin.kubeswift.io/readiness-startup` decides when
+it is used:
+
+| Value | SpinApp without `spec.checks.readiness` | SpinApp with `spec.checks.readiness` |
+|---|---|---|
+| `auto` (default) | used, for the TCP check kubeswift-spin adds | not used: the check keeps its `initialDelaySeconds` |
+| `always` | used | used: the check's `initialDelaySeconds` does not delay the first checks |
+| `never` | not used | not used |
+
+`auto` never changes how a check written in the SpinApp behaves. Choose
+`always` for an executor whose applications declare HTTP checks and should be
+ready as soon as those checks pass. On a KubeSwift without
+`spec.readinessStartup`, `auto` falls back to whole-second checks and
+`always` makes the executor invalid.
 
 ### Spin command line
 
@@ -351,40 +386,33 @@ sandboxes; every transition below is covered by unit and envtest tests.
 
 - **Create and scale up**: missing ordinals below `spec.replicas` are
   created.
-- **Scale down**: ordinals at or above `spec.replicas` are deleted, highest
-  first.
+- **Scale down**: ordinals at or above `spec.replicas`, other than the
+  surge replica of a rollout, are deleted. While
+  fewer than `spec.replicas` of the remaining replicas are available (for
+  example right after a scale-up, or at the end of a rolling update), the
+  lowest of them that are available are kept until enough of the remaining
+  ones are; they serve traffic and count toward `readyReplicas` meanwhile.
+  Replicas that are not available go at once.
 - **Replacement**: SwiftSandbox specs are immutable except `ttl`, so a
   change is applied by deleting a replica and recreating it at the new
   revision. A replica counts as available when it is ready (KubeSwift
   v0.16.0, readiness probe passing) or, on older KubeSwift, when it is
   `Running`. An outdated replica that is not available is replaced at once.
-  An available outdated replica is replaced only while every desired
-  replica is available, one at a time, highest ordinal first. A broken new
-  revision therefore stops the rollout after one replica. There is no
-  surge: a replica is deleted before its replacement exists. With two or
-  more replicas the SpinApp Service keeps routing to the others, and the
-  KVM e2e test sees no failed request during a rolling update of two
-  replicas (see
-  [compatibility.md](compatibility.md#kvm-e2e-lab-run-2026-10-05)).
-  **A SpinApp with one replica is unavailable during every replacement**
-  (any spec change, including a runtime image change on upgrade), for the
-  sandbox deletion plus a boot (on the lab cluster, with
-  `initialDelaySeconds: 1`, a cold boot returned its first direct response
-  after about 10 seconds, was `Available` after about 12 and served through
-  the Service after about 13 seconds; see
-  [performance.md](performance.md#current-results)). Use at least two
-  replicas for applications that must stay reachable.
+  For available outdated replicas, see [Rolling updates](#rolling-updates).
 - **Failure**: KubeSwift launcher pods never restart, so when Spin exits the
-  sandbox becomes `Completed` or `Failed`. kubeswift-spin replaces it after a
-  backoff of 10 seconds, doubling per consecutive failure up to 5 minutes.
-  The count resets only after a replica has run for 10 minutes without
-  failing, because a guest is `Running` before Spin has pulled the
-  application. The backoff state is in memory and restarts from 10 seconds
-  after a controller restart. When a liveness probe fails `failureThreshold`
-  times, KubeSwift marks the sandbox `Failed` (`LivenessProbeFailed`) and
-  restarts nothing; kubeswift-spin then replaces it with the same backoff.
-  The KVM e2e test covers this, including a replacement that fails again
-  and recovery.
+  sandbox becomes `Completed` or `Failed`. kubeswift-spin replaces it after
+  a backoff of 10 seconds, doubling per consecutive failure up to 5 minutes.
+  The count resets when a replica has run for 10 minutes without failing (a
+  guest is `Running` before Spin has pulled the application, so an earlier
+  reset would keep the delay at its base), and when the failing replica runs
+  a different revision than the previous failure. A failed replica from an
+  earlier revision than the current spec is replaced 10 seconds after its
+  failure, so a fixed spec is not held back by the broken one's backoff. The
+  backoff state is in memory and restarts from 10 seconds after a controller
+  restart. When a liveness probe fails `failureThreshold` times, KubeSwift
+  marks the sandbox `Failed` (`LivenessProbeFailed`) and restarts nothing;
+  kubeswift-spin then replaces it with the same backoff. The KVM e2e test
+  covers this, including a replacement that fails again and recovery.
 - **Deletion**: sandboxes are deleted with foreground propagation, so a
   replacement with the same name is created only after KubeSwift's launcher
   pod, runtime-intent ConfigMap and NetworkPolicy are gone.
@@ -392,7 +420,9 @@ sandboxes; every transition below is covered by unit and envtest tests.
   ordinal label is deleted.
 - **Conflicts**: if a sandbox name is taken by an object the SpinApp does not
   control (checked with a direct API read, not the cache), that ordinal is
-  not created and `Progressing` reports `SandboxConflict`. The SpinApp is
+  not created and `Progressing` reports `SandboxConflict`. This includes the
+  surge name `<spinapp>-<replicas>`: a foreign object with that name stalls
+  rollouts, while the existing replicas keep serving. The SpinApp is
   rechecked every 30 seconds, so the replica is created once the name is
   free.
 
@@ -400,10 +430,67 @@ While a SpinApp has unsupported configuration, an invalid executor or an
 incompatible warm pool, kubeswift-spin creates and deletes nothing for it;
 existing sandboxes keep running.
 
+### Rolling updates
+
+A rollout keeps `spec.replicas` replicas available
+([ADR 0013](adr/0013-surge-replacement.md)):
+
+1. It creates one surge replica, `<spinapp>-<replicas>` (for example
+   `hello-1` for a single-replica SpinApp), at the new revision and with the
+   label `spin.kubeswift.io/surge=true`. It serves Service traffic once it is
+   ready.
+2. It deletes an available outdated replica, highest ordinal first, only
+   while the other available replicas, the surge replica included, still
+   number `spec.replicas`. The deleted replica is recreated under its name
+   once the old sandbox is gone, at the new revision.
+3. It removes the surge replica once every ordinal below `spec.replicas`
+   runs the new revision and is available.
+
+If the spec changes again during a rollout, the surge replica of the
+earlier revision is replaced too. While it is available and the replicas
+below `spec.replicas` are not enough on their own, it is kept until they
+are, so a second change never removes the last available replica. If
+`spec.replicas` is raised during a rollout, the former surge replica
+becomes an ordinary ordinal and is replaced once like an outdated replica,
+so the `surge` label only ever marks the extra replica of a rollout.
+
+A ready surge replica counts toward `readyReplicas`, capped at
+`spec.replicas`, so `Available` stays `True` during a rollout. If the surge
+replica cannot start or never becomes ready, the rollout stalls with every
+old replica still serving, `Progressing` names the failing sandbox, and the
+surge replica is replaced with the failure backoff above. A rollout needs
+room for one extra sandbox: CPU and memory on a node, and room under any
+ResourceQuota on SwiftSandboxes and on launcher pods. A SwiftSandbox create
+that a quota or admission policy refuses (HTTP 403 or 422) is reported as
+`SandboxRejected`; the SpinApp is requeued after 10 seconds, doubling per
+consecutive refusal up to 5 minutes, and an earlier change to the SpinApp or
+its sandboxes also retries; a launcher pod that a pod quota refuses shows up
+as a KubeSwift waiting or failure reason on the sandbox instead. With a warm
+pool, the surge replica takes a free slot or falls back to a cold boot like
+any replica. To remove an outdated revision sooner, delete its
+SwiftSandboxes with `--cascade=foreground`, including the surge replica
+`<spinapp>-<replicas>` if its `spin.kubeswift.io/revision` label is not the
+current one (`spec.replicas: 0` is not supported; see
+[security-model.md](security-model.md#denial-of-service-and-capacity)).
+
+A deleted replica leaves the SpinApp Service when its launcher pod starts
+terminating. On KubeSwift v0.16.2 the guest keeps serving until the
+launcher's 30-second termination grace period ends, so connections that
+kube-proxy still routes to it in the meantime succeed. kubeswift-spin relies
+on that; an explicit drain is proposed upstream in
+[kubeswift-sandbox-termination-drain.md](upstream/kubeswift-sandbox-termination-drain.md).
+Each replaced replica therefore takes about 30 seconds to disappear, and its
+launcher pod ends in phase `Failed`.
+
+Measured on the lab cluster with continuous traffic through the SpinApp
+Service (new connection per request): see
+[compatibility.md](compatibility.md#zero-loss-rolling-updates).
+
 ## What triggers replacement
 
 The revision label is a hash of the full sandbox spec. A change to any of
-these replaces the replicas (one at a time, as above):
+these replaces the replicas (one at a time, as in
+[Rolling updates](#rolling-updates)):
 
 - `spec.image`, `spec.components`, `spec.variables`,
   `spec.runtimeConfig`, `spec.invocationLimits`, `spec.resources` (when the
@@ -418,6 +505,11 @@ these replaces the replicas (one at a time, as above):
   replica is replaced once. The controller re-reads the schema at most every
   `--capability-refresh` (default 5 minutes); a failed read keeps the last
   result, so a transient error never changes the spec
+- the first reconcile of kubeswift-spin v0.1.0-rc5 or later on KubeSwift
+  v0.16.2 or later (upgrading either one): replicas whose readiness check
+  gets `readinessStartup` (the TCP check kubeswift-spin adds, or every check
+  with `readiness-startup: always`) are replaced once. The same holds for
+  changing the `spin.kubeswift.io/readiness-startup` annotation
 - a different executor that kubeswift-spin manages, when its profile renders
   a different spec (the `spin.kubeswift.io/executor` label of existing
   sandboxes is not updated when the spec is identical)
@@ -545,6 +637,7 @@ v0.15.1 sandboxes have no probe, so `readyReplicas` stays 0.
 | Progressing | False | `ExecutorNotFound` | the executor no longer exists |
 | Progressing | False | `WarmPoolIncompatible` | the selected pool is missing or has another shape |
 | Progressing | False | `SandboxConflict` | a sandbox name is taken by a foreign object |
+| Progressing | False | `SandboxRejected` | the API server refused to create a sandbox (Forbidden or Invalid), for example a ResourceQuota |
 | Progressing | False | `RuntimeImageUnavailable` | KubeSwift could not pull, verify or materialize the runtime image |
 | Progressing | False | `SandboxFailed` | Spin exited or the guest failed; the replica is replaced after backoff |
 | Available | True | `ApplicationReady` | at most one desired replica is not ready |
@@ -560,10 +653,11 @@ capped at 1000 bytes.
 ## Events
 
 Events are recorded on the SpinApp with the `events.k8s.io/v1` API:
-`SandboxCreated`, `SandboxDeleted`, `SandboxFailed`, `UnsupportedConfiguration`,
-`PartiallySupported`, `ExecutorInvalid`, `ExecutorNotFound`,
-`WarmPoolIncompatible`, `SandboxConflict`, `ExecutorChanged`. Configuration
-Events fire once per SpinApp generation or when the message changes.
+`SandboxCreated`, `SandboxDeleted`, `SandboxFailed`,
+`UnsupportedConfiguration`, `PartiallySupported`, `ExecutorInvalid`,
+`ExecutorNotFound`, `WarmPoolIncompatible`, `SandboxConflict`,
+`SandboxRejected`, `ExecutorChanged`. Configuration Events fire once per
+SpinApp generation or when the message changes.
 
 ## Namespace prerequisites
 

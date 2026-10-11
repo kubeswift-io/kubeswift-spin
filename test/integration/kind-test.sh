@@ -219,11 +219,20 @@ $K -n "$NS" patch spinapp hello --type=merge -p '{"spec":{"replicas":1}}' >/dev/
 until_true 90 "scaled down to hello-0 (garbage collector finished foreground deletion)" \
   bash -c "[[ \$($K -n $NS get swiftsandbox -l spin.kubeswift.io/app=hello -o name | wc -l) -eq 1 ]]"
 
-log "rolling replacement on image change"
+log "rolling replacement on image change keeps a ready replica (surge)"
 uid="$(jp swiftsandbox/hello-0 '{.metadata.uid}')"
 $K -n "$NS" patch spinapp hello --type=merge -p '{"spec":{"image":"ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.1"}}' >/dev/null
+until_true 60 "surge replica hello-1 created" \
+  bash -c "[[ \$($K -n $NS get swiftsandbox hello-1 -o jsonpath='{.metadata.labels.spin\.kubeswift\.io/surge}' 2>/dev/null) == true ]]"
+sleep 3
+[[ "$(jp swiftsandbox/hello-0 '{.metadata.uid}')" == "$uid" && -z "$(jp swiftsandbox/hello-0 '{.metadata.deletionTimestamp}')" ]] \
+  && ok "hello-0 kept while the surge replica is not ready" || fail "hello-0 removed before the surge replica was ready"
+set_ready hello-1
 until_true 90 "hello-0 replaced at the new revision" \
   bash -c "[[ \$($K -n $NS get swiftsandbox hello-0 -o jsonpath='{.metadata.uid}' 2>/dev/null) != '' && \$($K -n $NS get swiftsandbox hello-0 -o jsonpath='{.metadata.uid}') != '$uid' ]]"
+[[ "$(jp spinapp/hello '{.status.readyReplicas}')" == "1" ]] && ok "readyReplicas stays 1 during the replacement" || fail "readyReplicas during replacement"
+set_ready hello-0
+until_true 90 "surge replica removed once hello-0 is ready" has_sandboxes hello "hello-0"
 
 log "unsupported configuration is reported, not ignored"
 cat <<YAML | $K apply -n "$NS" -f - >/dev/null
