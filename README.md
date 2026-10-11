@@ -83,9 +83,13 @@ Details: [docs/architecture.md](docs/architecture.md),
 
 - Kubernetes 1.31 or later (the chart's minimum; only 1.34 was tested on a
   cluster)
-- KubeSwift v0.16.0 or later with the sandbox CRDs, for exposure,
-  readiness, Secrets and egress allowlists; v0.16.2 or later for readiness
-  startup (fast readiness), which this release was tested with. KubeSwift
+- KubeSwift v0.16.3 or later with the sandbox CRDs (the supported
+  baseline). It drains a deleted replica and stops it explicitly, keeps its
+  network isolation until it has stopped, never hands a re-created sandbox
+  the previous one's launcher, and authorizes its node cache per
+  repository; kubeswift-spin relies on these but does not implement them.
+  v0.16.0 to v0.16.2 run SpinApps with the limitations listed in
+  [docs/compatibility.md](docs/compatibility.md#kubeswift-features);
   v0.15.1 works in a degraded mode: SpinApps run but cannot be reached, and
   Secret-backed configuration is rejected.
 - a node labelled `kubeswift.io/kernel-node=true`

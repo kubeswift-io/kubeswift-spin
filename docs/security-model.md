@@ -374,25 +374,26 @@ executor names a cosign key Secret.
   the annotation.
   KubeSwift's readiness and liveness probes run inside the launcher pod and
   are not affected. On KubeSwift v0.15.1 all inbound traffic is denied.
-- The per-sandbox NetworkPolicy is a child of the SwiftSandbox, not of the
-  launcher pod (KubeSwift v0.16.2 source). When a sandbox is deleted, by a
-  rolling update, a scale-down or a user, the policy is removed at once
-  while the launcher pod and its guest keep running for up to the 30-second
-  termination grace period (see
-  [compatibility.md](compatibility.md#known-upstream-issues)). In that
-  window no sandbox policy selects the pod, so unless the namespace has its
-  own default-deny ingress policy, any pod in the cluster can reach the Spin
-  port by pod IP and `ingress-from` is not enforced. Observed on the lab
-  cluster (KubeSwift v0.16.2, Calico): during a rolling update, a pod
-  outside the `ingress-from` peers, refused before, received HTTP 200 from
-  the replica being replaced for its whole 30-second termination. Egress is
-  not affected (KubeSwift enforces it inside the pod). An
-  administrator-managed default-deny ingress NetworkPolicy in each SpinApp
-  namespace, plus a policy that admits the SpinApp's clients to its launcher
-  pods (for example by the `core.spinkube.dev/app-name` label), should close
-  the window; that combination was not tested. The upstream proposal
-  [kubeswift-sandbox-termination-drain.md](upstream/kubeswift-sandbox-termination-drain.md)
-  asks KubeSwift to keep the policy until the pod is gone.
+- KubeSwift v0.16.3 creates the per-sandbox NetworkPolicy before the
+  launcher pod and keeps it, with a finalizer, until the launcher has
+  stopped, so a replica being deleted stays isolated through its drain, as
+  long as the cluster's NetworkPolicy implementation keeps enforcing a
+  policy that is being deleted until it is gone (observed with Calico). A
+  launcher pod deleted with `--force` is not covered: its guest may still
+  run while the policy goes.
+  Observed on the lab cluster (KubeSwift v0.16.3, Calico): through a rolling
+  update and through a SpinApp deletion, a pod outside the `ingress-from`
+  peers that probed the replica being deleted got no successful connection
+  (0 of 176 attempts during the drain across the two runs, 0 of 72
+  before it), while an allowed pod was served until the drain ended; the
+  policy was removed only after the launcher pod had ended `Succeeded`.
+  On KubeSwift v0.16.2 and earlier the policy was removed as
+  soon as the sandbox was deleted while the launcher pod and its guest
+  kept running for up to the 30-second termination grace period: any pod
+  in the cluster could reach the Spin port by pod IP and `ingress-from` was
+  not enforced (observed on the lab cluster with v0.16.2). That is one
+  reason v0.16.3 is the supported baseline. The egress restriction is
+  enforced inside the launcher pod and is not affected by any of this.
 - kubeswift-spin creates no NetworkPolicy, Service, EndpointSlice or proxy
   and never patches, labels or execs into launcher pods. Launcher pod labels
   come only from `spec.podMetadata`, which KubeSwift applies and which
@@ -422,7 +423,11 @@ executor names a cosign key Secret.
 - Ownership is by controller owner reference UID, so a user cannot make
   kubeswift-spin adopt, modify or delete a SwiftSandbox it did not create,
   even with matching labels. A name collision is reported as
-  `SandboxConflict`.
+  `SandboxConflict`, except that a sandbox of a deleted SpinApp with the
+  same name that is still terminating is waited for, for at most 2
+  minutes. On KubeSwift v0.16.3 a pod named like a replica's launcher
+  (`<spinapp>-<ordinal>`) that someone else created blocks that replica
+  (`LauncherPodConflict`); KubeSwift does not adopt it.
 - The controller cache holds only SwiftSandboxes with its managed-by label.
 
 ## Malicious SpinApp input
@@ -480,14 +485,17 @@ a SpinApp never runs more than `--max-replicas + 1` sandboxes (21 at the
 default). The
 bound holds for replacements kubeswift-spin makes, which delete with
 foreground propagation and recreate an ordinal only when its old sandbox
-is gone. A user who deletes SwiftSandboxes with the default background
-propagation makes the object disappear at once, and kubeswift-spin
-recreates the ordinal while the old launcher pod still runs out its grace
-period. A cold-started replacement attaches to that terminating pod on
-KubeSwift v0.16.2 and fails when it exits (see
-[compatibility.md](compatibility.md#known-upstream-issues)); a replacement
-that claims a warm-pool slot runs alongside it, one more microVM for up to
-30 seconds. Delete with `--cascade=foreground`. Size
+is gone. On KubeSwift v0.16.3 it also holds when a
+user deletes SwiftSandboxes with the default background propagation: the
+sandbox keeps a termination finalizer until its launcher has stopped (or
+until 30 seconds past the launcher's grace period, when KubeSwift lets it
+go, for example for an unreachable node), so the ordinal is normally
+recreated only afterwards. On KubeSwift v0.16.2 and earlier
+the object disappeared at once, a cold-started replacement attached to the
+old terminating launcher pod and failed when it exited (see
+[compatibility.md](compatibility.md#known-upstream-issues)), and a
+replacement that claimed a warm-pool slot ran alongside it, one more
+microVM for up to 30 seconds; delete with `--cascade=foreground` there. Size
 quotas and node capacity with one sandbox of headroom per SpinApp that may
 roll at the same time. A change that rolls every SpinApp at once, such as
 upgrading KubeSwift to v0.16.2 (replicas that get readiness startup are
@@ -509,17 +517,27 @@ kubectl delete swiftsandbox <name> -n <namespace> --cascade=foreground
 ```
 
 Each deleted ordinal is recreated at the new revision once the old one is
-gone, and the surge replica at the new revision too while the rollout
-lasts. A deleted replica keeps running for up to the 30-second termination
-grace period. `spec.replicas: 0` is not supported and leaves every sandbox
-in place.
+gone, and the surge replica at the new revision too while the rollout lasts.
+A deleted replica drains for 5 seconds and is then stopped (KubeSwift
+v0.16.3; up to 30 seconds on earlier releases). `spec.replicas: 0` is not
+supported and leaves every sandbox in place.
 
 ## Finalizers and deletion
 
 kubeswift-spin adds no finalizer. Deleting a SpinApp removes its sandboxes
 through owner-reference garbage collection, so a broken or removed
-controller can never block deletion. Sandboxes are deleted with foreground
-propagation so a replacement does not race KubeSwift's cleanup.
+kubeswift-spin controller can never block deletion. Sandboxes are deleted
+with foreground propagation so a replacement does not race KubeSwift's
+cleanup.
+
+KubeSwift v0.16.3 adds its own finalizers: `kubeswift.io/sandbox-termination`
+on every SwiftSandbox and `kubeswift.io/launcher-isolation` on every
+launcher NetworkPolicy. Deleting SwiftSandboxes, and so SpinApps and their
+namespaces, then needs the KubeSwift controller running; the sandbox
+finalizer is released by KubeSwift at the latest 30 seconds after the
+launcher's grace period, and the NetworkPolicy finalizer only once the
+launcher pod has finished. Before downgrading KubeSwift, remove these
+finalizers as its release notes describe.
 
 ## Metrics endpoint
 
@@ -547,6 +565,10 @@ They never contain values of variables or runtime-config options.
 - Without `spin.kubeswift.io/ingress-from`, any cluster source can reach the
   Spin HTTP port. Ingress restriction depends on the CNI enforcing
   NetworkPolicy; it was tested with Calico.
+- kubeswift-spin still runs on KubeSwift v0.16.0 to v0.16.2, where a
+  deleted replica loses its NetworkPolicy while it can still serve for up
+  to 30 seconds, so `ingress-from` is not enforced in that window. The
+  controller logs this once at startup; use KubeSwift v0.16.3 or later.
 - Application artifacts are not signature-verified and tags are not
   pinned to digests.
 - Literal variable values are stored in plain text in SwiftSandbox specs and

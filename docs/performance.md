@@ -129,6 +129,23 @@ The cold runs are a sanity check; 10 runs give no meaningful p95.
 The raw results are in
 [performance-results/2026-10-11-kubeswift-v0.16.2](performance-results/2026-10-11-kubeswift-v0.16.2/).
 
+### KubeSwift v0.16.3 sanity check (2026-10-11)
+
+The same cluster, upgraded to the KubeSwift v0.16.3 release images, with the
+published kubeswift-spin v0.1.0-rc5 controller and runtime image, stock
+kube-proxy, 15 warm and 5 cold runs per configuration. A small population
+to detect a regression, not a new baseline:
+
+| Seconds from SpinApp creation, p50 | Shipped, warm | No check, warm | Shipped, cold | No check, cold |
+|---|---:|---:|---:|---:|
+| first direct response | 1.50 | 1.51 | 8.95 | 9.10 |
+| `Available` | 3.15 | 1.60 | 10.70 | 9.24 |
+| first Service response | 3.31 | 2.21 | 11.12 | 9.61 |
+
+All within the run-to-run spread of the v0.16.2 results above; v0.16.3
+changed termination, not startup. The Wasmtime cache diagnostic below gave
+0.385, 0.487 and 1.444 seconds (10 warm runs), as on v0.16.2.
+
 ## Earlier results
 
 Environment for the KubeSwift v0.16.1 and v0.16.0 result sets below:
@@ -318,6 +335,16 @@ cold):
 - never listening: readiness reported `ProbeFailed` after the window and
   three failed periodic probes (about 38 seconds), and the replica never
   received Service traffic.
+
+The same cases ran again on KubeSwift v0.16.3 (2026-10-11) with `auto`
+and `always` (the latter on the `/healthz` check): a fast replica was ready
+0.05 to 0.14 seconds after it first answered, one listening at about 30
+seconds 0.08 to 0.13 seconds after, one listening at about 52 seconds,
+after the window, 0.84 to 0.87 seconds after at the next periodic probe,
+and a never-ready one reported `ProbeFailed` and got no Service traffic.
+With `never`, a fast replica was ready 0.46 seconds after it first
+answered, at its periodic probe. No replica received Service traffic
+before its endpoint was ready.
 
 ## Wasmtime compilation cache (measured once, not provided)
 
