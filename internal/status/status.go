@@ -118,13 +118,21 @@ type Result struct {
 
 // Compute derives the SpinApp conditions and ready replica count.
 func Compute(in Input) Result {
-	var ready, running, current int32
+	var ready, running, current, surgeReady int32
 	var failed []Instance
 	pending, materializing, outdated := 0, 0, 0
 	var waiting *Instance
 	for i := range in.Instances {
 		inst := in.Instances[i]
-		if inst.Deleting || inst.Stale || inst.Ordinal >= int(in.Replicas) {
+		if inst.Deleting || inst.Stale || inst.Ordinal > int(in.Replicas) {
+			continue
+		}
+		if inst.Ordinal == int(in.Replicas) {
+			// The surge replica of a rollout (ADR 0013) serves traffic and
+			// stands in for the replica being replaced.
+			if inst.Health == rollout.Ready {
+				surgeReady++
+			}
 			continue
 		}
 		if inst.Revision == in.Revision {
@@ -151,6 +159,7 @@ func Compute(in Input) Result {
 		}
 	}
 
+	ready = min(ready+surgeReady, in.Replicas)
 	r := Result{ReadyReplicas: ready}
 	cond := func(t string, s metav1.ConditionStatus, reason, msg string) metav1.Condition {
 		return metav1.Condition{Type: t, Status: s, Reason: reason, Message: Truncate(msg, maxMessage), ObservedGeneration: in.Generation}

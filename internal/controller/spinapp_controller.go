@@ -323,6 +323,9 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	requeue := plan.Waiting
 	for _, ord := range plan.Create {
 		sb := translate.NewSandbox(&app, profile.ExecutorName, tmpl, ord)
+		if ord == int(app.Spec.Replicas) {
+			sb.Labels[translate.LabelSurge] = "true"
+		}
 		if err := controllerutil.SetControllerReference(&app, sb, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -487,6 +490,7 @@ func Classify(appName string, sb *sandboxv1alpha1.SwiftSandbox) status.Instance 
 		Name:     sb.Name,
 		Revision: sb.Labels[translate.LabelRevision],
 		Deleting: !sb.DeletionTimestamp.IsZero(),
+		Surge:    sb.Labels[translate.LabelSurge] == "true",
 	}}
 	ord, err := translate.ParseOrdinal(sb.Labels[translate.LabelOrdinal])
 	if err != nil || translate.SandboxName(appName, ord) != sb.Name {

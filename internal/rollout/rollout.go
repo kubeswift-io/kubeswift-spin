@@ -4,8 +4,13 @@
 //
 // The model is StatefulSet-like: replica i is always the sandbox named
 // <app>-<i>. SwiftSandbox specs are immutable, so a configuration change is
-// applied by deleting a replica and recreating it at the new revision, one
-// available replica at a time.
+// applied by deleting a replica and recreating it at the new revision.
+//
+// A rollout keeps the desired number of replicas available (ADR 0013): it
+// first adds one surge replica at ordinal <replicas> with the new revision,
+// replaces an outdated replica only while the remaining available replicas
+// still number <replicas>, and removes the surge replica once every desired
+// ordinal runs the new revision and is available.
 package rollout
 
 import "sort"
@@ -50,6 +55,9 @@ type Instance struct {
 	// Stale marks an owned sandbox whose name does not match its ordinal,
 	// for example after a manual relabel. It is always removed.
 	Stale bool
+	// Surge marks the extra replica a rollout creates at ordinal Replicas.
+	// A replica left at that ordinal by a scale down is not a surge one.
+	Surge bool
 }
 
 // Input is the desired state and the observed replicas.
@@ -93,15 +101,24 @@ func Available(h Health, readinessObservable bool) bool {
 // Compute returns the plan for in.
 func Compute(in Input) Plan {
 	var p Plan
+	surgeOrd := in.Replicas
 	byOrdinal := map[int]Instance{}
-
+	var surge *Instance
+	surgeDeleting := false
 	for _, inst := range in.Instances {
 		switch {
 		case inst.Deleting:
 			p.Waiting = true
-			byOrdinal[inst.Ordinal] = inst
+			if inst.Ordinal == surgeOrd && inst.Surge {
+				surgeDeleting = true
+			} else {
+				byOrdinal[inst.Ordinal] = inst
+			}
 		case inst.Stale:
 			p.Delete = append(p.Delete, Deletion{inst.Name, inst.Ordinal, ReasonStale})
+		case inst.Ordinal == surgeOrd && inst.Surge && in.Replicas > 0:
+			s := inst
+			surge = &s
 		case inst.Ordinal >= in.Replicas:
 			p.Delete = append(p.Delete, Deletion{inst.Name, inst.Ordinal, ReasonScaleDown})
 		default:
@@ -110,9 +127,14 @@ func Compute(in Input) Plan {
 	}
 
 	available := 0
+	rolling := false   // a desired ordinal still runs an outdated revision
+	allCurrent := true // every desired ordinal is current and available
 	var outdatedAvailable []Instance
 	for ord := 0; ord < in.Replicas; ord++ {
 		inst, ok := byOrdinal[ord]
+		if !ok || inst.Deleting || inst.Revision != in.Revision || !Available(inst.Health, in.ReadinessObservable) {
+			allCurrent = false
+		}
 		switch {
 		case !ok:
 			p.Create = append(p.Create, ord)
@@ -126,6 +148,7 @@ func Compute(in Input) Plan {
 			p.Delete = append(p.Delete, Deletion{inst.Name, ord, ReasonFailed})
 		case inst.Revision != in.Revision:
 			if Available(inst.Health, in.ReadinessObservable) {
+				rolling = true
 				available++
 				outdatedAvailable = append(outdatedAvailable, inst)
 			} else {
@@ -140,11 +163,37 @@ func Compute(in Input) Plan {
 		}
 	}
 
-	// Replace one available outdated replica only when every desired
-	// replica is available, so a broken new revision stalls the rollout
-	// after a single replica instead of taking the whole app down.
+	// The surge replica exists only while a rollout needs it: it is created
+	// when a desired ordinal is outdated and kept until every desired
+	// ordinal is current and available.
+	wantSurge := in.Replicas > 0 && (rolling || (surge != nil && !allCurrent))
+	surgeAvailable := 0
+	switch {
+	case surge == nil:
+		if wantSurge && rolling && !surgeDeleting {
+			p.Create = append(p.Create, surgeOrd)
+		}
+	case !wantSurge:
+		p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonScaleDown})
+	case surge.Health == Terminal:
+		if in.InBackoff[surgeOrd] {
+			p.Waiting = true
+		} else {
+			p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonFailed})
+		}
+	case surge.Revision != in.Revision:
+		// A surge replica from an earlier revision: replace it first.
+		p.Delete = append(p.Delete, Deletion{surge.Name, surgeOrd, ReasonRollout})
+	case Available(surge.Health, in.ReadinessObservable):
+		surgeAvailable = 1
+	}
+
+	// Replace one available outdated replica only when the others still
+	// leave the desired number available, so a broken new revision stalls
+	// the rollout without taking a replica away.
 	if len(outdatedAvailable) > 0 {
-		if available == in.Replicas && len(p.Create) == 0 && !p.Waiting && !hasReason(p.Delete, ReasonFailed, ReasonRollout) {
+		capacity := available + surgeAvailable
+		if capacity-1 >= in.Replicas && len(p.Create) == 0 && !p.Waiting && !hasReason(p.Delete, ReasonFailed, ReasonRollout) {
 			sort.Slice(outdatedAvailable, func(i, j int) bool { return outdatedAvailable[i].Ordinal > outdatedAvailable[j].Ordinal })
 			victim := outdatedAvailable[0]
 			p.Delete = append(p.Delete, Deletion{victim.Name, victim.Ordinal, ReasonRollout})

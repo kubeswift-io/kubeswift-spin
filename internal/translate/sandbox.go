@@ -39,6 +39,9 @@ const (
 	LabelOrdinal   = executor.Prefix + "ordinal"
 	LabelRevision  = executor.Prefix + "revision"
 	LabelExecutor  = executor.Prefix + "executor"
+	// LabelSurge marks the extra replica a rollout adds at ordinal
+	// <replicas> (ADR 0013); it is removed when the rollout completes.
+	LabelSurge = executor.Prefix + "surge"
 	// LabelSpinKubeAppName mirrors the label Spin Operator puts on the objects
 	// it creates, so `kubectl get swiftsandbox -l core.spinkube.dev/app-name=x`
 	// works the way SpinKube users expect.

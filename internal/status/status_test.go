@@ -134,3 +134,20 @@ func TestMessagesAreBounded(t *testing.T) {
 		t.Fatalf("message not bounded: %d bytes", len(r.Progressing.Message))
 	}
 }
+
+func TestSurgeReplicaCountsTowardReadyUpToReplicas(t *testing.T) {
+	old := si(0, "r1", rollout.Ready)
+	old.Deleting = true
+	surge := si(1, "r2", rollout.Ready)
+	r := Compute(Input{Replicas: 1, Revision: "r2", Exposure: Exposure{Detected: true},
+		Instances: []Instance{old, surge}})
+	if r.ReadyReplicas != 1 || r.Available.Status != metav1.ConditionTrue {
+		t.Fatalf("ready %d available %+v", r.ReadyReplicas, r.Available)
+	}
+	// Never more than spec.replicas, even with every replica and the surge ready.
+	r = Compute(Input{Replicas: 1, Revision: "r2", Exposure: Exposure{Detected: true},
+		Instances: []Instance{si(0, "r1", rollout.Ready), si(1, "r2", rollout.Ready), si(2, "r2", rollout.Ready)}})
+	if r.ReadyReplicas != 1 {
+		t.Fatalf("ready %d", r.ReadyReplicas)
+	}
+}

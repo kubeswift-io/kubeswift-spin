@@ -271,7 +271,23 @@ func TestRollingReplacementOnImageChange(t *testing.T) {
 
 	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
 
-	// The highest ordinal goes first; replica 0 keeps running meanwhile.
+	// A surge replica at the new revision comes first; nothing is deleted
+	// until it is ready.
+	expectSandboxes(t, ns, "hello-0", "hello-1", "hello-2")
+	if sb := getSandbox(t, ns, "hello-2"); sb.Labels[translate.LabelSurge] != "true" || sb.Labels[translate.LabelRevision] == oldRev {
+		t.Fatalf("surge replica labels %v", sb.Labels)
+	}
+	consistently(t, "no replica deleted before the surge replica is ready", time.Second, func() error {
+		for _, n := range []string{"hello-0", "hello-1"} {
+			if !getSandbox(t, ns, n).DeletionTimestamp.IsZero() {
+				return fmt.Errorf("%s deleting", n)
+			}
+		}
+		return nil
+	})
+	setReady(t, ns, "hello-2")
+
+	// Then the highest ordinal is replaced; replica 0 keeps running.
 	eventually(t, "hello-1 deleting", func() error {
 		if getSandbox(t, ns, "hello-1").DeletionTimestamp.IsZero() {
 			return fmt.Errorf("not deleting")
@@ -294,10 +310,12 @@ func TestRollingReplacementOnImageChange(t *testing.T) {
 		if sb.Labels[translate.LabelRevision] == oldRev || !strings.Contains(strings.Join(sb.Spec.Args, " "), "hello-http:v2") {
 			return fmt.Errorf("old revision")
 		}
+		if sb.Labels[translate.LabelSurge] != "" {
+			return fmt.Errorf("desired replica labeled as surge")
+		}
 		return nil
 	})
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonRollingUpdate)
-
 	setReady(t, ns, "hello-1")
 	eventually(t, "hello-0 replaced", func() error {
 		simulateGC(t, ns)
@@ -307,6 +325,67 @@ func TestRollingReplacementOnImageChange(t *testing.T) {
 		}
 		if sb.UID == uid0 {
 			return fmt.Errorf("not replaced yet")
+		}
+		return nil
+	})
+	setReady(t, ns, "hello-0")
+
+	// Every desired replica runs the new revision: the surge replica goes.
+	eventually(t, "surge replica removed", func() error {
+		simulateGC(t, ns)
+		names := []string{}
+		for _, sb := range listSandboxes(t, ns) {
+			names = append(names, sb.Name)
+		}
+		if strings.Join(names, ",") != "hello-0,hello-1" {
+			return fmt.Errorf("sandboxes %v", names)
+		}
+		return nil
+	})
+}
+
+func TestSingleReplicaRolloutKeepsAReadyReplica(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	setReady(t, ns, "hello-0")
+	uid0 := getSandbox(t, ns, "hello-0").UID
+
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Image = "ghcr.io/example/hello-http:v2" })
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	consistently(t, "hello-0 kept until the new replica is ready", time.Second, func() error {
+		if sb := getSandbox(t, ns, "hello-0"); !sb.DeletionTimestamp.IsZero() || sb.UID != uid0 {
+			return fmt.Errorf("hello-0 deleted")
+		}
+		return nil
+	})
+	a := expectCondition(t, ns, "hello", status.TypeAvailable, metav1.ConditionTrue, status.ReasonApplicationReady)
+	if a.Status.ReadyReplicas != 1 {
+		t.Fatalf("readyReplicas %d", a.Status.ReadyReplicas)
+	}
+	setReady(t, ns, "hello-1")
+	eventually(t, "hello-0 replaced", func() error {
+		simulateGC(t, ns)
+		var sb sandboxv1alpha1.SwiftSandbox
+		if err := testClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "hello-0"}, &sb); err != nil {
+			return err
+		}
+		if sb.UID == uid0 {
+			return fmt.Errorf("not replaced yet")
+		}
+		return nil
+	})
+	// While the new hello-0 starts, the surge replica keeps the app available.
+	a = expectCondition(t, ns, "hello", status.TypeAvailable, metav1.ConditionTrue, status.ReasonApplicationReady)
+	if a.Status.ReadyReplicas != 1 {
+		t.Fatalf("readyReplicas %d during replacement", a.Status.ReadyReplicas)
+	}
+	setReady(t, ns, "hello-0")
+	eventually(t, "surge replica removed", func() error {
+		simulateGC(t, ns)
+		if n := len(listSandboxes(t, ns)); n != 1 {
+			return fmt.Errorf("%d sandboxes", n)
 		}
 		return nil
 	})
