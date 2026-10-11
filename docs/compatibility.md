@@ -7,11 +7,12 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.1.0-rc5, v0.1.0-rc3, v0.1.0-rc2 | all tests below; KVM runs used a development build before rc2, then the published v0.1.0-rc2, v0.1.0-rc3 and v0.1.0-rc5 artifacts; the other KubeSwift v0.16.2 runs used a development build of v0.1.0-rc5 (commit 7cb6d55) |
+| kubeswift-spin | v0.1.0-rc5, v0.1.0-rc3, v0.1.0-rc2 | all tests below; KVM runs used a development build before rc2, then the published v0.1.0-rc2, v0.1.0-rc3 and v0.1.0-rc5 artifacts; the other KubeSwift v0.16.2 runs used a development build of v0.1.0-rc5 (commit 7cb6d55); the KubeSwift v0.16.3 runs used the published v0.1.0-rc5 and a development build of v0.1.0-rc6 (commit 29d8bed) |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
-| KubeSwift | v0.16.2 | KVM e2e, rolling updates under traffic, startup benchmark, readiness startup and warm-pool functional checks on the lab cluster with the release images (below); contract test of `internal/sandboxapi` against the v0.16.2 Go types and CRDs; v0.16.2 sandbox CRDs in envtest. Required for readiness startup |
+| KubeSwift | v0.16.3 | KVM e2e, rolling updates under traffic, termination and `ingress-from` through deletion, re-creation under the same name, readiness startup, startup benchmark sanity check, with the release images (below); contract test of `internal/sandboxapi` against the v0.16.3 Go types and CRDs; v0.16.3 sandbox CRDs in envtest. The supported baseline |
+| KubeSwift | v0.16.2 | KVM e2e, rolling updates under traffic, startup benchmark, readiness startup and warm-pool functional checks on the lab cluster with the release images (below); until v0.1.0-rc5, contract test and envtest CRDs at v0.16.2 |
 | KubeSwift | v0.16.1 | KVM e2e, startup benchmark and warm-pool functional checks on the lab cluster (below); its sandbox API types and CRDs are unchanged from v0.16.0 (release diff), and the contract test then ran against v0.16.0 |
 | KubeSwift | v0.16.0 | KVM e2e on a lab cluster (below); until v0.1.0-rc4, contract test of `internal/sandboxapi` and envtest CRDs at v0.16.0 |
 | KubeSwift | v0.15.1 | legacy mode only: unit and envtest tests with a feature detector that reports no optional features. Legacy mode uses only the API subset that was contract-tested against v0.15.1 before the module moved to v0.16.0. Not run on a v0.15.1 cluster since the v0.16.0 integration. |
@@ -24,8 +25,9 @@ that ran; nothing else is implied.
 ### Startup latency
 
 Newer results (KubeSwift v0.16.2, v0.1.0-rc5 code, three readiness
-configurations) are in [performance.md](performance.md#current-results);
-the figures below are kept for comparison.
+configurations, and a KubeSwift v0.16.3 sanity check) are in
+[performance.md](performance.md#current-results); the figures below are kept
+for comparison.
 
 
 Measured with `make perf-startup` on the lab cluster below, with the
@@ -245,6 +247,55 @@ the v0.1.0-rc4 tag that first built it.
   sandbox.
 - The controller logged no error.
 
+### KubeSwift v0.16.3 (2026-10-11)
+
+Same cluster upgraded to the KubeSwift v0.16.3 release: chart `0.16.3`
+(`sha256:4c741057...`), controller `sha256:8ffb0b7b...`, swiftletd
+`sha256:904295d6...`, sandbox-materialize `sha256:76d69da6...`, all signed
+by the KubeSwift release workflow; the SwiftKernel stayed
+`kernels/sandbox:6.6.16` (`sha256:4305c3b3...`, Linux 6.6.158); the
+SwiftSandbox CRD has `spec.termination`.
+
+The published kubeswift-spin v0.1.0-rc5, unchanged, first:
+
+- The controller restarted cleanly on v0.16.3 and detected exposure,
+  secrets, egress and readiness startup.
+- `test/e2e/kvm-e2e.sh` passed every check of all nine phases: 23 in a run
+  of phases 1 and 2, and 55 in a run of phases 3 to 9 (each run with its
+  preflight checks). The second run used the test's `http` helpers with
+  retries (3, 1 second apart) for a refused connection, a timeout or a
+  transient HTTP error, because a request right after an endpoint turned
+  ready could reach a node whose kube-proxy had not programmed it yet: a
+  race in the test, not in kubeswift-spin. The
+  first cold start after the upgrade took 16.8 seconds to `Available`
+  (about 11 seconds afterwards): each node read the runtime image's layers
+  once (cache repository authorization). The private registry phase passed.
+- Rolling updates under traffic: see
+  [Zero-loss rolling updates](#zero-loss-rolling-updates).
+- Readiness startup: `auto`, `always` and `never` behaved as on v0.16.2,
+  with fast, slow and never-ready applications (see
+  [performance.md](performance.md#readiness-startup-kubeswift-v0162)).
+- A SpinApp deleted and created again at once under the same name: the old
+  sandbox drained under KubeSwift's termination finalizer and the new
+  sandbox started its own launcher afterwards. rc5 briefly reported
+  `SandboxConflict` meanwhile, which rc6 no longer does. With a plain
+  SwiftSandbox whose object was removed while its launcher was still
+  draining, the re-created sandbox waited with
+  `Resolved=False/PreviousLauncherStopping` and then got its own launcher
+  pod
+  ([kubeswift-io/kubeswift#772](https://github.com/kubeswift-io/kubeswift/issues/772)
+  fixed).
+- `ingress-from` through deletion: see
+  [security-model.md](security-model.md#network-isolation).
+
+kubeswift-spin v0.1.0-rc6 code (a development build of commit 29d8bed)
+then ran the same rolling update, isolation and re-creation scenarios
+(rolling updates in [Zero-loss rolling updates](#zero-loss-rolling-updates),
+isolation in [security-model.md](security-model.md#network-isolation)); the
+re-created SpinApp waited for its predecessor's sandbox without reporting
+`SandboxConflict`. `make verify-all` and `make kind-test WITH_SPIN_OPERATOR=1`
+passed.
+
 ### Zero-loss rolling updates
 
 KubeSwift v0.16.2, 2026-10-11. Method: an in-cluster client on another node
@@ -287,12 +338,51 @@ retried with backoff while the old replicas kept serving (`Available=True`,
 the same cluster lost 68 of 105,634 requests in one single-replica rollout
 and none with two replicas.
 
-These results depend on the KubeSwift v0.16.2 termination behavior
-described under [Known upstream issues](#known-upstream-issues): a
-deleted replica keeps serving until its grace period ends.
+These KubeSwift v0.16.2 results depended on its termination behavior
+described under [Known upstream issues](#known-upstream-issues): a deleted
+replica kept serving until its grace period ended. The KubeSwift v0.16.3
+runs below rely on its explicit drain instead.
+
+On KubeSwift v0.16.3 (2026-10-11), with the same method, KubeSwift drains
+each deleted replica explicitly (see
+[executor-contract.md](executor-contract.md#rolling-updates)). The client
+now counts a failure only after the same worker (one of eight) has had a
+success, so the start of the client pod itself is not counted; the published
+v0.1.0-rc5 counted it, and 24 failures in two of its runs were all in the
+first two seconds of the client, before any rollout.
+
+| Scenario | v0.1.0-rc5 (published), requests / failed | v0.1.0-rc6 code (commit 29d8bed), requests / failed |
+|---|---:|---:|
+| 4 rollouts, 1 replica, cold | 236,053 / 0 | 243,327 / 0 |
+| 3 rollouts, 2 replicas, cold | 290,805 / 0 | 287,267 / 0 |
+| 3 rollouts, 3 replicas, cold | 379,969 / 0 | 387,680 / 0 |
+| 3 rollouts, 2 replicas, warm pool | 176,031 / 0 | 169,586 / 0 |
+| 3 rollouts, 1 replica, a second spec change as soon as replica 0 was replaced | 270,916 / 0 | 271,092 / 0 |
+| scaling 1, 3, 1, 3, 1 | 132,760 / 0 | 188,625 / 0 |
+| a revision that never starts, held 90 s, then a fix, 1 replica | 239,142 / 8 (client start) | 238,523 / 0 |
+| the same with 2 replicas | 273,182 / 0 | 272,800 / 0 |
+| 2 rollouts with a controller restart 15 s into each | 177,131 / 16 (client start) | 177,619 / 0 |
+
+In every replacement of a serving replica that the watch recorded (49 with
+rc5, 50 with rc6; scale-downs and replicas replaced before they were ready
+are not counted) the old replica was deleted 1 to 276 ms after its
+replacement was ready, was marked not ready (`Terminating=Draining`) within
+91 ms of the deletion and left the ready endpoints within 17 ms of its
+launcher pod's deletion (where the watch recorded both), drained, and its
+launcher exited successfully 5.4 to 6.8 seconds after the deletion; the
+NetworkPolicy was removed 5 to 70 ms after the launcher exited. With the
+broken revision the surge replica failed and was retried with backoff while
+the old replicas kept serving and the SpinApp stayed `Available`.
 
 ### Not tested
 
+- On KubeSwift v0.16.3: a request longer than the 5-second drain during a
+  replacement (that it is cut follows from the KubeSwift source), a
+  launcher pod on an unreachable node (KubeSwift's release 30 seconds past
+  the grace period), `LauncherPodConflict`, a force-deleted launcher pod,
+  and downgrading KubeSwift after removing its finalizers. The 2-minute
+  `SandboxConflict` for a terminating same-named sandbox ran only in
+  envtest.
 - arm64 (images are built and published but not validated), other CNIs
   than Calico, other Kubernetes distributions, and more than one cluster.
 - A Wasm component actively trying to read guest files or credentials; the
@@ -326,7 +416,9 @@ read the SwiftSandbox features from it (see below).
 kubeswift-spin reads the OpenAPI v3 schema of `sandbox.kubeswift.io/v1alpha1`
 and uses a SwiftSandbox feature only when its fields are present. Exposure,
 secrets and egress first appear in KubeSwift v0.16.0, readiness startup in
-v0.16.2.
+v0.16.2 and termination in v0.16.3. KubeSwift v0.16.3 or later is the
+supported baseline: earlier releases lack the termination and launcher
+ownership behavior described below.
 
 | Feature | Detected when the schema has | Enables |
 |---|---|---|
@@ -334,8 +426,34 @@ v0.16.2.
 | secrets | `spec.secretFiles` (the same release honors `env[].valueFrom.secretKeyRef`) | `secretKeyRef` variables and runtime-config options, `runtimeConfig.loadFromSecret`, `imagePullSecrets` |
 | egress | `spec.network.egress` | `spin.kubeswift.io/egress-allow` |
 | readiness startup | `spec.readinessStartup` | replicas reported ready about when they first answer; `spin.kubeswift.io/readiness-startup` (see [executor-contract.md](executor-contract.md#readiness-startup)) |
+| termination | `spec.termination` | nothing to configure: kubeswift-spin reports the feature at startup and, on KubeSwift v0.16.0 to v0.16.2 (exposure detected, termination not), logs that KubeSwift is older than v0.16.3. KubeSwift drains and stops deleted replicas itself (see below) |
 
-On KubeSwift v0.16.0 and v0.16.1, readiness startup is not detected:
+KubeSwift v0.16.3 also changes behavior that kubeswift-spin relies on but
+does not configure, so no schema field marks it:
+
+- **Termination.** A deleted sandbox that exposes ports is taken out of
+  Service endpoints, keeps running for a drain (`spec.termination.drainPeriod`,
+  default 5 s), then has its microVM stopped; its launcher pod ends
+  `Succeeded`. kubeswift-spin does not set `drainPeriod`: every replica
+  exposes the Spin port, so the default applies, and leaving the spec
+  unchanged means upgrading kubeswift-spin replaces no replica.
+- **Isolation through termination.** The sandbox's NetworkPolicy is created
+  before its launcher pod and kept until the launcher has stopped.
+- **Launcher ownership.** A sandbox uses only a launcher pod it controls; a
+  sandbox re-created under the name of one whose launcher is still stopping
+  waits (`PreviousLauncherStopping`), and a live pod it does not control is
+  reported as `LauncherPodConflict` instead of being adopted.
+- **Cache repository authorization.** A node's cached runtime rootfs is used
+  for a repository only after that repository has served the image once.
+  After the upgrade, the first sandbox per runtime image repository on each
+  node reads the image's layers once.
+
+On KubeSwift v0.16.0 to v0.16.2, a deleted replica is not drained: it
+keeps serving until its launcher's 30-second grace period ends, its
+NetworkPolicy is removed while it can still serve, and a sandbox re-created
+under the same name can take over the old launcher pod (see
+[Known upstream issues](#known-upstream-issues)). On KubeSwift v0.16.0 and
+v0.16.1, readiness startup is not detected:
 readiness checks run at whole-second times, and
 `spin.kubeswift.io/readiness-startup: always` makes the executor invalid. On
 KubeSwift v0.15.1 none is detected. SpinApps then run without ports,
@@ -416,45 +534,44 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   ```
 
 - **KubeSwift v0.16.0 and v0.16.1 can hand out a warm-pool slot before its
-  guest is ready.** A slot counts as warm, and can be checked out, as soon as
-  its launcher container is running. A checkout in the first seconds after a
-  slot is created can fail with `ExecFailed`; kubeswift-spin then replaces the
-  sandbox after the failure backoff, and the replacement is usually served by
-  the same pool. Observed twice, each time on the first checkout of a newly
-  created pool: during the v0.1.0-rc3 validation (v0.16.0) and in the KVM e2e
-  run of 2026-10-09 (v0.16.1). The v0.16.2 release notes list no change
-  for it. Create pools some time before relying on warm starts.
+  guest is ready** (`ExecFailed` not observed on v0.16.2 or v0.16.3, and
+  not listed as fixed). A slot counts as warm, and can be checked out, as soon
+  as its launcher container is running. A checkout in the first seconds
+  after a slot is created can fail with `ExecFailed`; kubeswift-spin then
+  replaces the sandbox after the failure backoff, and the replacement is
+  usually served by the same pool. Observed twice, each time on the first
+  checkout of a newly created pool: during the v0.1.0-rc3 validation
+  (v0.16.0) and in the KVM e2e run of 2026-10-09 (v0.16.1). The v0.16.2 and
+  v0.16.3 release notes list no change for it. In the e2e runs the first
+  checkout of a newly created pool took 35.1 and 35.3 seconds to
+  `Available` on v0.16.2 and 12.2 seconds on v0.16.3, against about 1.5
+  seconds from an established pool. Create pools some time before relying
+  on warm starts.
 - **KubeSwift v0.16.0 and v0.16.1 log write conflicts as `Reconciler
   error`** at error level, although they retry them and converge (seen
   during the v0.16.1 benchmark runs)
   ([kubeswift-io/kubeswift#758](https://github.com/kubeswift-io/kubeswift/issues/758)).
   Do not alert on those lines alone.
-- **KubeSwift v0.16.2 attaches a new SwiftSandbox to a terminating launcher
-  pod that has its name.** KubeSwift finds a cold-started sandbox's launcher
-  pod by the sandbox's name and does not check that the pod belongs to that
-  sandbox (a sandbox that claims a warm slot uses the slot's pod). When a
-  SwiftSandbox is deleted with background propagation (the `kubectl delete`
-  default, and what deleting a SpinApp does to its sandboxes), the object
-  disappears at once while its launcher pod keeps running for up to 30
-  seconds. A sandbox created with the same name in that window reports the
-  old pod's state, including `Running` and ready, and turns `Failed` when
-  that pod exits; kubeswift-spin then replaces it after the failure backoff.
-  Observed on the lab cluster when a SpinApp was deleted and created again
-  with the same name within 30 seconds: the new SpinApp was `Available` on
-  the previous app's terminating replica, then had no ready replica until
-  the replacement started. kubeswift-spin's own replacements use foreground
-  deletion and are not affected. Delete SpinApps and SwiftSandboxes with
-  `--cascade=foreground` before re-creating them under the same name
-  ([kubeswift-io/kubeswift#772](https://github.com/kubeswift-io/kubeswift/issues/772)).
-- **KubeSwift v0.16.2 keeps a deleted sandbox's guest running until the
-  launcher's termination grace period ends.** swiftletd answers SIGTERM by
-  pressing the guest's ACPI power button, which the sandbox guest ignores,
-  so the launcher is killed after 30 seconds and its pod ends in phase
-  `Failed`. Every deleted replica therefore takes about 30 seconds to
-  disappear. kubeswift-spin's rolling updates without failed requests (in
-  the lab runs) currently depend on this, because the old replica keeps
-  serving while kube-proxy catches up; a bounded drain is proposed in
-  [kubeswift-sandbox-termination-drain.md](upstream/kubeswift-sandbox-termination-drain.md).
+- **KubeSwift v0.16.2 and earlier attach a new SwiftSandbox to a terminating
+  launcher pod that has its name** (fixed in v0.16.3,
+  [kubeswift-io/kubeswift#772](https://github.com/kubeswift-io/kubeswift/issues/772)).
+  KubeSwift found a cold-started sandbox's launcher pod by the sandbox's
+  name and did not check that the pod belonged to that sandbox. A SpinApp
+  deleted and created again under the same name within 30 seconds was
+  `Available` on the previous app's terminating replica, then had no ready
+  replica until the replacement started. On those releases, delete SpinApps
+  and SwiftSandboxes with `--cascade=foreground` before re-creating them
+  under the same name.
+- **KubeSwift v0.16.2 and earlier keep a deleted sandbox's guest running
+  until the launcher's termination grace period ends, and remove its
+  NetworkPolicy at once** (fixed in v0.16.3). swiftletd answered SIGTERM by
+  pressing the guest's ACPI power button, which the guest ignores, so the
+  launcher was killed after 30 seconds and ended `Failed`; meanwhile the
+  replica's port was reachable from any pod in the cluster (see
+  [security-model.md](security-model.md#network-isolation)). Rolling updates
+  without failed requests on those releases depended on this accidental
+  drain. KubeSwift v0.16.3 drains and stops deleted sandboxes explicitly
+  (see [KubeSwift features](#kubeswift-features)).
 
 ## Upgrading upstream versions
 
@@ -474,6 +591,14 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   re-reads the schema at most every `--capability-refresh` (default 5
   minutes) and renders the new spec at the next reconcile of each SpinApp;
   restarting the controller applies it at once.
+- **Upgrading KubeSwift to v0.16.3** changes no SwiftSandbox that
+  kubeswift-spin renders, so it replaces no replica. Apply the v0.16.3 CRDs
+  as its upgrade notes say. Its controller adds finalizers to every
+  SwiftSandbox and launcher NetworkPolicy; remove them before downgrading
+  KubeSwift, as its release notes describe. The first start of the runtime
+  image on each node after the upgrade reads the image's layers from the
+  registry once (cache repository authorization), so it takes about as long
+  as a pull.
 - **Upgrading KubeSwift to v0.16.2** with kubeswift-spin v0.1.0-rc5 or
   later gives replicas without a readiness check `spec.readinessStartup`
   (with the default `auto`; every replica with `always`) and replaces them

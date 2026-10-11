@@ -117,15 +117,19 @@ E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.1.0-rc5 E2E_WARM_POOL=1 E2E_SCR
 ## Lab result
 
 On 2026-10-05 the script passed every check with all nine phases
-(`E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh`) on a k0s Kubernetes
-v1.34.3 cluster with three linux/amd64 nodes (two kernel nodes with KVM)
-and Calico, KubeSwift v0.16.0, cert-manager v1.21.1 and Spin Operator
-v0.6.1, with a kubeswift-spin development build from `charts/kubeswift-spin`.
-The timings are in
+(`E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh`) on a k0s Kubernetes v1.34.3
+cluster with three linux/amd64 nodes (two kernel nodes with KVM) and Calico,
+KubeSwift v0.16.0, cert-manager v1.21.1 and Spin Operator v0.6.1, with a
+kubeswift-spin development build from `charts/kubeswift-spin`. The timings
+are in
 [compatibility.md](../../docs/compatibility.md#kvm-e2e-lab-run-2026-10-05).
 On 2026-10-09 it passed all 75 checks again on the same cluster with
 KubeSwift v0.16.1 and the published v0.1.0-rc3 artifacts (see
 [compatibility.md](../../docs/compatibility.md#kubeswift-v0161-2026-10-08-and-2026-10-09)).
+On 2026-10-11 it passed all checks on the same cluster with KubeSwift
+v0.16.2 (75 checks) and KubeSwift v0.16.3 (23 checks for phases 1 and 2, 55
+for phases 3 to 9, the latter with the retrying HTTP helpers); see
+[compatibility.md](../../docs/compatibility.md#kubeswift-v0163-2026-10-11).
 Not covered: arm64.
 
 ## CI

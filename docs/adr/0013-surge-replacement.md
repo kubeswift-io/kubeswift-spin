@@ -100,3 +100,19 @@ the old name while the old sandbox still exists.
   delete-then-create.
 - A controller restart resumes from the observed sandboxes and labels; the
   planner keeps no state of its own.
+
+## Update (KubeSwift v0.16.3, 2026-10-11)
+
+Old replicas leave the Service through KubeSwift's termination, not through
+anything kubeswift-spin does. From KubeSwift v0.16.3 a deleted sandbox is
+taken out of Service endpoints, drains for `spec.termination.drainPeriod`
+(kubeswift-spin leaves the default of 5 seconds for exposed sandboxes) while
+kube-proxy catches up, and then has its microVM stopped; its NetworkPolicy
+stays until the launcher has stopped. kubeswift-spin adds no sleep, drain or
+endpoint handling of its own. The reliance on the guest ignoring the ACPI
+power button and the NetworkPolicy window described above apply to KubeSwift
+v0.16.2 and earlier only. KubeSwift v0.16.3 is therefore the supported
+baseline; the proposal was
+[kubeswift-sandbox-termination-drain.md](../upstream/kubeswift-sandbox-termination-drain.md).
+A request still running when the 5-second drain ends is cut, where v0.16.2
+let it run for up to about 30 seconds.

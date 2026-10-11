@@ -1,6 +1,11 @@
 # KubeSwift requirement: a bounded drain when an exposed sandbox is deleted
 
-Status: proposal; not implemented in KubeSwift v0.16.2.
+Status: implemented in KubeSwift v0.16.3
+([kubeswift-io/kubeswift#774](https://github.com/kubeswift-io/kubeswift/pull/774)):
+`spec.termination.drainPeriod` (default 5 s for sandboxes that expose
+ports), an explicit microVM stop after the drain, and the NetworkPolicy kept
+until the launcher has stopped. kubeswift-spin uses the default and sets
+nothing. The text below is the original proposal, written against v0.16.2.
 
 ## Problem
 

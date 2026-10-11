@@ -10,6 +10,7 @@ import (
 	eventsv1 "k8s.io/api/events/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -976,4 +977,95 @@ func TestRejectedSurgeKeepsTheOldReplicaAndRecovers(t *testing.T) {
 	}
 	expectSandboxes(t, ns, "hello-0", "hello-1")
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonRollingUpdate)
+}
+
+// predecessorSandbox is a sandbox left by a deleted SpinApp named app (another
+// UID), still held by KubeSwift's termination finalizer.
+func predecessorSandbox(t *testing.T, ns, app, name string, owned bool) *sandboxv1alpha1.SwiftSandbox {
+	t.Helper()
+	sb := &sandboxv1alpha1.SwiftSandbox{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: translate.Labels(app, "kubeswift", "deadbeef00", 0),
+			Finalizers: []string{"kubeswift.io/sandbox-termination"}},
+		Spec: sandboxv1alpha1.SwiftSandboxSpec{Image: "ghcr.io/example/old:v1", Memory: resource.MustParse("512Mi")},
+	}
+	if owned {
+		sb.OwnerReferences = []metav1.OwnerReference{{APIVersion: spinv1alpha1.GroupVersion.String(), Kind: "SpinApp",
+			Name: app, UID: "00000000-0000-0000-0000-000000000001", Controller: ptr.To(true)}}
+	}
+	mustCreate(t, sb)
+	if err := testClient.Delete(ctx, sb); err != nil {
+		t.Fatal(err)
+	}
+	return sb
+}
+
+func releaseFinalizer(t *testing.T, ns, name string) {
+	t.Helper()
+	sb := getSandbox(t, ns, name)
+	sb.Finalizers = nil
+	if err := testClient.Update(ctx, sb); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// KubeSwift v0.16.3 keeps a deleted sandbox under a termination finalizer
+// until its launcher has stopped. A SpinApp re-created under the same name
+// waits for its predecessor's sandbox instead of reporting a conflict, and
+// creates its own once the name is free.
+func TestTerminatingSandboxOfTheSameNameIsWaitedFor(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	old := predecessorSandbox(t, ns, "hello", "hello-0", true)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	consistently(t, "no conflict reported while the old sandbox terminates", 1500*time.Millisecond, func() error {
+		if c := findCond(getApp(t, ns, "hello"), status.TypeProgressing); c != nil && c.Reason == status.ReasonSandboxConflict {
+			return fmt.Errorf("conflict reported: %s", c.Message)
+		}
+		if sb := getSandbox(t, ns, "hello-0"); sb.UID != old.UID {
+			return fmt.Errorf("old sandbox replaced early")
+		}
+		return nil
+	})
+	releaseFinalizer(t, ns, "hello-0")
+	app := getApp(t, ns, "hello")
+	start := time.Now()
+	eventually(t, "hello-0 created by the SpinApp", func() error {
+		var sb sandboxv1alpha1.SwiftSandbox
+		if err := testClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "hello-0"}, &sb); err != nil {
+			return err
+		}
+		if !metav1.IsControlledBy(&sb, app) {
+			return fmt.Errorf("not owned yet")
+		}
+		return nil
+	})
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("created %s after the name was free", d)
+	}
+}
+
+// A predecessor's sandbox that stays far longer than KubeSwift allows (its
+// controller down, a foreign finalizer) is reported, naming its finalizers.
+func TestStuckTerminatingSandboxIsReported(t *testing.T) {
+	startManager(t, harnessOpts{leavingTimeout: 2 * time.Second})
+	ns := newNamespace(t)
+	predecessorSandbox(t, ns, "hello", "hello-0", true)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxConflict)
+	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, "has been terminating for") || !strings.Contains(m, "kubeswift.io/sandbox-termination") {
+		t.Fatalf("message %q", m)
+	}
+	releaseFinalizer(t, ns, "hello-0")
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxCreating)
+}
+
+// A terminating sandbox that no same-named SpinApp owned is a conflict at
+// once, as any foreign object is.
+func TestTerminatingForeignSandboxIsAConflict(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	predecessorSandbox(t, ns, "hello", "hello-0", false)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxConflict)
+	releaseFinalizer(t, ns, "hello-0")
 }

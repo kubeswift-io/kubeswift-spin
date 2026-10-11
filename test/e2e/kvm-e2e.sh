@@ -120,8 +120,13 @@ start_client() {
   $K run e2e-client --restart=Never --image="$CURL_IMAGE" --command -- sleep 3600 >/dev/null
   $K wait --for=condition=Ready pod/e2e-client --timeout=120s >/dev/null
 }
-http() { $K exec e2e-client -- curl -sS --max-time 10 "$@"; }
-http_code() { $K exec e2e-client -- curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@"; }
+# A request right after an endpoint turns ready can reach a node whose
+# kube-proxy has not programmed it yet (up to its minSyncPeriod, 1 s by
+# default): retry a refused connection. curl's --retry also retries timeouts
+# and HTTP 408, 429 and 5xx, which these checks of a working app tolerate.
+# Checks that must fail use code_from, and the traffic loop plain curl.
+http() { $K exec e2e-client -- curl -sS --max-time 10 --retry 3 --retry-delay 1 --retry-connrefused "$@"; }
+http_code() { $K exec e2e-client -- curl -s -o /dev/null -w '%{http_code}' --max-time 10 --retry 3 --retry-delay 1 --retry-connrefused "$@"; }
 code_from() {
   local pod="$1" t="$2"
   shift 2

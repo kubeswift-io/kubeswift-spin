@@ -30,7 +30,15 @@ kubectl -n kubeswift-spin-system logs deploy/kubeswift-spin | grep "SwiftSandbox
 ```
 
 `exposure`, `secrets` and `egress` are all `true` on KubeSwift v0.16.0 and
-all `false` on v0.15.1.
+all `false` on v0.15.1; `readinessStartup` is `true` from v0.16.2 and
+`termination` from v0.16.3. On v0.16.0 to v0.16.2 the controller also logs
+a line saying that KubeSwift is older than v0.16.3: upgrade it, because
+deleted replicas are then not drained and lose their NetworkPolicy while
+they can still serve.
+
+```bash
+kubectl -n kubeswift-spin-system logs deploy/kubeswift-spin | grep "older than v0.16.3"
+```
 
 ## The SpinApp is refused by admission
 
@@ -66,10 +74,10 @@ their SpinApp status.
 | `ExecutorInvalid` | The message lists every problem with the executor: `createDeployment: true`, `deploymentConfig` fields (including `caCertSecret`), unknown `spin.kubeswift.io/` annotations, network mode `none`, `egress-allow` with network mode `open`, `egress-allow` or `ingress-from` on KubeSwift before v0.16.0, invalid values. |
 | `ExecutorNotFound` | The executor was deleted. Existing sandboxes keep running; recreate the executor. |
 | `WarmPoolIncompatible` | The pool is missing or its shape differs; the message names each mismatching field. Align the pool with the runtime image, CPU, memory, network mode, `network.ports` (on KubeSwift v0.16.0, `http-app` port 3000), egress allowlist and ingress peers the SpinApp gets (see [executor-contract.md](executor-contract.md#warm-pools)). The image must be the exact reference in the controller's `--runtime-image` argument; the released chart passes it by digest, so a tag does not match. If the message says the SwiftSandboxPool API was not installed at startup, restart the controller. |
-| `SandboxConflict` | A SwiftSandbox with the needed name exists and is not owned by the SpinApp. Delete or rename it. |
+| `SandboxConflict` | A SwiftSandbox with the needed name exists and is not owned by the SpinApp. Delete or rename it. A sandbox left by a deleted SpinApp of the same name is waited for while KubeSwift terminates it; if it is still there 2 minutes after its deletion started, the message names its finalizers: check that the KubeSwift controller is running. |
 | `SandboxRejected` | The API server refused to create a SwiftSandbox: `Forbidden` (HTTP 403, for example a ResourceQuota on `count/swiftsandboxes.sandbox.kubeswift.io`) or `Invalid` (HTTP 422, for example an admission policy). The controller log has the full error, logged at the first refusal. A quota must leave room for `replicas + 1` sandboxes during a rolling update. The SpinApp is requeued after 10 seconds, doubling per consecutive refusal up to 5 minutes; an earlier change to the SpinApp or its sandboxes also retries. A pod quota that refuses the launcher pod appears as a KubeSwift reason on the sandbox instead. |
 | `RuntimeImageUnavailable` | KubeSwift could not pull, verify or materialize the runtime image. Check the image reference, pull secret and cosign key. |
-| `SandboxFailed` | Spin exited or the guest failed. Read the guest console (below). The replica is replaced after a backoff of up to 5 minutes. If the SpinApp was deleted and created again under the same name less than 30 seconds earlier, the sandbox may have been attached to the previous replica's terminating launcher pod (a KubeSwift v0.16.2 issue, see [compatibility.md](compatibility.md#known-upstream-issues)); delete with `--cascade=foreground` before re-creating. |
+| `SandboxFailed` | Spin exited or the guest failed. Read the guest console (below). The replica is replaced after a backoff of up to 5 minutes. If the SpinApp was deleted and created again under the same name less than 30 seconds earlier, the sandbox may have been attached to the previous replica's terminating launcher pod (a KubeSwift v0.16.2 and earlier issue, fixed in v0.16.3, see [compatibility.md](compatibility.md#known-upstream-issues)); delete with `--cascade=foreground` before re-creating. |
 
 ## Sandboxes stay Pending
 
@@ -78,6 +86,12 @@ The `Progressing` message carries KubeSwift's reason:
 - `KernelNotFound` or `KernelNotReady`: create a SwiftKernel named
   `sandbox` (or the executor's kernel profile) in the SpinApp's namespace
   and wait until it is `Ready`.
+- `PreviousLauncherStopping` (KubeSwift v0.16.3): a launcher pod with the
+  sandbox's name, left by a deleted sandbox, is still stopping; the sandbox
+  starts its own launcher once that pod is gone, normally within seconds.
+- `LauncherPodConflict` (KubeSwift v0.16.3): a pod with the sandbox's name
+  that is not terminating belongs to something else. KubeSwift does not
+  adopt it; delete that pod, or re-create the SpinApp under another name.
 - No reason, pod unschedulable: no node is labelled
   `kubeswift.io/kernel-node=true`, or the executor's node selector matches
   none. Check the launcher pod, which has the sandbox's name:

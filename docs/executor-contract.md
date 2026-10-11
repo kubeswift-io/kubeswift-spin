@@ -418,13 +418,21 @@ sandboxes; every transition below is covered by unit and envtest tests.
   pod, runtime-intent ConfigMap and NetworkPolicy are gone.
 - **Stale sandboxes**: an owned sandbox whose name does not match its
   ordinal label is deleted.
-- **Conflicts**: if a sandbox name is taken by an object the SpinApp does not
-  control (checked with a direct API read, not the cache), that ordinal is
-  not created and `Progressing` reports `SandboxConflict`. This includes the
-  surge name `<spinapp>-<replicas>`: a foreign object with that name stalls
-  rollouts, while the existing replicas keep serving. The SpinApp is
+- **Conflicts**: if a sandbox name is taken by an object the SpinApp does
+  not control (checked with a direct API read, not the cache), that ordinal
+  is not created and `Progressing` reports `SandboxConflict`. This includes
+  the surge name `<spinapp>-<replicas>`: a foreign object with that name
+  stalls rollouts, while the existing replicas keep serving. The SpinApp is
   rechecked every 30 seconds, so the replica is created once the name is
-  free.
+  free. One case is not a conflict: a sandbox that is being deleted and is
+  controlled by an earlier SpinApp with the same name (another UID), as left
+  when a SpinApp is deleted and created again while KubeSwift still
+  terminates its sandbox. The SpinApp then waits with `Progressing=True`
+  (`SandboxCreating`), rechecking at least every 5 seconds, and creates its
+  replica once the name is free. If the old sandbox is still there 2 minutes
+  after its deletion started, `Progressing` reports `SandboxConflict` with
+  the sandbox's finalizers, which usually means the KubeSwift controller is
+  not running. Any other terminating object is a conflict at once.
 
 While a SpinApp has unsupported configuration, an invalid executor or an
 incompatible warm pool, kubeswift-spin creates and deletes nothing for it;
@@ -473,14 +481,44 @@ SwiftSandboxes with `--cascade=foreground`, including the surge replica
 current one (`spec.replicas: 0` is not supported; see
 [security-model.md](security-model.md#denial-of-service-and-capacity)).
 
-A deleted replica leaves the SpinApp Service when its launcher pod starts
-terminating. On KubeSwift v0.16.2 the guest keeps serving until the
-launcher's 30-second termination grace period ends, so connections that
-kube-proxy still routes to it in the meantime succeed. kubeswift-spin relies
-on that; an explicit drain is proposed upstream in
-[kubeswift-sandbox-termination-drain.md](upstream/kubeswift-sandbox-termination-drain.md).
-Each replaced replica therefore takes about 30 seconds to disappear, and its
-launcher pod ends in phase `Failed`.
+KubeSwift owns what happens to a deleted replica; kubeswift-spin only
+deletes it. On KubeSwift v0.16.3 or later, deleting a replica's
+SwiftSandbox:
+
+1. sets its readiness to false and takes it out of the SpinApp Service's
+   ready endpoints, while the workload keeps running;
+2. keeps the workload serving for the drain period
+   (`spec.termination.drainPeriod`; kubeswift-spin leaves it unset, so
+   KubeSwift's default of 5 seconds for sandboxes with exposed ports
+   applies), meant to cover kube-proxy's next rule sync on every node
+   (`minSyncPeriod` is 1 second by default). Requests still running when the
+   drain ends are cut: a request that takes longer than about 5 seconds can
+   fail when its replica is replaced, scaled down or deleted (on KubeSwift
+   v0.16.2 and earlier such a request had up to about 30 seconds);
+3. stops the microVM; the launcher pod exits and ends `Succeeded`;
+4. removes the NetworkPolicy and the SwiftSandbox only after the launcher
+   has stopped (KubeSwift lets the SwiftSandbox go anyway 30 seconds after
+   the launcher's grace period, for example when its node is unreachable;
+   the NetworkPolicy stays until the pod is gone).
+
+In the KubeSwift v0.16.3 rolling-update runs
+([compatibility.md](compatibility.md#zero-loss-rolling-updates)) the old
+replica was marked not ready within 91 ms of its deletion, left the ready
+endpoints within 17 ms of its launcher pod's deletion, and its launcher
+exited 5.4 to 6.8 seconds after the deletion (the 5-second drain, then the
+stop); its NetworkPolicy was removed 5 to 70 ms after the launcher exited,
+and the SwiftSandbox was gone 5.6 to 7.1 seconds after the deletion. The
+SwiftSandbox `Terminating` condition reports `Draining`, then `Stopping` (or
+`LauncherGone` if the pod is already gone); KubeSwift computes the time of
+`Stopping` from the pod's deletion timestamp, which has one-second
+resolution, so the condition can change up to a second before the drain in
+the launcher ends.
+
+On KubeSwift v0.16.2 and earlier there is no explicit drain: the guest keeps
+serving until the launcher's 30-second termination grace period ends, the
+launcher pod ends `Failed`, and the NetworkPolicy is removed while the
+replica can still serve (see
+[compatibility.md](compatibility.md#known-upstream-issues)).
 
 Measured on the lab cluster with continuous traffic through the SpinApp
 Service (new connection per request): see
@@ -636,7 +674,7 @@ v0.15.1 sandboxes have no probe, so `readyReplicas` stays 0.
 | Progressing | False | `ExecutorInvalid` | the executor profile is invalid |
 | Progressing | False | `ExecutorNotFound` | the executor no longer exists |
 | Progressing | False | `WarmPoolIncompatible` | the selected pool is missing or has another shape |
-| Progressing | False | `SandboxConflict` | a sandbox name is taken by a foreign object |
+| Progressing | False | `SandboxConflict` | a sandbox name is taken by a foreign object, or by a deleted same-named SpinApp's sandbox still terminating after 2 minutes |
 | Progressing | False | `SandboxRejected` | the API server refused to create a sandbox (Forbidden or Invalid), for example a ResourceQuota |
 | Progressing | False | `RuntimeImageUnavailable` | KubeSwift could not pull, verify or materialize the runtime image |
 | Progressing | False | `SandboxFailed` | Spin exited or the guest failed; the replica is replaced after backoff |

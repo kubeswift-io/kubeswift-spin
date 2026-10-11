@@ -114,8 +114,9 @@ type harness struct {
 }
 
 type harnessOpts struct {
-	detector    capabilities.SandboxDetector
-	maxReplicas int32
+	detector       capabilities.SandboxDetector
+	maxReplicas    int32
+	leavingTimeout time.Duration
 }
 
 func startManager(t *testing.T, o harnessOpts) *harness {
@@ -157,6 +158,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		PoolsServed:    true,
 		Backoff:        b,
 		WaitingRequeue: 500 * time.Millisecond,
+		LeavingTimeout: o.leavingTimeout,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := r.SetupWithManager(ctx, mgr); err != nil {
