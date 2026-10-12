@@ -267,6 +267,7 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 	if len(s.VolumeMounts) > 0 {
 		block("volumeMounts", Unsupported, "spec.volumeMounts is not supported: KubeSwift mounts only Secret files and OCI artifacts into a sandbox")
 	}
+	analyzeAnnotations(app.Annotations, o.Features, block, note)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Field != out[j].Field {
@@ -435,6 +436,40 @@ func validateAppImage(ref string) error {
 		return fmt.Errorf("must start with a registry host, for example ghcr.io/org/app:tag or docker.io/org/app:tag")
 	}
 	return nil
+}
+
+// AppAnnotations are the spin.kubeswift.io/ annotations kubeswift-spin
+// reads on a SpinApp. docs/compatibility.md lists them.
+var AppAnnotations = []string{executor.AnnDrainPeriod}
+
+// annotationsField is the Finding field (and metric label) for SpinApp
+// annotations.
+const annotationsField = "metadata.annotations"
+
+// analyzeAnnotations checks the SpinApp's spin.kubeswift.io/ annotations.
+// An unknown key only warns: kubeswift-spin v0.1.0 read no SpinApp
+// annotation, and existing SpinApps must keep reconciling.
+func analyzeAnnotations(ann map[string]string, f capabilities.Sandbox, block, note func(string, Level, string, ...any)) {
+	keys := make([]string, 0, len(ann))
+	for k := range ann {
+		if strings.HasPrefix(k, executor.Prefix) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		switch k {
+		case executor.AnnDrainPeriod:
+			if _, err := executor.ParseDrainPeriod(ann[k]); err != nil {
+				block(annotationsField, Unsupported, "annotation %s %v", k, err)
+			} else if !f.Termination {
+				block(annotationsField, Unsupported, "annotation %s needs spec.termination, KubeSwift v0.16.3 or later", k)
+			}
+		default:
+			note(annotationsField, Unsupported, "annotation %s is not a kubeswift-spin SpinApp annotation and is ignored; known: %s",
+				quoteName(k), strings.Join(AppAnnotations, ", "))
+		}
+	}
 }
 
 // Blocking reports whether any finding blocks reconciliation.

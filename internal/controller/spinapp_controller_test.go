@@ -1105,6 +1105,55 @@ func TestDrainPeriodAnnotation(t *testing.T) {
 	}
 }
 
+// A SpinApp's own drain-period annotation overrides the executor's, and
+// changing it rolls the replicas to the new value.
+func TestSpinAppDrainPeriodOverridesExecutor(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	app := spinApp(ns, "hello", "kubeswift", 1)
+	app.Annotations = map[string]string{executor.AnnDrainPeriod: "10s"}
+	mustCreate(t, managedExecutor(ns, "kubeswift", map[string]string{executor.AnnDrainPeriod: "30s"}), app)
+	expectSandboxes(t, ns, "hello-0")
+	if d := getSandbox(t, ns, "hello-0").Spec.Termination; d == nil || d.DrainPeriod == nil || d.DrainPeriod.Duration != 10*time.Second {
+		t.Fatalf("termination %+v, want the SpinApp's 10s", d)
+	}
+	setReady(t, ns, "hello-0")
+	// An annotation edit does not change the generation; it must still
+	// roll the replica, through a surge replica with the executor's 30s.
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { delete(a.Annotations, executor.AnnDrainPeriod) })
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	if d := getSandbox(t, ns, "hello-1").Spec.Termination; d == nil || d.DrainPeriod == nil || d.DrainPeriod.Duration != 30*time.Second {
+		t.Fatalf("surge replica termination %+v, want the executor's 30s", d)
+	}
+}
+
+// An invalid SpinApp drain-period is reported before any sandbox exists.
+func TestInvalidSpinAppDrainPeriod(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	app := spinApp(ns, "hello", "kubeswift", 1)
+	app.Annotations = map[string]string{executor.AnnDrainPeriod: "11m"}
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), app)
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonUnsupportedConfiguration)
+	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, executor.AnnDrainPeriod) || !strings.Contains(m, "10m") {
+		t.Fatalf("message %q", m)
+	}
+	if n := len(listSandboxes(t, ns)); n != 0 {
+		t.Fatalf("%d sandboxes for an invalid SpinApp", n)
+	}
+}
+
+// Without any drain-period the field stays unset, as in v0.1.0.
+func TestNoDrainPeriodLeavesTerminationUnset(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	if d := getSandbox(t, ns, "hello-0").Spec.Termination; d != nil {
+		t.Fatalf("termination %+v, want unset", d)
+	}
+}
+
 func TestDrainPeriodNeedsKubeSwiftTermination(t *testing.T) {
 	v0162 := capabilities.Static{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true, ReadinessStartup: true}
 	startManager(t, harnessOpts{detector: v0162})

@@ -359,3 +359,62 @@ func TestDrainPeriod(t *testing.T) {
 		t.Fatalf("err = %v, want one naming %s", err, executor.AnnDrainPeriod)
 	}
 }
+
+// The SpinApp annotation takes precedence over the executor's, and absent
+// both the field stays unset.
+func TestDrainPeriodPrecedence(t *testing.T) {
+	v163 := v16
+	v163.ReadinessStartup = true
+	v163.Termination = true
+	thirty := 30 * time.Second
+	withAnn := func(v string) *spinv1alpha1.SpinApp {
+		a := testApp()
+		a.Annotations = map[string]string{executor.AnnDrainPeriod: v}
+		return a
+	}
+	exec30 := testProfile()
+	exec30.DrainPeriod = &thirty
+	for _, c := range []struct {
+		name string
+		app  *spinv1alpha1.SpinApp
+		p    *executor.Profile
+		want *time.Duration
+	}{
+		{"neither", testApp(), testProfile(), nil},
+		{"executor only", testApp(), exec30, &thirty},
+		{"SpinApp only", withAnn("10s"), testProfile(), ptr(10 * time.Second)},
+		{"SpinApp over executor", withAnn("10s"), exec30, ptr(10 * time.Second)},
+		{"SpinApp 0s over executor", withAnn("0s"), exec30, ptr(time.Duration(0))},
+	} {
+		got, err := DrainPeriod(c.app, c.p)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+			t.Fatalf("%s: got %v, want %v", c.name, got, c.want)
+		}
+		tmpl, err := BuildTemplate(c.app, c.p, DefaultResourcePolicy(), v163)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if c.want == nil {
+			if tmpl.Spec.Termination != nil {
+				t.Fatalf("%s: termination %+v, want unset", c.name, tmpl.Spec.Termination)
+			}
+			continue
+		}
+		if tmpl.Spec.Termination == nil || tmpl.Spec.Termination.DrainPeriod == nil || tmpl.Spec.Termination.DrainPeriod.Duration != *c.want {
+			t.Fatalf("%s: termination %+v", c.name, tmpl.Spec.Termination)
+		}
+	}
+	for _, v := range []string{"0", "-5s", "11m", "soon"} {
+		if _, err := BuildTemplate(withAnn(v), testProfile(), DefaultResourcePolicy(), v163); err == nil || !strings.Contains(err.Error(), executor.AnnDrainPeriod) {
+			t.Fatalf("%q: err = %v", v, err)
+		}
+	}
+	if _, err := BuildTemplate(withAnn("10s"), testProfile(), DefaultResourcePolicy(), v16); err == nil {
+		t.Fatal("SpinApp drain period rendered without spec.termination")
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

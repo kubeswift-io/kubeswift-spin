@@ -231,6 +231,17 @@ When exposure is detected, a SpinApp name longer than 52 characters is
 rejected: the label `core.spinkube.dev/app.<name>.status` that the SpinApp
 Service selects would exceed the 63-character limit of a label name.
 
+## SpinApp annotations
+
+kubeswift-spin reads one annotation on a SpinApp. An invalid value stops
+reconciliation like an unsupported field (`UnsupportedConfiguration`). Any
+other annotation under `spin.kubeswift.io/` is reported in a Warning Event
+and otherwise ignored, so SpinApps that reconciled before keep doing so.
+
+| Annotation | Effect |
+|---|---|
+| `spin.kubeswift.io/drain-period` | The replicas' `spec.termination.drainPeriod`, overriding the executor's annotation of the same name; a duration with units from `0s` to `10m`. Needs KubeSwift v0.16.3 or later. See [executor-contract.md](executor-contract.md#rolling-updates). |
+
 ## SpinAppExecutor field support
 
 | Field | Handling |

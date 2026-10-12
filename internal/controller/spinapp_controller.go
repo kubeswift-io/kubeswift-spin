@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -131,7 +133,7 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 
 	b := ctrl.NewControllerManagedBy(mgr).
 		Named("spinapp").
-		For(&spinv1alpha1.SpinApp{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&spinv1alpha1.SpinApp{}, builder.WithPredicates(predicate.Or[client.Object](predicate.GenerationChangedPredicate{}, appAnnotationsChanged))).
 		Owns(&sandboxv1alpha1.SwiftSandbox{}).
 		Watches(&spinv1alpha1.SpinAppExecutor{}, handler.EnqueueRequestsFromMapFunc(r.appsForExecutor))
 	if r.PoolsServed {
@@ -463,6 +465,28 @@ func rejectionReason(err error) (string, bool) {
 		return "Invalid", true
 	}
 	return "", false
+}
+
+// appAnnotationsChanged lets an update through when a spin.kubeswift.io/
+// annotation of the SpinApp changed: such an edit does not change the
+// generation, which GenerationChangedPredicate looks at.
+var appAnnotationsChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		if e.ObjectOld == nil || e.ObjectNew == nil {
+			return false
+		}
+		return !maps.Equal(kubeswiftAnnotations(e.ObjectOld.GetAnnotations()), kubeswiftAnnotations(e.ObjectNew.GetAnnotations()))
+	},
+}
+
+func kubeswiftAnnotations(ann map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range ann {
+		if strings.HasPrefix(k, executor.Prefix) {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // leavingTimeout is how long a predecessor's terminating sandbox may hold a

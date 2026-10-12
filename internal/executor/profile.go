@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -72,15 +73,41 @@ const (
 	// the check kubeswift-spin adds when a SpinApp sets none, "always" also
 	// for a SpinApp's own readiness check, "never" for none.
 	AnnReadinessStartup = Prefix + "readiness-startup"
-	// AnnDrainPeriod is how long a deleted replica keeps serving after it
-	// has left Service endpoints, before KubeSwift stops its microVM
-	// (SwiftSandbox spec.termination.drainPeriod, KubeSwift v0.16.3), as a
-	// duration from 0s to 10m. Unset leaves KubeSwift's default of 5s.
+	// AnnDrainPeriod is how long a deleted replica keeps running after
+	// its readiness was withdrawn and it left Service endpoints, so that
+	// requests already in flight can finish, before KubeSwift stops its
+	// microVM (SwiftSandbox spec.termination.drainPeriod, KubeSwift
+	// v0.16.3), as a duration from 0s to 10m. It is read from the executor
+	// and, taking precedence, from the SpinApp. Unset on both leaves the
+	// field unset and KubeSwift's default applies (5s for exposed sandboxes).
 	AnnDrainPeriod = Prefix + "drain-period"
 )
 
 // MaxDrainPeriod is KubeSwift's upper bound for spec.termination.drainPeriod.
 const MaxDrainPeriod = 10 * time.Minute
+
+// drainPeriodSyntax is a duration with units, as in the chart schema: 0s,
+// 500ms, 30s, 2m, 1m30s. A bare number such as 0 or 30 is rejected.
+var drainPeriodSyntax = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(ms|s|m))+$`)
+
+// ParseDrainPeriod validates a drain-period annotation value. The error
+// names the problem and quotes the value, which is configuration, never a
+// secret.
+func ParseDrainPeriod(v string) (time.Duration, error) {
+	if !drainPeriodSyntax.MatchString(v) {
+		return 0, fmt.Errorf("must be a duration with units such as 0s, 30s or 2m, got %q", v)
+	}
+	d, err := time.ParseDuration(v)
+	switch {
+	case err != nil:
+		return 0, fmt.Errorf("must be a duration with units such as 0s, 30s or 2m, got %q", v)
+	case d > MaxDrainPeriod:
+		return 0, fmt.Errorf("must be between 0s and 10m, got %s", d)
+	case d%time.Millisecond != 0:
+		return 0, fmt.Errorf("must be a whole number of milliseconds, got %s", d)
+	}
+	return d, nil
+}
 
 // ReadinessStartup values of AnnReadinessStartup.
 const (
@@ -326,15 +353,9 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 	}
 
 	if v, ok := ann[AnnDrainPeriod]; ok {
-		d, err := time.ParseDuration(v)
-		switch {
-		case err != nil:
-			add("annotation %s must be a duration such as 30s or 2m, got %q", AnnDrainPeriod, v)
-		case d < 0 || d > MaxDrainPeriod:
-			add("annotation %s must be between 0s and 10m, got %s", AnnDrainPeriod, d)
-		case d%time.Millisecond != 0:
-			add("annotation %s must be a whole number of milliseconds, got %s", AnnDrainPeriod, d)
-		default:
+		if d, err := ParseDrainPeriod(v); err != nil {
+			add("annotation %s %v", AnnDrainPeriod, err)
+		} else {
 			p.DrainPeriod = &d
 		}
 	}

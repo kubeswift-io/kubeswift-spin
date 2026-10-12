@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -110,13 +111,18 @@ func BuildTemplate(app *spinv1alpha1.SpinApp, p *executor.Profile, policy Resour
 		}
 		spec.Network.Egress = &sandboxv1alpha1.SandboxEgress{Allow: append([]sandboxv1alpha1.SandboxEgressRule(nil), p.EgressAllow...)}
 	}
-	if p.DrainPeriod != nil {
+	drain, err := DrainPeriod(app, p)
+	if err != nil {
+		return nil, err
+	}
+	if drain != nil {
 		if !f.Termination {
-			return nil, fmt.Errorf("executor %q sets %s, but the installed KubeSwift has no spec.termination", p.ExecutorName, executor.AnnDrainPeriod)
+			return nil, fmt.Errorf("%s is set, but the installed KubeSwift has no spec.termination", executor.AnnDrainPeriod)
 		}
-		// Only when the executor asks for it, so executors without the
-		// annotation keep the spec, and their replicas, unchanged.
-		spec.Termination = &sandboxv1alpha1.SandboxTermination{DrainPeriod: &metav1.Duration{Duration: *p.DrainPeriod}}
+		// Only when the SpinApp or the executor asks for it, so SpinApps
+		// without the annotation keep the spec, and their replicas,
+		// unchanged, and KubeSwift applies its own default.
+		spec.Termination = &sandboxv1alpha1.SandboxTermination{DrainPeriod: &metav1.Duration{Duration: *drain}}
 	}
 	if f.Exposure() {
 		expose(&spec, app, p, f)
@@ -471,4 +477,18 @@ func Labels(app, executorName, revision string, ordinal int) map[string]string {
 	l[LabelRevision] = revision
 	l[LabelExecutor] = AppLabelValue(executorName)
 	return l
+}
+
+// DrainPeriod is the drain period a SpinApp's replicas get: the SpinApp's
+// spin.kubeswift.io/drain-period annotation, else the executor's, else nil
+// (spec.termination stays unset and KubeSwift applies its default).
+func DrainPeriod(app *spinv1alpha1.SpinApp, p *executor.Profile) (*time.Duration, error) {
+	if v, ok := app.Annotations[executor.AnnDrainPeriod]; ok {
+		d, err := executor.ParseDrainPeriod(v)
+		if err != nil {
+			return nil, fmt.Errorf("SpinApp annotation %s %w", executor.AnnDrainPeriod, err)
+		}
+		return &d, nil
+	}
+	return p.DrainPeriod, nil
 }

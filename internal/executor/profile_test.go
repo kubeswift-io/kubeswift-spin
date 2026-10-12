@@ -261,13 +261,15 @@ func TestParseDrainPeriod(t *testing.T) {
 	if err != nil || p.DrainPeriod != nil {
 		t.Fatalf("default: %v %+v", err, p.DrainPeriod)
 	}
-	for v, want := range map[string]time.Duration{"0s": 0, "30s": 30 * time.Second, "2m": 2 * time.Minute, "10m": 10 * time.Minute} {
+	for v, want := range map[string]time.Duration{"0s": 0, "500ms": 500 * time.Millisecond, "30s": 30 * time.Second, "1m30s": 90 * time.Second, "2m": 2 * time.Minute, "10m": 10 * time.Minute} {
 		p, err := Parse(managed("kubeswift", map[string]string{AnnDrainPeriod: v}), defaults())
 		if err != nil || p.DrainPeriod == nil || *p.DrainPeriod != want {
 			t.Fatalf("%q: %v %+v", v, err, p.DrainPeriod)
 		}
 	}
-	for _, v := range []string{"", "30", "-1s", "11m", "1h", "soon", "500us", "1.0005s"} {
+	// Malformed, unitless (including 0), negative, above 10m, finer than
+	// a millisecond.
+	for _, v := range []string{"", "0", "30", "soon", "30 s", "+30s", "-1s", "-0s", "10m1s", "11m", "1h", "500us", "1.0005s"} {
 		if _, err := Parse(managed("kubeswift", map[string]string{AnnDrainPeriod: v}), defaults()); err == nil {
 			t.Errorf("%q accepted", v)
 		}
