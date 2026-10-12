@@ -114,6 +114,39 @@ kubectl -n kubeswift-spin-system rollout status deployment/kubeswift-spin
 ```
 
 Chart values: [charts/kubeswift-spin](charts/kubeswift-spin/README.md).
+
+### Upgrade
+
+Upgrade with `--reset-then-reuse-values` (Helm 3.14 or later), which keeps
+your values and takes everything else, including the image digests, from
+the new chart:
+
+```bash
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.1 \
+  --namespace kubeswift-spin-system --reset-then-reuse-values
+```
+
+Do not use `--reuse-values`: it also reuses the previous chart's values,
+including the controller and runtime image digests that the released chart
+pins, so the chart version changes but the controller does not. A plain
+`helm upgrade` without your values resets them, including the executors.
+With Helm before 3.14, save your values and pass them back:
+
+```bash
+helm get values kubeswift-spin --namespace kubeswift-spin-system --output yaml > kubeswift-spin-values.yaml
+```
+
+```bash
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.1 \
+  --namespace kubeswift-spin-system --values kubeswift-spin-values.yaml
+```
+
+The controller logs its version at startup; after the upgrade it must be
+the new one:
+
+```bash
+kubectl -n kubeswift-spin-system logs deployment/kubeswift-spin | grep 'starting kubeswift-spin'
+```
 Building from source: [CONTRIBUTING.md](CONTRIBUTING.md#build-from-source).
 
 ## Quick start
