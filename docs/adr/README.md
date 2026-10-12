@@ -15,3 +15,4 @@
 | [0011](0011-apache-license-and-sandbox-api.md) | Apache-2.0 license; project-owned subset of the sandbox API |
 | [0012](0012-feature-detection.md) | Use KubeSwift features only when the published schema shows them |
 | [0013](0013-surge-replacement.md) | Replace replicas with one surge replica, so rollouts keep `spec.replicas` replicas available (updated for KubeSwift v0.16.3) |
+| [0014](0014-compiled-wasmtime-cache.md) | Deliver a trusted compiled Wasmtime cache as a KubeSwift artifact (proposed, not implemented) |

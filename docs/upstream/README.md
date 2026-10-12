@@ -11,7 +11,7 @@ issues below.
 | [kubeswift-sandbox-service-exposure.md](kubeswift-sandbox-service-exposure.md) | [#729](https://github.com/kubeswift-io/kubeswift/issues/729) | `spec.network.ports`, `spec.network.ingress`, `spec.podMetadata` | reaching HTTP SpinApps through the SpinApp Service; `spin.kubeswift.io/ingress-from`; `spec.podLabels` |
 | [kubeswift-sandbox-health-probes.md](kubeswift-sandbox-health-probes.md) | [#729](https://github.com/kubeswift-io/kubeswift/issues/729) | `spec.readinessProbe`, `spec.livenessProbe`, `WorkloadReady` | `readyReplicas`, `spec.checks`, readiness-gated rollouts |
 | [kubeswift-sandbox-secret-projection.md](kubeswift-sandbox-secret-projection.md) | [#730](https://github.com/kubeswift-io/kubeswift/issues/730) | `env[].valueFrom.secretKeyRef`, `spec.secretFiles` | Secret-backed variables and runtime configuration, `loadFromSecret`, `imagePullSecrets`, LLM tokens (not `caCertSecret`) |
-| [kubeswift-sandbox-artifact-projection.md](kubeswift-sandbox-artifact-projection.md) | [#731](https://github.com/kubeswift-io/kubeswift/issues/731) | `spec.artifacts` | not used: Spin 4.2.1 cannot run an application from a local OCI layout |
+| [kubeswift-sandbox-artifact-projection.md](kubeswift-sandbox-artifact-projection.md) | [#731](https://github.com/kubeswift-io/kubeswift/issues/731) | `spec.artifacts` | not used yet: Spin 4.2.1 cannot run an application from a local OCI layout; a compiled Wasmtime cache artifact is under evaluation (ADR 0014) |
 | [kubeswift-sandbox-egress-allowlist.md](kubeswift-sandbox-egress-allowlist.md) | [#732](https://github.com/kubeswift-io/kubeswift/issues/732) | `spec.network.egress.allow` | `spin.kubeswift.io/egress-allow`: calling in-cluster services without the `open` mode |
 | [kubeswift-sandbox-pool-shape-enforcement.md](kubeswift-sandbox-pool-shape-enforcement.md) | [#733](https://github.com/kubeswift-io/kubeswift/issues/733) | full slot shape compared at checkout | nothing new: kubeswift-spin still checks the shape itself |
 
@@ -21,6 +21,7 @@ Later requirements:
 |---|---|---|
 | [kubeswift-sandbox-readiness-latency.md](kubeswift-sandbox-readiness-latency.md) | implemented in v0.16.2 ([#770](https://github.com/kubeswift-io/kubeswift/pull/770)): one pod write for readiness, `spec.readinessStartup` | `spin.kubeswift.io/readiness-startup`: a replica is ready about when it answers |
 | [kubeswift-sandbox-termination-drain.md](kubeswift-sandbox-termination-drain.md) | implemented in v0.16.3 ([#774](https://github.com/kubeswift-io/kubeswift/pull/774)) | removing an old replica during a rollout without relying on the guest ignoring the ACPI power button |
+| [kubeswift-sandbox-optional-artifacts.md](kubeswift-sandbox-optional-artifacts.md) | proposal, not filed | a compiled Wasmtime cache (ADR 0014): optional artifacts, placement on pool nodes, node cache limits, a verification policy tenants cannot change, output export for an isolated compiler, pool capability status |
 
 kubeswift-spin uses these features only when the installed KubeSwift
 serves them ([ADR 0012](../adr/0012-feature-detection.md)). On v0.15.1 it
