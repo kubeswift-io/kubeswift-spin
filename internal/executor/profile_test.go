@@ -288,3 +288,27 @@ func TestParseDrainPeriod(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestParseMaxDrainPeriod(t *testing.T) {
+	p, err := Parse(managed("kubeswift", map[string]string{AnnMaxDrainPeriod: "1m"}), defaults())
+	if err != nil || p.LimitDrainPeriod() != time.Minute {
+		t.Fatalf("1m: %v %v", err, p.LimitDrainPeriod())
+	}
+	if p, _ := Parse(managed("kubeswift", nil), defaults()); p.LimitDrainPeriod() != MaxDrainPeriod {
+		t.Fatalf("default limit %v", p.LimitDrainPeriod())
+	}
+	// The executor's own drain period must fit its limit.
+	if _, err := Parse(managed("kubeswift", map[string]string{AnnMaxDrainPeriod: "1m", AnnDrainPeriod: "90s"}), defaults()); err == nil || !strings.Contains(err.Error(), AnnMaxDrainPeriod) {
+		t.Fatalf("drain above limit: %v", err)
+	}
+	for _, v := range []string{"0", "11m", "-1s"} {
+		if _, err := Parse(managed("kubeswift", map[string]string{AnnMaxDrainPeriod: v}), defaults()); err == nil {
+			t.Errorf("%q accepted", v)
+		}
+	}
+	// A long invalid value is not echoed whole.
+	_, err = ParseDrainPeriod(strings.Repeat("x", 500))
+	if err == nil || len(err.Error()) > 120 {
+		t.Fatalf("unbounded message: %v", err)
+	}
+}

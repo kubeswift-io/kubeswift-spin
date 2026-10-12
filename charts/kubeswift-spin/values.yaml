@@ -67,7 +67,9 @@ executors:
     # readinessStartup: auto      # auto (default), always (KubeSwift v0.16.2) or never; see
     #                             # docs/executor-contract.md#readiness-startup
     # drainPeriod: 30s            # KubeSwift v0.16.3: how long a deleted replica keeps
-    #                             # serving after leaving the Service (default 5s)
+    #                             # running after leaving the Service (KubeSwift
+    #                             # default 5s); a SpinApp annotation overrides it
+    # maxDrainPeriod: 2m          # the longest drain a SpinApp may set (default 10m)
     # otel:
     #   exporter_otlp_endpoint: http://otel-collector.observability:4318
 

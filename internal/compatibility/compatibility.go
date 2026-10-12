@@ -267,7 +267,7 @@ func Analyze(app *spinv1alpha1.SpinApp, p *executor.Profile, o Options) []Findin
 	if len(s.VolumeMounts) > 0 {
 		block("volumeMounts", Unsupported, "spec.volumeMounts is not supported: KubeSwift mounts only Secret files and OCI artifacts into a sandbox")
 	}
-	analyzeAnnotations(app.Annotations, o.Features, block, note)
+	analyzeAnnotations(app.Annotations, p, o.Features, block, note)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Field != out[j].Field {
@@ -449,7 +449,7 @@ const annotationsField = "metadata.annotations"
 // analyzeAnnotations checks the SpinApp's spin.kubeswift.io/ annotations.
 // An unknown key only warns: kubeswift-spin v0.1.0 read no SpinApp
 // annotation, and existing SpinApps must keep reconciling.
-func analyzeAnnotations(ann map[string]string, f capabilities.Sandbox, block, note func(string, Level, string, ...any)) {
+func analyzeAnnotations(ann map[string]string, p *executor.Profile, f capabilities.Sandbox, block, note func(string, Level, string, ...any)) {
 	keys := make([]string, 0, len(ann))
 	for k := range ann {
 		if strings.HasPrefix(k, executor.Prefix) {
@@ -460,8 +460,11 @@ func analyzeAnnotations(ann map[string]string, f capabilities.Sandbox, block, no
 	for _, k := range keys {
 		switch k {
 		case executor.AnnDrainPeriod:
-			if _, err := executor.ParseDrainPeriod(ann[k]); err != nil {
+			if d, err := executor.ParseDrainPeriod(ann[k]); err != nil {
 				block(annotationsField, Unsupported, "annotation %s %v", k, err)
+			} else if limit := p.LimitDrainPeriod(); d > limit {
+				block(annotationsField, Unsupported, "annotation %s is %s, above the limit of %s that executor %q sets with %s",
+					k, d, limit, p.ExecutorName, executor.AnnMaxDrainPeriod)
 			} else if !f.Termination {
 				block(annotationsField, Unsupported, "annotation %s needs spec.termination, KubeSwift v0.16.3 or later", k)
 			}

@@ -81,6 +81,12 @@ const (
 	// and, taking precedence, from the SpinApp. Unset on both leaves the
 	// field unset and KubeSwift's default applies (5s for exposed sandboxes).
 	AnnDrainPeriod = Prefix + "drain-period"
+	// AnnMaxDrainPeriod caps the drain period of the executor's SpinApps,
+	// including a SpinApp's own AnnDrainPeriod, as a duration from 0s to
+	// 10m. Unset allows KubeSwift's 10m. It lets the platform operator bound
+	// how long a SpinApp author can keep deleted replicas, and their
+	// launcher pods' termination grace period, around.
+	AnnMaxDrainPeriod = Prefix + "max-drain-period"
 )
 
 // MaxDrainPeriod is KubeSwift's upper bound for spec.termination.drainPeriod.
@@ -90,17 +96,33 @@ const MaxDrainPeriod = 10 * time.Minute
 // 500ms, 30s, 2m, 1m30s. A bare number such as 0 or 30 is rejected.
 var drainPeriodSyntax = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?(ms|s|m))+$`)
 
+// bounded shortens a value echoed in a message.
+func bounded(v string) string {
+	if len(v) > 32 {
+		return v[:32] + "..."
+	}
+	return v
+}
+
+// LimitDrainPeriod is the longest drain period the profile allows.
+func (p *Profile) LimitDrainPeriod() time.Duration {
+	if p != nil && p.DrainPeriodLimit != nil {
+		return *p.DrainPeriodLimit
+	}
+	return MaxDrainPeriod
+}
+
 // ParseDrainPeriod validates a drain-period annotation value. The error
 // names the problem and quotes the value, which is configuration, never a
 // secret.
 func ParseDrainPeriod(v string) (time.Duration, error) {
 	if !drainPeriodSyntax.MatchString(v) {
-		return 0, fmt.Errorf("must be a duration with units such as 0s, 30s or 2m, got %q", v)
+		return 0, fmt.Errorf("must be a duration with units such as 0s, 30s or 2m, got %q", bounded(v))
 	}
 	d, err := time.ParseDuration(v)
 	switch {
 	case err != nil:
-		return 0, fmt.Errorf("must be a duration with units such as 0s, 30s or 2m, got %q", v)
+		return 0, fmt.Errorf("must be a duration with units such as 0s, 30s or 2m, got %q", bounded(v))
 	case d > MaxDrainPeriod:
 		return 0, fmt.Errorf("must be between 0s and 10m, got %s", d)
 	case d%time.Millisecond != 0:
@@ -134,6 +156,7 @@ var knownAnnotations = map[string]bool{
 	AnnIngressFrom:            true,
 	AnnReadinessStartup:       true,
 	AnnDrainPeriod:            true,
+	AnnMaxDrainPeriod:         true,
 }
 
 // KnownAnnotations returns the supported profile annotation keys, sorted.
@@ -185,6 +208,8 @@ type Profile struct {
 
 	// DrainPeriod is AnnDrainPeriod; nil leaves KubeSwift's default.
 	DrainPeriod *time.Duration
+	// DrainPeriodLimit is AnnMaxDrainPeriod; nil allows MaxDrainPeriod.
+	DrainPeriodLimit *time.Duration
 }
 
 // CheckFeatures reports profile settings the installed KubeSwift cannot
@@ -357,6 +382,16 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 			add("annotation %s %v", AnnDrainPeriod, err)
 		} else {
 			p.DrainPeriod = &d
+		}
+	}
+	if v, ok := ann[AnnMaxDrainPeriod]; ok {
+		if d, err := ParseDrainPeriod(v); err != nil {
+			add("annotation %s %v", AnnMaxDrainPeriod, err)
+		} else {
+			p.DrainPeriodLimit = &d
+			if p.DrainPeriod != nil && *p.DrainPeriod > d {
+				add("annotation %s is %s, above the executor's %s of %s", AnnDrainPeriod, *p.DrainPeriod, AnnMaxDrainPeriod, d)
+			}
 		}
 	}
 

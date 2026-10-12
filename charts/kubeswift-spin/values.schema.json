@@ -271,7 +271,12 @@
           "drainPeriod": {
             "type": "string",
             "pattern": "^([0-9]+(\\.[0-9]+)?(ms|s|m))+$",
-            "description": "spin.kubeswift.io/drain-period: how long a deleted replica keeps serving after it has left Service endpoints, before KubeSwift stops it (spec.termination.drainPeriod, KubeSwift v0.16.3), 0s to 10m. Unset keeps KubeSwift's default of 5s. Setting or changing it replaces the executor's replicas once."
+            "description": "spin.kubeswift.io/drain-period: how long a deleted replica keeps running after its readiness was withdrawn, before KubeSwift stops it (spec.termination.drainPeriod, KubeSwift v0.16.3), 0s to 10m (checked by the controller). The default for the executor's SpinApps; a SpinApp's own annotation overrides it. Unset keeps KubeSwift's default of 5s. Setting or changing it replaces the affected replicas once."
+          },
+          "maxDrainPeriod": {
+            "type": "string",
+            "pattern": "^([0-9]+(\\.[0-9]+)?(ms|s|m))+$",
+            "description": "spin.kubeswift.io/max-drain-period: the longest drain period the executor's SpinApps may set, 0s to 10m (checked by the controller). Unset allows KubeSwift's 10m."
           }
         }
       }

@@ -488,6 +488,9 @@ func DrainPeriod(app *spinv1alpha1.SpinApp, p *executor.Profile) (*time.Duration
 		if err != nil {
 			return nil, fmt.Errorf("SpinApp annotation %s %w", executor.AnnDrainPeriod, err)
 		}
+		if limit := p.LimitDrainPeriod(); d > limit {
+			return nil, fmt.Errorf("SpinApp annotation %s is %s, above the executor's limit of %s", executor.AnnDrainPeriod, d, limit)
+		}
 		return &d, nil
 	}
 	return p.DrainPeriod, nil

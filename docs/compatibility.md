@@ -156,7 +156,7 @@ ownership behavior described below.
 | secrets | `spec.secretFiles` (the same release honors `env[].valueFrom.secretKeyRef`) | `secretKeyRef` variables and runtime-config options, `runtimeConfig.loadFromSecret`, `imagePullSecrets` |
 | egress | `spec.network.egress` | `spin.kubeswift.io/egress-allow` |
 | readiness startup | `spec.readinessStartup` | replicas reported ready about when they first answer; `spin.kubeswift.io/readiness-startup` (see [executor-contract.md](executor-contract.md#readiness-startup)) |
-| termination | `spec.termination` | `spin.kubeswift.io/drain-period` (optional; KubeSwift's 5-second drain applies without it). kubeswift-spin reports the feature at startup and, on KubeSwift v0.16.0 to v0.16.2 (exposure detected, termination not), logs that KubeSwift is older than v0.16.3; the annotation makes the executor invalid there. KubeSwift drains and stops deleted replicas itself (see below) |
+| termination | `spec.termination` | `spin.kubeswift.io/drain-period` on a SpinApp or executor (optional; KubeSwift's 5-second drain applies without it). kubeswift-spin reports the feature at startup and, on KubeSwift v0.16.0 to v0.16.2 (exposure detected, termination not), logs that KubeSwift is older than v0.16.3; the annotation makes the executor invalid, or the SpinApp unsupported, there. KubeSwift drains and stops deleted replicas itself (see below) |
 
 KubeSwift v0.16.3 also changes behavior that kubeswift-spin relies on but
 does not configure, so no schema field marks it:
@@ -164,10 +164,10 @@ does not configure, so no schema field marks it:
 - **Termination.** A deleted sandbox that exposes ports is taken out of
   Service endpoints, keeps running for a drain (`spec.termination.drainPeriod`,
   default 5 s), then has its microVM stopped; its launcher pod ends
-  `Succeeded`. kubeswift-spin sets `drainPeriod` only when the executor has
-  the `spin.kubeswift.io/drain-period` annotation; otherwise every replica,
-  which exposes the Spin port, gets the default, and the spec, and so every
-  replica, stays unchanged.
+  `Succeeded`. kubeswift-spin sets `drainPeriod` only when the SpinApp or
+  its executor has the `spin.kubeswift.io/drain-period` annotation;
+  otherwise every replica, which exposes the Spin port, gets the default,
+  and the spec, and so every replica, stays unchanged.
 - **Isolation through termination.** The sandbox's NetworkPolicy is created
   before its launcher pod and kept until the launcher has stopped.
 - **Launcher ownership.** A sandbox uses only a launcher pod it controls; a
@@ -240,7 +240,7 @@ and otherwise ignored, so SpinApps that reconciled before keep doing so.
 
 | Annotation | Effect |
 |---|---|
-| `spin.kubeswift.io/drain-period` | The replicas' `spec.termination.drainPeriod`, overriding the executor's annotation of the same name; a duration with units from `0s` to `10m`. Needs KubeSwift v0.16.3 or later. See [executor-contract.md](executor-contract.md#rolling-updates). |
+| `spin.kubeswift.io/drain-period` | The replicas' `spec.termination.drainPeriod`, overriding the executor's annotation of the same name; a duration with units from `0s` to the executor's `spin.kubeswift.io/max-drain-period` (default `10m`). Needs KubeSwift v0.16.3 or later. See [executor-contract.md](executor-contract.md#rolling-updates). |
 
 ## SpinAppExecutor field support
 

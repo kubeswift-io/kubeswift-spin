@@ -1118,6 +1118,7 @@ func TestSpinAppDrainPeriodOverridesExecutor(t *testing.T) {
 		t.Fatalf("termination %+v, want the SpinApp's 10s", d)
 	}
 	setReady(t, ns, "hello-0")
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxRunning)
 	// An annotation edit does not change the generation; it must still
 	// roll the replica, through a surge replica with the executor's 30s.
 	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { delete(a.Annotations, executor.AnnDrainPeriod) })
@@ -1140,6 +1141,64 @@ func TestInvalidSpinAppDrainPeriod(t *testing.T) {
 	}
 	if n := len(listSandboxes(t, ns)); n != 0 {
 		t.Fatalf("%d sandboxes for an invalid SpinApp", n)
+	}
+}
+
+// Fixing an invalid SpinApp annotation, an edit that does not change the
+// generation, unblocks the SpinApp.
+func TestFixedSpinAppDrainPeriodRecovers(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	app := spinApp(ns, "hello", "kubeswift", 1)
+	app.Annotations = map[string]string{executor.AnnDrainPeriod: "30"}
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), app)
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonUnsupportedConfiguration)
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Annotations[executor.AnnDrainPeriod] = "30s" })
+	expectSandboxes(t, ns, "hello-0")
+	if d := getSandbox(t, ns, "hello-0").Spec.Termination; d == nil || d.DrainPeriod == nil || d.DrainPeriod.Duration != 30*time.Second {
+		t.Fatalf("termination %+v", d)
+	}
+}
+
+// A misspelled spin.kubeswift.io/ annotation added to a running SpinApp is
+// reported in a Warning Event, although the generation does not change.
+func TestUnknownSpinAppAnnotationWarns(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	setReady(t, ns, "hello-0")
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxRunning)
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) {
+		a.Annotations = map[string]string{executor.Prefix + "drain-perod": "30s"}
+	})
+	eventually(t, "a Warning Event naming the misspelled key", func() error {
+		var l eventsv1.EventList
+		if err := testClient.List(ctx, &l, client.InNamespace(ns)); err != nil {
+			return err
+		}
+		for _, e := range l.Items {
+			if e.Regarding.Name == "hello" && e.Type == corev1.EventTypeWarning && strings.Contains(e.Note, "drain-perod") {
+				return nil
+			}
+		}
+		return fmt.Errorf("none among %d events", len(l.Items))
+	})
+}
+
+// A SpinApp cannot ask for more than its executor's max-drain-period.
+func TestSpinAppDrainPeriodAboveExecutorLimit(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	app := spinApp(ns, "hello", "kubeswift", 1)
+	app.Annotations = map[string]string{executor.AnnDrainPeriod: "2m"}
+	mustCreate(t, managedExecutor(ns, "kubeswift", map[string]string{executor.AnnMaxDrainPeriod: "1m"}), app)
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonUnsupportedConfiguration)
+	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, executor.AnnMaxDrainPeriod) {
+		t.Fatalf("message %q", m)
+	}
+	if n := len(listSandboxes(t, ns)); n != 0 {
+		t.Fatalf("%d sandboxes above the limit", n)
 	}
 }
 

@@ -67,7 +67,8 @@ for example `kubeswift`, `kubeswift-open` and `kubeswift-warm`.
 | `spin.kubeswift.io/egress-allow` | JSON list of 1 to 32 KubeSwift egress rules; only with network mode `restricted`; needs KubeSwift v0.16.0 | none |
 | `spin.kubeswift.io/ingress-from` | JSON list of 1 to 16 NetworkPolicy peers allowed to reach the Spin HTTP port; needs KubeSwift v0.16.0 | any source |
 | `spin.kubeswift.io/readiness-startup` | `auto`, `always`, `never`; see [Readiness startup](#readiness-startup); `always` needs KubeSwift v0.16.2 | `auto` |
-| `spin.kubeswift.io/drain-period` | a duration from `0s` to `10m` (for example `30s`): how long a deleted replica keeps serving after it has left the Service before KubeSwift stops it (`spec.termination.drainPeriod`); see [Rolling updates](#rolling-updates); needs KubeSwift v0.16.3 | unset (KubeSwift's 5 seconds) |
+| `spin.kubeswift.io/drain-period` | a duration with units from `0s` to `10m` (for example `30s`): how long a deleted replica keeps running after its readiness was withdrawn, before KubeSwift stops it (`spec.termination.drainPeriod`); the default for the executor's SpinApps, which a SpinApp's own annotation overrides; see [Drain period](#drain-period); needs KubeSwift v0.16.3 | unset (KubeSwift's default, 5 seconds for exposed sandboxes) |
+| `spin.kubeswift.io/max-drain-period` | a duration with units from `0s` to `10m`: the longest drain period the executor's SpinApps, and its own `drain-period`, may set | `10m` (KubeSwift's limit) |
 
 Any other annotation with the `spin.kubeswift.io/` prefix makes the executor
 invalid, so a misspelled key is reported rather than ignored. Network mode
@@ -145,7 +146,7 @@ Each replica is one SwiftSandbox in the SpinApp's namespace:
 | `podMetadata.labels` | `core.spinkube.dev/app.<name>.status: ready`, `core.spinkube.dev/app-name: <name>`, plus `spec.podLabels`; KubeSwift v0.16.0 |
 | `readinessProbe` | from `spec.checks.readiness`, else a TCP check; KubeSwift v0.16.0 |
 | `readinessStartup` | `{}` (KubeSwift defaults) when [readiness startup](#readiness-startup) applies; KubeSwift v0.16.2 |
-| `termination.drainPeriod` | profile `drain-period`; unset otherwise; KubeSwift v0.16.3 |
+| `termination.drainPeriod` | the SpinApp's `spin.kubeswift.io/drain-period` annotation, else the profile `drain-period`; unset otherwise ([Drain period](#drain-period)); KubeSwift v0.16.3 |
 | `livenessProbe` | from `spec.checks.liveness`, else unset; KubeSwift v0.16.0 |
 | `rootfsMode` | profile rootfs mode |
 | `kernelProfileRef` | profile kernel profile |
@@ -431,10 +432,10 @@ sandboxes; every transition below is covered by unit and envtest tests.
   when a SpinApp is deleted and created again while KubeSwift still
   terminates its sandbox. The SpinApp then waits with `Progressing=True`
   (`SandboxCreating`), rechecking at least every 5 seconds, and creates its
-  replica once the name is free. If the old sandbox is still there 2 minutes
-  plus the drain period in its own spec after its deletion started, `Progressing` reports `SandboxConflict` with
-  the sandbox's finalizers, which usually means the KubeSwift controller is
-  not running. Any other terminating object is a conflict at once.
+  replica once the name is free. If the old sandbox is still there 2
+  minutes plus the drain period in its own spec after its deletion started,
+  `Progressing` reports `SandboxConflict` with the sandbox's finalizers,
+  which usually means the KubeSwift controller is not running. Any other terminating object is a conflict at once.
 
 While a SpinApp has unsupported configuration, an invalid executor or an
 incompatible warm pool, kubeswift-spin creates and deletes nothing for it;
@@ -489,30 +490,10 @@ SwiftSandbox:
 
 1. sets its readiness to false and takes it out of the SpinApp Service's
    ready endpoints, while the workload keeps running;
-2. keeps the workload serving for the drain period
-   (`spec.termination.drainPeriod`), meant to cover kube-proxy's next rule
-   sync on every node (`minSyncPeriod` is 1 second by default) and the
-   requests still running. kubeswift-spin leaves the field unset, so
-   KubeSwift's default of 5 seconds for sandboxes with exposed ports
-   applies, unless the executor sets `spin.kubeswift.io/drain-period`.
-   Requests still running when the drain ends are cut: with the default, a
-   request that takes longer than about 5 seconds can fail when its replica
-   is replaced, scaled down or deleted (on KubeSwift v0.16.2 and earlier
-   such a request had up to about 30 seconds). Set the annotation to the
-   longest request the application must be able to finish, plus a few
-   seconds. A longer drain keeps each old replica, and the capacity it
-   uses, for that long, and makes rolling updates slower: a replica is
-   recreated at the new revision only once its old sandbox is gone, so a
-   rolling update of N replicas takes at least N times the drain period,
-   and a replica of a broken revision that runs but never becomes ready
-   also holds its ordinal for the whole drain. The pace comes from the drain
-   in the old replicas' specs, so the rolling update that shortens the
-   drain still runs at the old one. The surge replica removed at the end of
-   a rolling update, and a replica removed by a scale-down, keep their names
-   for their drain too: the next rolling update or scale-up waits for them.
-   Values below about 2 seconds
-   do not cover kube-proxy's rule sync and can fail requests during
-   rolling updates;
+2. keeps the workload running for the drain period
+   (`spec.termination.drainPeriod`, see [Drain period](#drain-period)), so
+   that requests already in flight can finish and kube-proxy on every node
+   stops sending it new connections;
 3. stops the microVM; the launcher pod exits and ends `Succeeded`;
 4. removes the NetworkPolicy and the SwiftSandbox only after the launcher
    has stopped (KubeSwift lets the SwiftSandbox go anyway 30 seconds after
@@ -531,6 +512,88 @@ SwiftSandbox `Terminating` condition reports `Draining`, then `Stopping` (or
 `Stopping` from the pod's deletion timestamp, which has one-second
 resolution, so the condition can change up to a second before the drain in
 the launcher ends.
+
+### Drain period
+
+The drain period is how long a deleted replica keeps running after its
+readiness was withdrawn, before KubeSwift stops it. It is a KubeSwift
+field; kubeswift-spin only decides whether to set it:
+
+1. the SpinApp's `spin.kubeswift.io/drain-period` annotation, if present;
+2. otherwise the executor's `spin.kubeswift.io/drain-period` annotation
+   (the chart value `executors[].drainPeriod`);
+3. otherwise nothing: `spec.termination.drainPeriod` stays unset and
+   KubeSwift applies its own default, 5 seconds for a sandbox with exposed
+   ports. This is the behavior of v0.1.0, and existing manifests need no
+   change.
+
+A value is a duration with units from `0s` to `10m`, such as `0s`, `10s`,
+`90s` or `2m`. A bare number such as `30`, a negative value, a value above
+`10m` or one finer than a millisecond is rejected before any sandbox is
+created: on a SpinApp with `Progressing=False` and reason
+`UnsupportedConfiguration`, on an executor with `ExecutorInvalid`, each
+with a Warning Event. Either annotation needs KubeSwift v0.16.3 or later.
+The executor's `spin.kubeswift.io/max-drain-period` (default `10m`) caps
+both: a SpinApp asking for more is `UnsupportedConfiguration`. The drain
+period is the one setting a SpinApp author can choose that affects the
+platform (node capacity, rollout pace, node maintenance); see
+[security-model.md](security-model.md#denial-of-service-and-capacity).
+
+Changing only the annotation does not change the SpinApp's
+`metadata.generation`, so `status.conditions[].observedGeneration` cannot
+show that the change was seen. kubeswift-spin reconciles it at once; to
+follow the replacement, watch `Progressing` (its reason becomes
+`RollingUpdate`) rather than `observedGeneration`.
+
+For a replica that is replaced (rolling update), scaled down or deleted,
+the order is:
+
+```
+replacement ready (rolling update only)
+  -> old replica's readiness False, endpoint not ready
+  -> kube-proxy stops sending it new connections (within its sync period)
+  -> drain period: requests in flight finish
+  -> microVM stopped, launcher pod exits
+  -> NetworkPolicy removed, SwiftSandbox removed
+```
+
+The drain starts after the replica has left the Service's ready endpoints:
+a replica does not receive new Service traffic during its drain, except
+for connections kube-proxy routes before its next rule sync. The drain is
+not a startup or readiness timeout and not the launcher pod's
+`terminationGracePeriodSeconds` (KubeSwift derives that from it), and it
+does not guarantee that a request completes: a request still running when
+the drain ends is cut. Set it to the longest request the application must
+finish, plus a few seconds. `0s` stops the replica as soon as it has left
+the endpoints, without waiting for kube-proxy, so requests can fail during
+rolling updates; values below about 2 seconds carry the same risk.
+
+A longer drain keeps each deleted replica, and the capacity it uses, for
+that long, and makes rolling updates slower: a replica is recreated at the
+new revision only once its old sandbox is gone, so a rolling update of N
+replicas takes at least N times the drain period, and a replica of a broken
+revision that runs but never becomes ready also holds its ordinal for the
+whole drain. The pace comes from the drain in the old replicas' specs, so
+the rolling update that changes the drain still runs at the old one. The
+surge replica removed at the end of a rolling update, and a replica removed
+by a scale-down, keep their names for their drain too: the next rolling
+update or scale-up waits for them. Setting, changing or removing the
+annotation replaces the affected replicas once.
+
+Example: requests to this application take up to 20 seconds.
+
+```yaml
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: reports
+  annotations:
+    spin.kubeswift.io/drain-period: 30s
+spec:
+  image: ghcr.io/example/reports:v1
+  executor: kubeswift
+  replicas: 2
+```
 
 On KubeSwift v0.16.2 and earlier there is no explicit drain: the guest keeps
 serving until the launcher's 30-second termination grace period ends, the
@@ -567,14 +630,16 @@ these replaces the replicas (one at a time, as in
   with `readiness-startup: always`) are replaced once. The same holds for
   changing the `spin.kubeswift.io/readiness-startup` annotation
 - setting, changing or removing the `spin.kubeswift.io/drain-period`
-  annotation (only the executor's replicas are replaced)
+  annotation on the executor (its SpinApps without their own annotation)
+  or on a SpinApp (that SpinApp)
 - a different executor that kubeswift-spin manages, when its profile renders
   a different spec (the `spin.kubeswift.io/executor` label of existing
   sandboxes is not updated when the spec is identical)
 
 These do not replace replicas:
 
-- `spec.replicas`, labels and annotations on the SpinApp,
+- `spec.replicas`, labels and annotations on the SpinApp other than
+  `spin.kubeswift.io/drain-period`,
   `spec.serviceAnnotations`
 - changing the contents of a referenced Secret. The revision hashes Secret
   names and keys, not values, and values are delivered when a sandbox

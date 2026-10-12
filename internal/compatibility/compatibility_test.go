@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -493,6 +494,16 @@ func TestSpinAppAnnotations(t *testing.T) {
 	}
 	if fs := Analyze(annotated(executor.AnnDrainPeriod, "10s"), profile(), opts()); !Blocking(fs) || !strings.Contains(fs[0].Message, "v0.16.3") {
 		t.Fatalf("without spec.termination: %+v", fs)
+	}
+	// Above the executor's limit.
+	capped := profile()
+	minute := time.Minute
+	capped.DrainPeriodLimit = &minute
+	if fs := Analyze(annotated(executor.AnnDrainPeriod, "2m"), capped, withTermination); !Blocking(fs) || !strings.Contains(fs[0].Message, executor.AnnMaxDrainPeriod) {
+		t.Fatalf("above the executor limit: %+v", fs)
+	}
+	if fs := Analyze(annotated(executor.AnnDrainPeriod, "1m"), capped, withTermination); len(fs) != 0 {
+		t.Fatalf("at the executor limit: %+v", fs)
 	}
 	// An unknown key under the prefix warns but does not block, so a
 	// SpinApp that reconciled on v0.1.0 still does.
