@@ -21,6 +21,12 @@ helm install kubeswift-spin charts/kubeswift-spin --namespace kubeswift-spin-sys
 The default values create the executor `kubeswift` in namespace `default`;
 see [Executors](#executors) to change that.
 
+To upgrade, use `helm upgrade --reset-then-reuse-values` (Helm 3.14 or
+later), or pass your saved values with `--values`. Do not use
+`--reuse-values`: it also reuses the previous chart's pinned image
+digests, so the controller and runtime images do not change. See
+[Upgrade](../../README.md#upgrade) in the repository README.
+
 ## Values
 
 | Value | Default | Description |

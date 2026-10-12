@@ -56,6 +56,10 @@ minimum. Without the new settings nothing changes.
 
 - Upgrading from v0.1.0 changes no rendered SwiftSandbox spec, so it
   replaces no replica; the runtime image stays `spin-4.2.1-r2`.
+- Upgrade the chart with `--reset-then-reuse-values` (Helm 3.14 or later)
+  or with your saved values (`--values`), not with `--reuse-values`, which
+  keeps the v0.1.0 chart's pinned controller digest and so the v0.1.0
+  controller. See the README (Upgrade).
 - Setting, changing or removing a drain period replaces the affected
   replicas once. A longer drain keeps each deleted replica, and its
   capacity, for that long, makes a rolling update of N replicas take at
