@@ -112,7 +112,9 @@ warm-pool checkout (next list); the others still hold.
 - Warm-pool checkout compares the full slot shape (image, network mode,
   egress, ports, verify key, rootfs mode, kernel, CPU, memory, node
   selector) and boots cold on a mismatch. Since KubeSwift v0.16.2,
-  `spec.artifacts` is mounted at checkout too and is not part of the shape.
+  `spec.artifacts` is mounted at checkout too and is not part of the shape,
+  on slots with kernels/sandbox 6.6.15 or newer; on older slots KubeSwift
+  boots a sandbox with artifacts cold.
 
 **Spin v4.2.1**:
 

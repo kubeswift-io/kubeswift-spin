@@ -1,271 +1,314 @@
 # 0014: Deliver a trusted compiled Wasmtime cache as a KubeSwift artifact
 
-Status: proposed, for architecture review. Nothing here is implemented in a
-release; the proof of concept lives on an unmerged branch.
+Status: proposed, revised after security and architecture review. Nothing
+here is implemented in a release; the proof of concept lives on an
+unmerged branch and exercises only the delivery path.
 
 ## Context
 
 On a warm start most of the time between workload dispatch and the first
 response is Wasmtime compiling the application's components: about 400 ms
 of the roughly 1.4 s for hello-http in the lab, more for larger
-applications. Wasmtime can reuse compiled code through its cache directory,
-and a pre-filled cache removed that time in earlier diagnostics. The cache
-entries are native machine code: whoever writes them controls what the
-guest executes, so they are trusted material and must never come from a
-SpinApp author or from a tenant's own sandbox.
+applications. Wasmtime can reuse compiled code through its cache directory.
+The cache entries are native machine code: whoever writes them controls
+what the guest executes, so they are trusted material and must never come
+from a SpinApp author or from a tenant's sandbox that served traffic.
 
 Facts this decision rests on (Spin 4.2.1, Wasmtime 49.0.1, KubeSwift
-v0.16.4; sources and measurements in the PoC record below):
+v0.16.4; measurements in the proof-of-concept section):
 
-- Wasmtime's cache key is a SHA-256 over the exact component bytes, the
-  full engine configuration (target, Cranelift flags, tunables, wasm
-  features, Wasmtime version) and every CPU feature flag Cranelift detects
-  at runtime. An entry made on a CPU with a different feature set is a
-  clean miss, never wrong code. A loaded entry is checked again against
-  the host (ISA features, engine metadata); a failed check is a silent miss
-  and a recompile.
-- Wasmtime keeps no checksum over the compiled code. Integrity of the
-  entries has to come from how they are delivered.
-- One entry per component, keyed by content: an application with N
-  components has N entries, identical components share one, and changing
-  one component adds exactly one entry.
-- A read-only cache directory works: hits are served, Wasmtime's usage
-  statistics and cleanup fail silently, and a miss compiles normally
-  without storing. Spin points Wasmtime at a cache configuration file
-  through `WASMTIME_CACHE_FILE`, whose `[cache] directory` can be any
-  absolute path.
-- Spin 4.2.1 cannot load precompiled components (`.cwasm`) with
-  `spin up --from`; the cache directory is the only reuse mechanism.
-- KubeSwift v0.16.2 and later mount `spec.artifacts` read-only in the
-  guest at warm-pool checkout as well as at a cold start: digest-pinned,
-  optionally cosign-verified, cached per node and bound to the repository
-  that served it, mounted over virtio-fs before the workload is
-  dispatched, without restarting the VM, and outside the slot shape, so
-  pools stay generic.
+- Wasmtime's cache key is a SHA-256 over the component bytes, the engine
+  configuration (target, Cranelift flags, tunables, wasm features, Wasmtime
+  version) and every CPU feature flag Cranelift detects at runtime. A
+  mismatching entry is a clean miss, and a loaded entry is checked again
+  against the host; a failed check is a silent miss and a recompile.
+- The key is only a file name chosen by whoever writes the cache. Wasmtime
+  does not check an entry's content against its key and keeps no checksum
+  over the code. All inputs to the key are public or derivable, so anyone
+  who can place an entry can target any component. **Integrity comes only
+  from who may produce, sign and reference an artifact**, never from the
+  key.
+- One entry per component, keyed by content; identical components share an
+  entry, and changing one component adds one entry.
+- A read-only cache directory works: hits are served, statistics and
+  cleanup writes fail silently, misses compile normally without storing.
+- Spin reads `WASMTIME_CACHE_FILE`. If it names a file that does not exist,
+  `spin up` exits ("failed to read config file"). Spin 4.2.1 cannot load
+  precompiled components with `spin up --from`; the cache directory is the
+  only reuse mechanism.
+- `spin up` refuses to start an application with a required variable that
+  has no value, or with a key-value store label that has no runtime
+  configuration.
+- KubeSwift v0.16.2 and later mount `spec.artifacts` read-only at warm-pool
+  checkout as well as at a cold start: digest-pinned, optionally
+  cosign-verified (public key only, no transparency log), cached per node
+  and bound to the repository that served it, mounted over virtio-fs before
+  dispatch, without restarting the VM, outside the slot shape. A warm slot
+  can take artifacts only with kernels/sandbox 6.6.15 or newer; otherwise
+  KubeSwift boots the sandbox cold. A registry that refuses the reference
+  fails the sandbox; an unreachable registry keeps it `Pending` and retries
+  without limit.
 
 ## Decision
 
+### Enablement and gating
+
+- Off by default. An executor opts in (annotation
+  `spin.kubeswift.io/compiled-cache: enabled`, chart value
+  `executors[].compiledCache`), together with the repository prefix, the
+  per-namespace pull credential and the verification settings below.
+- Used only when KubeSwift serves warm-checkout artifacts (detected through
+  the v0.16.2 schema, as in ADR 0012) and only on executors whose operator
+  guarantees warm-mount-capable slots; KubeSwift does not yet advertise that
+  per pool (requested upstream). Otherwise the executor is
+  `ExecutorInvalid`, never a silent cold boot.
+- Used only when both the SpinApp image and the runtime image are pinned by
+  digest. The controller has no registry access and cannot resolve tags;
+  tagged images get no cache, and the executor documentation says so.
+
 ### Delivery
 
-A compiled cache is an OCI artifact attached to a replica as a KubeSwift
-artifact:
+The replica gets a KubeSwift artifact and a runtime contract variable:
 
 ```yaml
 artifacts:
   - name: wasmtime-cache
-    ref: <cache repository>@sha256:<compiled artifact digest>
+    ref: <namespace's cache repository>@sha256:<artifact digest>
     layout: unpacked
     mountPath: /opt/kubeswift-spin-cache
-    verifyKeySecretRef: {name: <platform verification key>}
+    pullSecretRef: {name: <platform pull credential for this namespace's repository>}
+    verifyKeySecretRef: {name: <verification key>}
 env:
-  - {name: WASMTIME_CACHE_FILE, value: /opt/kubeswift-spin-cache/wasmtime-cache.toml}
+  - {name: KUBESWIFT_SPIN_COMPILED_CACHE, value: /opt/kubeswift-spin-cache}
 ```
 
-The artifact is mounted read-only and used in place, with no copy. The
-runtime contract (`internal/runtimecontract`) gains the mount path and the
-variable. No change to the runtime image or to KubeSwift is needed.
+- The runtime entrypoint owns the Wasmtime configuration. It writes
+  `[cache] directory = "<mount>/cache"` under its own base directory and
+  exports `WASMTIME_CACHE_FILE` only if the contract path is a read-only
+  mount containing `cache/`. Otherwise it starts Spin without it.
+  `WASMTIME_CACHE_FILE` and `DISABLE_WASMTIME_CACHE` become reserved
+  names: the entrypoint drops any other value, and translation never emits
+  them. This needs a runtime image release, which also makes the mount
+  path a runtime contract rather than something stored in signed
+  artifacts.
+- The cache decoration is applied per replica outside the revision
+  fingerprint: the Template keeps the revision-bearing spec, and
+  `NewSandbox` adds the artifact and the variable when a record applies.
+  The arrival or removal of a cache never rolls replicas. Golden tests
+  prove the revision is identical with and without it, and the documented
+  meaning of the revision label is updated.
 
 ### Artifact format
 
-One artifact per application digest, OCI image manifest with OCI media
-types and one tar layer:
+One OCI image manifest per application digest (OCI media types), one tar
+layer:
 
 ```
-wasmtime-cache.toml   [cache] directory = "/opt/kubeswift-spin-cache/cache"
-metadata.json         source digest, component digests, runtime image digest,
-                      Spin and Wasmtime versions, target, CPU classes and their
-                      feature sets, compiler image and node, compile time
-cache/modules/wasmtime-49.0.1/<key>   one entry per component and CPU class
+metadata.json                          source and runtime digests, versions,
+                                       CPU classes and feature sets, compiler identity
+cache/modules/wasmtime-49.0.1/<key>    one entry per component, CPU class and architecture
 ```
 
-The usage statistics files are not shipped. Entries for several CPU
-classes coexist in one directory because the CPU features are part of
-Wasmtime's key; Wasmtime picks the matching one. The artifact records the
-source as OCI annotations as well and, where the registry supports it, as
-an OCI referrer (`subject`) of the application, so registry tools can show
-the relation and garbage-collect with it.
+Only regular files whose names match the key pattern, mode 0444, no links;
+the packager fails otherwise. No statistics files. Entries for several CPU
+classes and architectures coexist because both are part of Wasmtime's key;
+neither is part of the lookup. Metadata is written by a JSON encoder, never
+by templating values into a shell.
 
 ### Lookup identity
 
-kubeswift-spin finds an artifact by an external identity and leaves
-validity to Wasmtime:
-
-- the application digest (the SpinApp image resolved to a digest; the
-  compiled entries are per component, so the digest stands for the set of
-  component bytes);
-- the runtime image digest (it fixes Spin, Wasmtime and the engine
-  configuration, including the static build's unwind setting);
-- the target architecture.
-
-CPU classes are not part of the lookup: one artifact carries an entry per
-class. Wasmtime's own key then decides, per component and per guest,
-whether an entry is used. kubeswift-spin never computes Wasmtime's key.
+`(namespace, SpinApp image digest reference, runtime image digest
+reference)`. kubeswift-spin never computes Wasmtime's key; Wasmtime decides
+per component and per guest whether an entry is used.
 
 ### Compilation
 
-A dedicated trusted compiler, run by the platform:
+A separate component, the compiler, with its own Deployment, ServiceAccount
+and namespace. The main controller gains no Job, Pod or Secret access.
 
-- One Kubernetes Job per application digest and CPU class, in the
-  kubeswift-spin namespace, on a node of that class. It runs the runtime
-  image's own `spin` binary on the application (pulled by digest), which
-  compiles every component into an empty cache, and stops it before the
-  application receives any request. A second container, which never
-  handles the application, packages the entries, pushes the artifact and
-  signs it. The compile container has no credentials, no service account
-  token and no network access beyond the registry.
-- Compilation is triggered when kubeswift-spin first sees a SpinApp
-  revision with an application digest it has no artifact for.
-- Before signing, the compiler checks the output: it starts `spin` once
-  more on a writable copy of the packaged cache and fails if that start
-  adds an entry (an added entry means a component missed the cache).
-- A compiler in a container produces the same entries a guest on the same
-  CPU class would (same key in the PoC), because the lab's Cloud Hypervisor
-  guests see the host's CPU features. This must hold on each supported
-  platform; where a hypervisor hides features, the compiler has to run in
-  a guest of that class instead.
+1. The compiler watches SpinApps (read-only) on opted-in executors and
+   deduplicates by lookup identity, with per-namespace concurrency limits,
+   resource limits, a deadline and a maximum component and artifact size.
+2. It compiles inside a SwiftSandbox of the target CPU class: the same
+   isolation as a production replica, no credentials, no service account
+   token, egress only to the application's registry host. The runtime image
+   gains a compile mode: it pulls the application by digest, supplies
+   placeholder values for required variables and an in-memory runtime
+   configuration for every store label (none of which is part of Wasmtime's
+   key), loads every component of HTTP triggers, never sends a request, and
+   exits when the cache is populated. Other trigger types wait for a
+   compile-only command in Spin.
+3. The output leaves the sandbox through a generic KubeSwift capability
+   that does not exist yet: exporting a directory as an OCI artifact when
+   the workload exits, pushed by KubeSwift with platform credentials outside
+   the guest (requested upstream).
+4. A separate signer, which never handles tenant input, checks the
+   exported artifact (file names, modes, sizes, metadata), pushes the final
+   artifact to the namespace's repository, and signs the digest it computed
+   itself, never a re-resolved tag. The signature carries the claim
+   (namespace, application digest, runtime digest, compiler identity) as an
+   attestation. The key is KMS-backed with audit logging; rotation re-signs
+   or recompiles.
+5. The signer writes the record (below). It is the only writer.
+
+Rationale: a compiler exploited by its input runs in a microVM, holds no
+credentials, and can only influence the cache of that tenant's own
+application, which the tenant could already exploit in its own guest. The
+damage stays inside one namespace as long as artifacts, repositories,
+claims and records are namespace-scoped. A second, independent compile
+whose output must be byte-identical is an optional hardening against a
+compromised compiler sandbox that is not driven by the input.
 
 ### Index
 
-The compiler records each artifact in a namespaced `SpinCompiledCache`
-object in the application's namespace (application digest, runtime image
-digest, artifact reference by digest, CPU classes, state), owned by the
-SpinApp so it is deleted with it. Only the compiler's service account may
-write it; SpinApp authors have no RBAC on it. kubeswift-spin reads it when
-it renders a replica. This is a platform index, not an application API: the
-user-facing API stays the SpinApp, and nothing about it changes. It needs
-its own CRD and RBAC review before implementation (CLAUDE.md requires an ADR
-for any new CRD; this is that ADR).
+`SpinCompiledCache` objects in the compiler's namespace, keyed by namespace
+and lookup identity (deterministic names within 63 characters), with
+`spec` (identity, artifact reference by digest, CPU classes) written by the
+signer and `status` (usable, last failure) that the main controller may
+patch. The main controller gets get, list and watch on them and patch on
+their status only; it discovers the CRD at startup as an optional API.
+
+Why a CRD: the index must be writable only by the platform and readable by
+the controller. SpinApp and executor annotations are writable by tenants
+and executor authors, Helm values are static, and ConfigMaps and Secrets
+are outside the controller's RBAC by design. The user-facing API stays the
+SpinApp. Two SpinApps with the same image share one record; garbage
+collection belongs to the compiler (it keeps the record for each SpinApp's
+current image and one previous image), not to owner references.
 
 ### Trust chain
 
 ```
-SpinApp image digest (tenant input, untrusted Wasm)
-  -> trusted compiler Job (platform namespace, pinned runtime image digest)
-  -> artifact digest, metadata binding source digest, runtime digest, CPU classes
-  -> cosign signature by the platform key (optionally an attestation)
-  -> SpinCompiledCache record written by the compiler only
-  -> kubeswift-spin renders the artifact with the executor's verification key
-  -> KubeSwift verifies the signature at the pinned digest before materializing
-  -> node cache, sealed read-only, bound to the repository
-  -> read-only virtio-fs mount in the guest
-  -> Wasmtime key check (content, engine, CPU) on every load
+SpinApp image digest (tenant input)
+  -> compiler sandbox (microVM, no credentials, pinned runtime digest)
+  -> exported artifact (KubeSwift, platform credentials outside the guest)
+  -> signer: checks, pushes to the namespace's repository, signs the computed
+     digest with a claim (namespace, application, runtime)
+  -> record in the platform namespace (signer only)
+  -> controller renders the artifact by digest with the namespace's pull
+     credential and the verification key
+  -> KubeSwift verifies before materializing; node cache bound to the repository
+  -> read-only virtio-fs mount; entrypoint checks the mount is read-only
+  -> Wasmtime uses an entry only where its key matches
 ```
 
-- Signing: the platform's compiler, with a key held outside tenant reach
-  (a KMS-backed or Kubernetes Secret key in the kubeswift-spin namespace).
-  KubeSwift v0.16.4 verifies cosign public-key signatures without a
-  transparency log; keyless verification needs a KubeSwift change.
-- Verification: KubeSwift, before anything is mounted. kubeswift-spin only
-  chooses which artifact to reference, and only from records it trusts.
-- Cache poisoning: a SpinApp author cannot name an artifact (there is no
-  user-facing setting), cannot write records, and cannot sign. A wrong but
-  validly signed artifact is still only used where Wasmtime's key matches
-  the exact component bytes, so another application's entries are never
-  executed. Output of a tenant's own sandbox is never promoted to the
-  cache.
-- Tenant separation: compiled code reveals as much as the application it
-  came from. Artifacts are stored per namespace (one repository per
-  namespace, readable only with that namespace's pull credential), so one
-  tenant cannot reference another tenant's compiled code even by digest:
-  KubeSwift binds its node cache to the repository and resolves with the
-  sandbox's own credentials.
-- The guest cannot overwrite entries: the mount is read-only at several
-  levels, and Wasmtime's own writes into it fail silently.
+- A SpinApp author has no setting that names an artifact and cannot write
+  records, sign, or push to cache repositories.
+- Confidentiality: compiled code reveals as much as its application.
+  Each namespace's artifacts live in their own repository, readable only
+  with that namespace's platform-provisioned, read-only pull credential;
+  the controller always renders `pullSecretRef` and never falls back to
+  the runtime image credential.
+- Verification today: KubeSwift reads `verifyKeySecretRef` from the
+  sandbox's namespace, where whoever can write Secrets can replace it. Until
+  KubeSwift supports a verification policy tenants cannot modify, with
+  claim checks (requested upstream), integrity rests on the record's RBAC,
+  the digest pin and the per-namespace repository; the signature serves as
+  provenance and protects against registry tampering.
+- A failed verification never leads to a retry without verification; it
+  produces a Warning Event and a metric.
+- The guest cannot change entries: the mount is read-only on the host and
+  in the guest, and the entrypoint refuses a writable cache path.
 
 ### Fallback
 
-The cache is an optimization; without it a replica starts as today.
+The cache is an optimization; without it a replica starts as without the
+feature.
 
 | Situation | Behavior |
 |---|---|
-| No record yet, compiler running or failed | No artifact; Spin compiles as today |
-| Artifact cannot be resolved, fetched or verified | KubeSwift v0.16.4 fails the sandbox (`ArtifactResolveFailed`, `ArtifactMaterializeFailed`, `ArtifactMissing`). kubeswift-spin marks the record unusable and replaces the replica without the artifact. A KubeSwift `optional` artifact would remove the failed attempt (proposed upstream) |
-| CPU class, Wasmtime version or engine mismatch | Silent miss, normal compile (measured) |
-| Entry present but not used | Silent miss, normal compile |
-| Corrupt entry | Prevented by digest pinning and signature. Wasmtime has no code checksum; a corrupt compressed entry is a miss, a corrupt metadata section is a start failure, which the fallback above then handles |
+| No record, compiler running or failed, tagged image | No artifact; Spin compiles |
+| Registry refuses the reference, fetch or verification fails (`ArtifactResolveFailed`, `ArtifactMaterializeFailed`, `ArtifactMissing`, `InvalidArtifacts`) on a replica that carries the cache | Classified as a cache failure: no backoff, no `SandboxFailed` condition, a Warning Event and a metric. The controller marks the record unusable in its status (one retry after a controller restart) and replaces the replica without the cache |
+| Registry unreachable (`RegistryUnavailable`, `Resolving`) longer than a bounded wait | The replica is replaced without the cache, with the same classification |
+| Mount absent or not read-only | Entrypoint starts Spin without the cache |
+| CPU class, Wasmtime version or engine mismatch, entry unused | Silent miss, normal compile (measured) |
+| Corrupt entry | Prevented by the digest pin; a corrupt metadata section would be a start failure, handled as a cache failure |
 
-There is no strict mode: no operational need for refusing to start without
-the cache has been shown.
+There is no strict mode.
 
 ### Rollout
 
 For a change from application digest A to B:
 
-1. Compilation of B starts when kubeswift-spin sees the new revision.
-2. The rollout does not wait for it. The surge replica and the replacements
-   start without the cache until the record for B is ready, then with it.
-3. Old replicas keep serving under the existing surge rules (ADR 0013).
+1. The compiler sees the new image and compiles B.
+2. The rollout does not wait. The first replicas of B start without the
+   cache; replicas created after the record is ready get it.
+3. Old replicas keep serving under ADR 0013; nothing about the surge
+   changes, because the cache is outside the revision.
 4. A failed compilation only means no cache.
-5. B always starts without the cache.
-6. The compiler deletes the record for A once no replica of the SpinApp
-   runs digest A, after a grace period; every record is also deleted with
-   its SpinApp (owner reference). A registry retention job removes
-   artifacts that no record references.
-
-The cache artifact is not part of the replica revision: its arrival does
-not roll replicas, and removing it (fallback) does not either. Replicas
-created later pick it up.
+5. The compiler keeps the records for each SpinApp's current and previous
+   image and deletes the rest; a registry retention job removes
+   unreferenced artifacts.
 
 ### Warm pools
 
-Pools stay generic. A slot of any pool that runs the same runtime image can
-take any application's cache at checkout. The first checkout of an artifact
-on a node fetches it into the node cache (one pod, then a second dispatch);
-later checkouts on that node mount it from the cache.
+Pools stay generic. Any slot running the same runtime image can take any
+application's cache at checkout. The first checkout of an artifact on a
+node fetches it (one pod, then a second dispatch), which costs more than
+the cache saves. The feature therefore stays off by default until
+KubeSwift can place artifacts on pool nodes before first use and checks
+authorization off the checkout path (requested upstream).
+
+### Observability
+
+Events on the SpinApp when a replica gets a cache and when it falls back
+(with the reason), metrics for hits attached, fallbacks and compiler
+outcomes, and the record's status. No new SpinApp condition.
 
 ### Ownership
 
 - KubeSwift: artifact resolution, verification, node cache, read-only
-  mount at checkout. It knows nothing of Spin, Wasmtime or compiled code.
-- kubeswift-spin: the compiler Jobs, the index, the lookup, the metadata,
-  the fallback and the rollout behavior.
-- Spin and Wasmtime: the cache format, the key and the compatibility
-  checks.
+  mount at checkout, and the requested output export. It knows nothing of
+  Spin, Wasmtime or compiled code.
+- kubeswift-spin: the compiler and signer components, the index, the
+  lookup, the metadata, the fallback, the rollout behavior, the runtime
+  entrypoint's cache handling.
+- Spin and Wasmtime: the cache format, the key and the compatibility checks.
 
 ## Alternatives considered
 
-- **Lazy capture from the first replica.** Rejected: the cache would come
-  from a tenant's own sandbox, where the application runs and could have
-  altered it.
-- **Per-node compilation on first use.** Every node pays the compile once
-  per application, and the output still has to be trusted and shared;
-  it gives up the main benefit.
-- **CI-produced artifacts.** Possible only with the exact runtime image,
-  engine configuration and CPU classes of the cluster, and with a signing
-  identity the platform trusts; it moves platform concerns into every
-  application's pipeline.
-- **Admission-time precompilation, waiting before rollout.** Lower first-
-  start latency for new revisions, at the cost of rollouts depending on
-  the compiler. Kept as a later option (a bounded wait), not the default.
-- **Baking the cache into the runtime image or a pool per application.**
-  Rejected: one image or pool per application defeats generic warm pools.
+- **Compiling in a container next to the push and signing credentials** (the
+  proof of concept's compiler). Rejected: a Wasm runtime escape during
+  compilation would reach credentials valid for every tenant, outside a
+  microVM.
+- **Lazy capture from a serving replica.** Rejected: the cache would come
+  from a sandbox the application ran in and could have altered.
+- **Per-node compilation on first use.** Every node pays the compile per
+  application and the output still has to be trusted.
+- **CI-produced artifacts.** Only with the cluster's exact runtime image,
+  engine configuration and CPU classes and a signing identity the platform
+  trusts.
+- **Waiting for compilation before a rollout.** A later option with a
+  bounded wait, not the default.
+- **Baking the cache into the runtime image, or a pool per application.**
+  Defeats generic warm pools.
 - **Precompiled `.cwasm` loading.** Not supported by `spin up` in Spin
   4.2.1.
-- **Copying the cache into a writable directory before Spin starts.** Not
-  needed: the read-only mount works. A copy would cost 5 to 10 ms and would
-  let the guest change the copy.
-- **A portable baseline CPU build.** Code compiled for a baseline target
-  never matches the key of an engine that detects the host's features, so
-  it would never be a hit with Spin's engine.
+- **A writable copy of the cache.** Not needed (read-only works), costs 5 to
+  10 ms, and lets the guest change the copy.
+- **A portable baseline CPU build.** Never matches the key of an engine that
+  detects the host's features.
 
 ## Proof of concept
 
 Unmerged branch `poc/compiled-cache`: the KubeSwift `spec.artifacts` type
-in `internal/sandboxapi`, and a SpinApp annotation that names an artifact
-and its verification key. The annotation stands in for the index and is not
-part of the design.
+in `internal/sandboxapi` and a SpinApp annotation naming an artifact and a
+key. The annotation is a stand-in for the index and must not ship. The
+proof of concept puts the artifact into the revision and lets the artifact
+supply the cache configuration; both differ from the decision above. Its
+compiler was a container with credentials in the same pod, which the
+security review rejected; it measured the delivery path only.
 
-- Compiler: a pod on a lab node ran the runtime image's `spin` on hello-http
-  v0.1.1 (by digest), packaged the single entry with the cache
-  configuration and metadata (one tar layer, 213 KB), pushed it to the lab
-  registry and signed it with a PoC key. The entry key matched the one a
-  guest on the same node had produced earlier, so the guest and the
-  container see the same CPU features.
+- A pod on a lab node ran the runtime image's `spin` on hello-http v0.1.1
+  (by digest), packaged the single entry (one tar layer, 213 KB), pushed it
+  and signed it with a throwaway key. The entry key matched the one a guest
+  on the same node had produced earlier: the lab's guests see the host's
+  CPU features. This must be checked per platform; the decision compiles
+  inside a sandbox anyway.
 - KubeSwift cosign-verified, materialized and mounted the artifact; the
-  replica served normally on the cold and the warm path.
+  replica served on the cold and the warm path.
 - 30 warm starts each on KubeSwift v0.16.4, one node, the shipped
-  hello-http (application pulled from ghcr.io at every start), against the
-  same build without the artifact:
+  hello-http (pulled from ghcr.io at every start):
 
 | Seconds from SpinApp creation (p50 / p95) | v0.1.1 runtime | Compiled cache |
 |---|---:|---:|
@@ -276,52 +319,53 @@ part of the design.
 | `Available` | 3.140 / 3.184 | 3.132 / 3.543 |
 | first Service response | 3.316 / 3.336 | 3.310 / 3.743 |
 
-  The cache removed 405 ms (p50) between dispatch and the first response.
-  Projecting a cached artifact at checkout cost about 1 ms. `Available` and
-  the Service response did not move at p50 because the example's own
-  readiness check (`initialDelaySeconds: 1`, `periodSeconds: 2`) gates
-  them. Every fifth minute one checkout took about 0.75 s longer: KubeSwift
-  caches its authorization check of a digest reference for 5 minutes and
-  repeats it, serially, before claiming a slot.
-- 10 warm starts each, same setup:
+  The cache removed 405 ms (p50) between dispatch and the first response;
+  projecting a cached artifact cost about 1 ms. `Available` did not move at
+  p50 because the example's readiness check (`initialDelaySeconds: 1`,
+  `periodSeconds: 2`) gates it. Every fifth minute one checkout took about
+  0.75 s longer: KubeSwift repeats its authorization check of a digest
+  reference every 5 minutes, serially, before claiming a slot.
+- 10 warm starts each:
 
 | Case | dispatch to first direct response (p50) | `Available` (p50) | Result |
 |---|---:|---:|---|
-| artifact with an entry compiled on another CPU class (AVX-512) | 1.480 s | 3.125 s | miss, normal compile, application served |
-| artifact with entries for both CPU classes | 1.034 s | 2.151 s | hit on the lab's class |
+| entry compiled on another CPU class (AVX-512) | 1.480 s | 3.125 s | miss, normal compile, served |
+| entries for both CPU classes | 1.034 s | 2.151 s | hit on the lab's class |
 | no readiness check, v0.1.1 runtime | 1.450 s | 1.571 s | |
 | no readiness check, compiled cache | 1.035 s | 1.182 s | 389 ms earlier `Available` |
 
   The first checkout of each new artifact digest on the node took 5.4 to
-  5.5 s instead of about 1.1 s: KubeSwift ran its fetch pod (pull and
-  signature check) and dispatched again. Later checkouts on that node
-  mounted it from the node cache. The first Service response stayed at
-  about 2.2 s without a readiness check in both cases: kube-proxy's rule
-  sync, not the start, sets it.
+  5.5 s instead of about 1.1 s (fetch pod, pull, signature check, second
+  dispatch). The first Service response stayed at about 2.2 s without a
+  readiness check: kube-proxy's rule sync, not the start, sets it.
 
 ## Consequences
 
-- No KubeSwift release is required for the core path (v0.16.2 or later
-  with kernels/sandbox 6.6.15 or later on warm slots). KubeSwift changes
-  make it cheaper and more robust: optional artifacts, placement on pool
-  nodes, node cache garbage collection, keyless verification, and a
-  concurrent or longer-lived authorization check for digest references
+- kubeswift-spin v0.2.0 at the earliest: a compiler and a signer
+  component, a CRD, a runtime image with a compile mode and an entrypoint
+  that owns the cache configuration, new executor settings, per-namespace
+  repositories and pull credentials to provision.
+- KubeSwift work is required before this is production-worthy: output
+  export (for an isolated compiler), a verification policy tenants cannot
+  modify, optional artifacts, placement on pool nodes, authorization off the
+  checkout path, node cache garbage collection, and per-pool advertisement
+  of warm-mount support
   ([kubeswift-sandbox-optional-artifacts.md](../upstream/kubeswift-sandbox-optional-artifacts.md)).
-- kubeswift-spin gains a compiler component, a CRD and a signing key to
-  operate, and a registry location per namespace for artifacts.
-- The cache must be rebuilt for every runtime image (Spin version) and for
-  every new CPU class in the cluster.
+- Acceptance criteria before the feature can default to on: the
+  first-checkout fetch no longer on the request path, no periodic
+  authorization delay at checkout, and a measured saving at p95 as well as
+  p50.
+- The cache must be rebuilt for every runtime image and every new CPU
+  class.
 
 ## Open questions
 
-- Applications in private registries: the compiler must pull them, which
-  needs a credential the platform may not have (kubeswift-spin reads no
-  Secret). Options: a platform pull credential per executor, or compiling
-  in the application's namespace with the SpinApp's own `imagePullSecrets`
-  and a separate signer.
-- A compile-only command in Spin (load every component, populate the
-  cache, exit without serving) would replace starting `spin up` and
-  stopping it, and would rule out executing application code during
-  compilation for triggers other than HTTP.
-- CPU class discovery on clusters with mixed hardware: node labels (for
-  example from Node Feature Discovery) to place one compiler Job per class.
+- Applications in private registries: the compiler sandbox must pull them.
+  A platform pull credential per executor is the simplest; compiling with
+  the SpinApp's own `imagePullSecrets` inside the tenant's namespace keeps
+  credentials where they are but must never let a key valid beyond that
+  namespace sign the output.
+- A compile-only command in Spin would replace the runtime's compile mode
+  and cover non-HTTP triggers.
+- CPU class discovery on mixed hardware: node labels (for example from Node
+  Feature Discovery) to run one compile per class.

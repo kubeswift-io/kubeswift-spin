@@ -1,4 +1,4 @@
-# KubeSwift requirement: optional checkout-time artifacts, node placement, cache lifecycle and checkout latency
+# KubeSwift requirements: accelerating artifacts and producing them in a sandbox
 
 Status: proposal, not filed. Builds on `spec.artifacts`, which KubeSwift
 v0.16.2 mounts read-only at warm-pool checkout as well as at a cold start.
@@ -50,56 +50,89 @@ For such an artifact:
    after an expiry took about 0.75 s longer. Digest references are
    immutable, so the check could run concurrently with the claim, or be
    cached longer, without weakening the binding.
-6. **Projection is not visible.** The sandbox is `Running` with
+6. **Nothing can produce an artifact in isolation.** A platform that must
+   run an untrusted transformation (compiling, indexing) to produce such an
+   artifact can run it in a sandbox, but cannot get the result out without
+   giving the guest registry credentials.
+7. **Projection is not visible.** The sandbox is `Running` with
    `GuestRunning=True` (`CheckedOut`) before the artifacts are projected,
    and stays so while a fetch pod runs. A client cannot tell when the
    artifact is in place or whether the workload started without it.
 
 ## Proposed API
 
-1. `spec.artifacts[].optional` (bool, default `false`). When `true`, a
-   failure to resolve, fetch, verify or materialize the artifact does not
-   fail the sandbox: the artifact is not mounted, the workload starts
-   without it, and the sandbox records why (see 5). Verification stays
-   strict: an optional artifact that fails verification is never mounted.
-2. `SwiftSandboxPool.spec.artifactHints` (list of OCI references by digest,
-   with the same `pullSecretRef` and `verifyKeySecretRef` fields): the pool
-   materializes them into the node cache of every node that holds a slot,
-   before the slots count as warm or in the background. A checkout prefers
-   a slot on a node whose cache already holds the sandbox's artifacts.
-   Hints never change the slot shape.
-3. Node cache lifecycle: a size limit per node (absolute and as a fraction
-   of the filesystem) and least-recently-used eviction of entries that no
-   running sandbox and no pool hint references. Eviction never removes the
+Each item is independent and can be filed and shipped separately.
+
+1. **Optional artifacts.** `spec.artifacts[].optional` (bool, default
+   `false`). When `true`, a failure to resolve, fetch, verify or
+   materialize the artifact, or a registry that stays unreachable past a
+   per-artifact `fetchTimeout`, does not fail the sandbox: nothing is
+   mounted at `mountPath` (the path does not exist in the guest), the
+   workload starts without it, and the sandbox records why (item 7).
+   Verification stays strict: an optional artifact that fails verification
+   is never mounted.
+2. **Placement on pool nodes.** KubeSwift itself keeps the artifacts
+   recently checked out from a pool materialized on every node that holds a
+   slot of that pool, and a checkout prefers a slot on a node whose cache
+   already holds the sandbox's artifacts. Clients do not write pool specs
+   for this (pools are usually owned by administrators, and per-version
+   digests would make pool edits frequent). Placement uses only the
+   repositories and credentials of the pool's own namespace and never
+   changes the slot shape.
+3. **Node cache lifecycle.** A size limit per node (absolute and as a
+   fraction of the filesystem) and least-recently-used eviction of entries
+   that no running sandbox references. Eviction never removes the
    per-repository authorization or verification records of an entry that
    stays.
-4. Verification policy: `verifyKeySecretRef` stays; add keyless
-   verification (`certificateIdentity`, `certificateOIDCIssuer`, an
-   optional Rekor URL) and allow more than one accepted key.
-5. Authorization off the critical path: the resolve of a digest reference
-   runs concurrently with the slot claim, and the claim is released if it
-   fails.
-6. Status: `status.artifacts[]` gains `state` (`Mounted`, `Skipped`,
-   `Failed`), `reason` and `mountedAt`, set when swiftletd projects the
-   artifact (warm path) or when the launcher starts (cold path), before the
-   workload is dispatched.
+4. **Verification policy tenants cannot modify.** A verification policy
+   referenced by the sandbox but held outside the sandbox's namespace (a
+   cluster-scoped object or a platform namespace), with more than one
+   accepted key, keyless verification (`certificateIdentity`,
+   `certificateOIDCIssuer`, an optional Rekor URL), and optional checks of
+   signed claims (annotations or attestation predicates that must match
+   values the sandbox supplies, for example a namespace). Today
+   `verifyKeySecretRef` is a Secret in the sandbox's namespace, which
+   anyone who can write Secrets there can replace.
+5. **Authorization off the critical path.** The resolve of a digest
+   reference (the check that the sandbox's credentials may read the
+   repository) runs concurrently with the slot claim. It still always
+   completes, and succeeds, before anything is mounted; the claim is
+   released if it fails. The cache of authorization results stays bounded,
+   so revoked credentials still take effect.
+6. **Output export.** A sandbox can declare a guest directory that
+   KubeSwift packages and pushes as an OCI artifact when the workload
+   exits successfully, with credentials that never enter the guest (for
+   example `spec.outputs[]` with `path`, `repository`, `pushSecretRef`),
+   and records the pushed digest in status. This lets a platform run an
+   untrusted build or transformation step in a microVM without giving the
+   guest registry credentials.
+7. **Pool and sandbox status.**
+   - `SwiftSandboxPool.status` advertises what its slots can take, at least
+     whether they can mount artifacts at checkout (kernel bridge feature
+     `warm-mounts`), so a client can avoid sandboxes that would fall back to
+     a cold boot without reading pods.
+   - `status.artifacts[]` gains `state` (`Mounted`, `Skipped`, `Failed`),
+     `reason` and `mountedAt`, set when swiftletd projects the artifact
+     (warm path) or when the launcher starts (cold path), before the
+     workload is dispatched.
 
 ## Semantics
 
 - An optional artifact never delays the workload beyond its own resolve
-  and fetch timeouts. A per-artifact `fetchTimeout` (default the current
-  materializer timeout) bounds how long a checkout waits before starting
-  without it.
+  and fetch timeouts.
 - A required artifact (the default) keeps today's behavior.
 - Concurrent checkouts that need the same uncached artifact on one node
   share one fetch.
 - Read-only guarantees, digest pinning, repository binding of the node
-  cache and the mount ordering before dispatch are unchanged.
+  cache, per-sandbox authorization before mount and the mount ordering
+  before dispatch are unchanged.
 
 ## Why this belongs in KubeSwift
 
 Every client that attaches accelerating content has the same needs:
 starting without the content when it is unavailable, placing it before the
-first use, and bounding the node cache. Doing it in each client means
+first use, bounding the node cache, verifying with a policy the workload's
+namespace cannot change, and producing such content in an isolated
+sandbox. Doing it in each client means
 creating a sandbox, watching it fail, and creating it again, and leaves the
 node cache unbounded regardless.
