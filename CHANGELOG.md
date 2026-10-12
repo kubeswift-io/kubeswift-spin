@@ -7,58 +7,63 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## Unreleased
+## v0.1.1 (2026-10-12)
 
-KubeSwift v0.16.4 or later is the recommended baseline (v0.16.3 remains the
-minimum for the termination behavior kubeswift-spin relies on). v0.16.4
-hands a warm-pool slot to a checkout only once its guest is ready.
+A patch release: the drain period of deleted replicas is configurable.
+KubeSwift v0.16.4 or later is the recommended baseline; v0.16.3 remains the
+minimum. Without the new settings nothing changes.
 
 ### Added
 
-- The drain period of deleted replicas is configurable. The annotation
-  `spin.kubeswift.io/drain-period` on a SpinApp, or on its executor (chart
-  value `executors[].drainPeriod`), sets the replicas'
-  `spec.termination.drainPeriod`: how long a replica keeps running after
-  its readiness was withdrawn, so requests in flight can finish, before
-  KubeSwift stops it. The SpinApp's annotation takes precedence. A value
-  is a duration with units from `0s` to `10m`; an invalid one is reported
-  before any sandbox is created (`UnsupportedConfiguration` on a SpinApp,
-  `ExecutorInvalid` on an executor). Needs KubeSwift v0.16.3 or later. See
-  docs/executor-contract.md (Drain period).
-- The executor annotation `spin.kubeswift.io/max-drain-period` (chart value
-  `executors[].maxDrainPeriod`) caps the drain period its SpinApps may set;
-  the default is KubeSwift's 10 minutes.
+- The drain period of deleted replicas is configurable: how long a replica
+  keeps running after its readiness was withdrawn, so requests in flight
+  can finish, before KubeSwift stops it (`spec.termination.drainPeriod`).
+  The annotation `spin.kubeswift.io/drain-period` on a SpinApp takes
+  precedence over the same annotation on its executor (chart value
+  `executors[].drainPeriod`); without either the field stays unset and
+  KubeSwift's default applies (5 seconds for exposed sandboxes). Values are
+  durations with units from `0s` to `10m`. Needs KubeSwift v0.16.3 or
+  later. See docs/executor-contract.md (Drain period).
+- Executor drain policy: `spin.kubeswift.io/max-drain-period` (chart value
+  `executors[].maxDrainPeriod`, default KubeSwift's 10 minutes) caps the
+  drain period of the executor's SpinApps. A SpinApp asking for more, or
+  an invalid value, is reported as `UnsupportedConfiguration` with a
+  Warning Event before any sandbox is created; an invalid executor value
+  as `ExecutorInvalid`. A value is never clamped.
+
+### Fixed
+
+- A change to a `spin.kubeswift.io/` annotation of a SpinApp, such as
+  `kubectl annotate spinapp <name> spin.kubeswift.io/drain-period=30s`, is
+  reconciled at once; such edits do not change the generation, and were
+  previously seen only with the next spec change. An unknown
+  `spin.kubeswift.io/` annotation on a SpinApp is reported in a Warning
+  Event.
+- A SpinApp re-created while its predecessor's sandbox still drains is
+  rechecked when that drain should end (every 5 to 30 seconds) instead of
+  every 5 seconds, and waits 2 minutes plus that drain period before
+  reporting `SandboxConflict`.
 
 ### Changed
 
-- A change to a `spin.kubeswift.io/` annotation of a SpinApp is reconciled
-  at once; such edits do not change the SpinApp's generation.
-- An unknown `spin.kubeswift.io/` annotation on a SpinApp is reported in a
-  Warning Event and otherwise ignored.
-- The wait for a deleted same-named SpinApp's terminating sandbox lasts 2
-  minutes plus the drain period in that sandbox's spec, and is rechecked
-  when that drain and KubeSwift's 15-second stop allowance should have
-  ended (every 5 to 30 seconds) instead of every 5 seconds.
-- While a deleted replica still terminates, `Progressing` names the
-  sandbox its ordinal waits for. The `SandboxConflict` message names the
-  deletion time instead of the age.
-- KubeSwift v0.16.4 is the contract-test and envtest dependency.
+- KubeSwift v0.16.4 is the contract-test and envtest dependency. v0.16.4
+  hands a warm-pool slot to a checkout only once its guest is ready.
+- While a deleted replica still terminates, `Progressing` names the sandbox
+  its ordinal waits for; the `SandboxConflict` message names the deletion
+  time instead of the age.
 
 ### Upgrade notes
 
-- Without the annotation nothing changes: `spec.termination` stays unset,
-  KubeSwift applies its default (5 seconds for exposed sandboxes), and no
-  replica is replaced on upgrade. Setting, changing or removing the
-  annotation replaces the affected replicas once, one at a time.
-- A longer drain keeps each deleted replica, and its capacity, for that
-  long; a rolling update of N replicas takes at least N times the drain
-  period of the replicas it replaces, and KubeSwift sets the launcher pod's
-  termination grace period to the drain plus 15 seconds, which node drains
-  wait for.
-- SpinApp authors can now set a drain period of up to 10 minutes on their
-  SpinApps. Set `spin.kubeswift.io/max-drain-period` on executors whose
-  SpinApp authors should not hold capacity or slow node maintenance that
-  long.
+- Upgrading from v0.1.0 changes no rendered SwiftSandbox spec, so it
+  replaces no replica; the runtime image stays `spin-4.2.1-r2`.
+- Setting, changing or removing a drain period replaces the affected
+  replicas once. A longer drain keeps each deleted replica, and its
+  capacity, for that long, makes a rolling update of N replicas take at
+  least N times the drain period of the replicas it replaces, and sets
+  the launcher pod's termination grace period (drain plus 15 seconds),
+  which node drains wait for.
+- SpinApp authors can set a drain period of up to 10 minutes unless the
+  executor sets `spin.kubeswift.io/max-drain-period`.
 
 ## v0.1.0 (2026-10-11)
 
