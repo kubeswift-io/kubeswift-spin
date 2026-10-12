@@ -604,6 +604,35 @@ spec:
   replicas: 2
 ```
 
+An executor can set the default for its SpinApps and cap what they may ask
+for. With this executor, SpinApps without the annotation drain for 15
+seconds, and a SpinApp asking for more than 2 minutes is reported
+`UnsupportedConfiguration` instead of being clamped:
+
+```yaml
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinAppExecutor
+metadata:
+  name: kubeswift
+  labels:
+    spin.kubeswift.io/managed-by: kubeswift-spin
+  annotations:
+    spin.kubeswift.io/drain-period: 15s
+    spin.kubeswift.io/max-drain-period: 2m
+spec:
+  createDeployment: false
+```
+
+With the chart, the same executor is:
+
+```yaml
+executors:
+  - name: kubeswift
+    namespaces: [demo]
+    drainPeriod: 15s
+    maxDrainPeriod: 2m
+```
+
 On KubeSwift v0.16.2 and earlier there is no explicit drain: the guest keeps
 serving until the launcher's 30-second termination grace period ends, the
 launcher pod ends `Failed`, and the NetworkPolicy is removed while the

@@ -19,13 +19,14 @@ SpinKube is the better choice.
 
 ## Status
 
-v0.1.0 is the first release. It was validated on a KVM lab cluster:
-Kubernetes 1.34 (k0s) with the Calico CNI on linux/amd64 nodes, KubeSwift
-v0.16.3 and Spin Operator v0.6.1. The validation covered the end-to-end
-test suite, rolling updates, scaling and deletion under continuous traffic,
-network isolation during termination and warm pools, with builds from the
-same source as v0.1.0. [docs/compatibility.md](docs/compatibility.md) lists what was
-tested.
+The current release is v0.1.1, which adds a configurable drain period for
+deleted replicas. It was validated on a KVM lab cluster: Kubernetes 1.34
+(k0s) with the Calico CNI on linux/amd64 nodes, Spin Operator v0.6.1 and
+KubeSwift v0.16.3 (v0.1.0: the end-to-end test suite, rolling updates,
+scaling and deletion under continuous traffic, network isolation during
+termination, warm pools) and v0.16.4 (the drain period, rolling updates
+under traffic, warm pools). [docs/compatibility.md](docs/compatibility.md)
+lists what was tested.
 
 It has been run on that one cluster only. Evaluate it with your own
 workloads, and read the [known limitations](#known-limitations), before
@@ -103,7 +104,7 @@ kubectl create namespace demo
 ```
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.0 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.1 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -118,7 +119,7 @@ Building from source: [CONTRIBUTING.md](CONTRIBUTING.md#build-from-source).
 ## Quick start
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.0/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.1/examples/hello-http/spinapp.yaml
 ```
 
 ```bash
@@ -153,7 +154,7 @@ and an experimental MCP server, are in [examples](examples/).
   configuration.
 - Startup figures in [performance](docs/performance.md) are lab
   measurements, not guarantees. The Wasmtime compilation cache measured
-  there was a diagnostic; v0.1.0 ships no prebuilt cache, and every
+  there was a diagnostic; kubeswift-spin ships no prebuilt cache, and every
   sandbox starts with an empty one.
 - Any SpinApp author in a namespace can make that namespace's Secrets
   readable by their application, and registry credentials and
