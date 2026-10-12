@@ -37,8 +37,8 @@ hands a warm-pool slot to a checkout only once its guest is ready.
   Warning Event and otherwise ignored.
 - The wait for a deleted same-named SpinApp's terminating sandbox lasts 2
   minutes plus the drain period in that sandbox's spec, and is rechecked
-  when that drain should end (every 5 to 30 seconds) instead of every 5
-  seconds.
+  when that drain and KubeSwift's 15-second stop allowance should have
+  ended (every 5 to 30 seconds) instead of every 5 seconds.
 - While a deleted replica still terminates, `Progressing` names the
   sandbox its ordinal waits for. The `SandboxConflict` message names the
   deletion time instead of the age.

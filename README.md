@@ -72,11 +72,12 @@ Details: [architecture](docs/architecture.md) and
 
 - Kubernetes 1.31 or later (the chart's minimum; 1.34 was tested)
 - KubeSwift v0.16.4 or later, the recommended baseline (v0.16.3 is the
-  minimum). kubeswift-spin relies on its termination order (a deleted replica leaves the Service,
-  drains and is then stopped), on its network isolation being kept until a
-  replica has stopped, and on a re-created sandbox never taking over the
-  previous one's launcher. Older KubeSwift releases run with the
-  limitations in [compatibility](docs/compatibility.md#kubeswift-features).
+  minimum). kubeswift-spin relies on its termination order (a deleted
+  replica leaves the Service, drains and is then stopped), on its network
+  isolation being kept until a replica has stopped, and on a re-created
+  sandbox never taking over the previous one's launcher. Older KubeSwift
+  releases run with the limitations in
+  [compatibility](docs/compatibility.md#kubeswift-features).
 - a node labelled `kubeswift.io/kernel-node=true`, and a Ready SwiftKernel
   named `sandbox` in every namespace that runs SpinApps (6.6.14 or later
   for secret files)
