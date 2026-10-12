@@ -6,8 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -60,12 +64,16 @@ const (
 	EventExecutorChanged    = "ExecutorChanged"
 )
 
-// leavingRequeueMax bounds how soon a SpinApp is rechecked while its sandbox
-// name is held by a terminating sandbox of a deleted SpinApp with the same
-// name. Such a sandbox is still owned by a SpinApp of that name, so its
-// updates and removal already enqueue this SpinApp; the requeue is a safety
-// net.
-const leavingRequeueMax = 5 * time.Second
+// leavingRequeueMin is the shortest recheck while a SpinApp's sandbox name is
+// held by a terminating sandbox of a deleted SpinApp with the same name.
+// Such a sandbox is still owned by a SpinApp of that name, so its updates
+// and removal already enqueue this SpinApp; the requeue is a safety net,
+// timed for when the sandbox's drain and KubeSwift's stop allowance end and
+// at most WaitingRequeue away, so a long drain is not polled.
+const leavingRequeueMin = 5 * time.Second
+
+// stopAllowance is KubeSwift's time to stop a microVM after its drain.
+const stopAllowance = 15 * time.Second
 
 // SpinAppReconciler realizes SpinApps as SwiftSandboxes.
 type SpinAppReconciler struct {
@@ -92,9 +100,16 @@ type SpinAppReconciler struct {
 	WaitingRequeue time.Duration
 	// LeavingTimeout is how long a sandbox of a deleted SpinApp with the
 	// same name may keep a sandbox name while it terminates before it is
-	// reported as SandboxConflict. KubeSwift v0.16.3 releases it within its
-	// drain, a 15 s stop allowance and a 30 s slack. Defaults to 2 minutes.
+	// reported as SandboxConflict, on top of the drain period in that
+	// sandbox's spec. KubeSwift v0.16.3 releases it within its drain, a 15 s
+	// stop allowance and a 30 s slack. Defaults to 2 minutes.
 	LeavingTimeout time.Duration
+
+	// annSeen remembers, per SpinApp, the spin.kubeswift.io/ annotations of
+	// the last reconcile, so an annotation-only edit (no new generation)
+	// still reports its findings.
+	annMu   sync.Mutex
+	annSeen map[string]string
 }
 
 // SetupWithManager registers the controller, its watches and the field index.
@@ -130,7 +145,7 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 
 	b := ctrl.NewControllerManagedBy(mgr).
 		Named("spinapp").
-		For(&spinv1alpha1.SpinApp{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&spinv1alpha1.SpinApp{}, builder.WithPredicates(predicate.Or[client.Object](predicate.GenerationChangedPredicate{}, appAnnotationsChanged))).
 		Owns(&sandboxv1alpha1.SwiftSandbox{}).
 		Watches(&spinv1alpha1.SpinAppExecutor{}, handler.EnqueueRequestsFromMapFunc(r.appsForExecutor))
 	if r.PoolsServed {
@@ -285,7 +300,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	opts.Features = features
 	findings := compatibility.Analyze(&app, profile, opts)
 	newGeneration := r.isNewGeneration(&app)
-	if newGeneration {
+	if annChanged := r.annotationsChanged(key, &app); newGeneration || annChanged {
 		for _, f := range findings {
 			if f.Blocking {
 				metrics.UnsupportedConfiguration.WithLabelValues(f.Field).Inc()
@@ -343,6 +358,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	var blocker *status.Blocker
 	var rejectedWait time.Duration
 	waitForName := false
+	leavingWait := time.Duration(-1) // the earliest recheck a name wait needs
 	requeue := plan.Waiting
 	for _, ord := range plan.Create {
 		sb := translate.NewSandbox(&app, profile.ExecutorName, tmpl, ord)
@@ -392,21 +408,25 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 			case nameFree:
 				// Gone between the create and the read: retry soon.
 				waitForName = true
+				leavingWait = 0
 				continue
 			case nameLeaving:
 				// A sandbox of a deleted SpinApp with the same name, still
 				// terminating under KubeSwift's finalizer: not a conflict,
 				// unless it takes far longer than KubeSwift allows.
 				age := now.Sub(held.DeletionTimestamp.Time)
-				if age < r.LeavingTimeout {
+				if age < r.leavingTimeout(held) {
 					logger.V(1).Info("waiting for a terminating sandbox of the same name", "sandbox", sb.Name)
 					waitForName = true
+					if left := r.leavingTimeout(held) - r.LeavingTimeout + stopAllowance - age; leavingWait < 0 || left < leavingWait {
+						leavingWait = left
+					}
 					continue
 				}
 				if blocker == nil {
 					blocker = &status.Blocker{Reason: status.ReasonSandboxConflict,
-						Message: fmt.Sprintf("SwiftSandbox %s of a deleted SpinApp with this name has been terminating for %s and still has finalizers %s; check that KubeSwift is running",
-							sb.Name, age.Round(time.Second), strings.Join(held.Finalizers, ", "))}
+						Message: fmt.Sprintf("SwiftSandbox %s of a deleted SpinApp with this name has been terminating since %s and still has finalizers %s; check that KubeSwift is running",
+							sb.Name, held.DeletionTimestamp.UTC().Format(time.RFC3339), strings.Join(held.Finalizers, ", "))}
 				}
 				continue
 			}
@@ -441,7 +461,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: backoffWait + 100*time.Millisecond}, nil
 	}
 	if waitForName && blocker == nil {
-		return ctrl.Result{RequeueAfter: min(r.WaitingRequeue, leavingRequeueMax)}, nil
+		return ctrl.Result{RequeueAfter: max(leavingRequeueMin, min(r.WaitingRequeue, leavingWait))}, nil
 	}
 	if requeue {
 		// Watches normally trigger the next step (owned sandbox events);
@@ -462,6 +482,39 @@ func rejectionReason(err error) (string, bool) {
 		return "Invalid", true
 	}
 	return "", false
+}
+
+// appAnnotationsChanged lets an update through when a spin.kubeswift.io/
+// annotation of the SpinApp changed: such an edit does not change the
+// generation, which GenerationChangedPredicate looks at.
+var appAnnotationsChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		if e.ObjectOld == nil || e.ObjectNew == nil {
+			return false
+		}
+		return !maps.Equal(kubeswiftAnnotations(e.ObjectOld.GetAnnotations()), kubeswiftAnnotations(e.ObjectNew.GetAnnotations()))
+	},
+}
+
+func kubeswiftAnnotations(ann map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range ann {
+		if strings.HasPrefix(k, executor.Prefix) {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// leavingTimeout is how long a predecessor's terminating sandbox may hold a
+// name: LeavingTimeout plus the drain period in that sandbox's own spec, so
+// a long drain is not reported as a stuck sandbox whatever the current
+// executor says.
+func (r *SpinAppReconciler) leavingTimeout(sb *sandboxv1alpha1.SwiftSandbox) time.Duration {
+	if t := sb.Spec.Termination; t != nil && t.DrainPeriod != nil && t.DrainPeriod.Duration > 0 {
+		return r.LeavingTimeout + min(t.DrainPeriod.Duration, executor.MaxDrainPeriod)
+	}
+	return r.LeavingTimeout
 }
 
 // nameState is who holds a sandbox name this SpinApp wants to create.
@@ -763,6 +816,30 @@ const maxEventNote = 1000
 func (r *SpinAppReconciler) forget(key string) {
 	r.Metrics.Forget(key)
 	r.Backoff.Forget(key)
+	r.annMu.Lock()
+	delete(r.annSeen, key)
+	r.annMu.Unlock()
+}
+
+// annotationsChanged records the SpinApp's spin.kubeswift.io/ annotations
+// and reports whether they differ from those of its previous reconcile. The
+// first reconcile after a restart reports no change, so a restart does not
+// repeat Events for every annotated SpinApp.
+func (r *SpinAppReconciler) annotationsChanged(key string, app *spinv1alpha1.SpinApp) bool {
+	ann := kubeswiftAnnotations(app.Annotations)
+	keys := slices.Sorted(maps.Keys(ann))
+	var sig strings.Builder
+	for _, k := range keys {
+		fmt.Fprintf(&sig, "%s=%s\n", k, ann[k])
+	}
+	r.annMu.Lock()
+	defer r.annMu.Unlock()
+	if r.annSeen == nil {
+		r.annSeen = map[string]string{}
+	}
+	prev, seen := r.annSeen[key]
+	r.annSeen[key] = sig.String()
+	return seen && prev != sig.String()
 }
 
 func findByName(list []sandboxv1alpha1.SwiftSandbox, name string) *sandboxv1alpha1.SwiftSandbox {

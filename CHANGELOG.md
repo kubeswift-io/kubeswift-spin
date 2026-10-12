@@ -7,6 +7,59 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## Unreleased
+
+KubeSwift v0.16.4 or later is the recommended baseline (v0.16.3 remains the
+minimum for the termination behavior kubeswift-spin relies on). v0.16.4
+hands a warm-pool slot to a checkout only once its guest is ready.
+
+### Added
+
+- The drain period of deleted replicas is configurable. The annotation
+  `spin.kubeswift.io/drain-period` on a SpinApp, or on its executor (chart
+  value `executors[].drainPeriod`), sets the replicas'
+  `spec.termination.drainPeriod`: how long a replica keeps running after
+  its readiness was withdrawn, so requests in flight can finish, before
+  KubeSwift stops it. The SpinApp's annotation takes precedence. A value
+  is a duration with units from `0s` to `10m`; an invalid one is reported
+  before any sandbox is created (`UnsupportedConfiguration` on a SpinApp,
+  `ExecutorInvalid` on an executor). Needs KubeSwift v0.16.3 or later. See
+  docs/executor-contract.md (Drain period).
+- The executor annotation `spin.kubeswift.io/max-drain-period` (chart value
+  `executors[].maxDrainPeriod`) caps the drain period its SpinApps may set;
+  the default is KubeSwift's 10 minutes.
+
+### Changed
+
+- A change to a `spin.kubeswift.io/` annotation of a SpinApp is reconciled
+  at once; such edits do not change the SpinApp's generation.
+- An unknown `spin.kubeswift.io/` annotation on a SpinApp is reported in a
+  Warning Event and otherwise ignored.
+- The wait for a deleted same-named SpinApp's terminating sandbox lasts 2
+  minutes plus the drain period in that sandbox's spec, and is rechecked
+  when that drain and KubeSwift's 15-second stop allowance should have
+  ended (every 5 to 30 seconds) instead of every 5 seconds.
+- While a deleted replica still terminates, `Progressing` names the
+  sandbox its ordinal waits for. The `SandboxConflict` message names the
+  deletion time instead of the age.
+- KubeSwift v0.16.4 is the contract-test and envtest dependency.
+
+### Upgrade notes
+
+- Without the annotation nothing changes: `spec.termination` stays unset,
+  KubeSwift applies its default (5 seconds for exposed sandboxes), and no
+  replica is replaced on upgrade. Setting, changing or removing the
+  annotation replaces the affected replicas once, one at a time.
+- A longer drain keeps each deleted replica, and its capacity, for that
+  long; a rolling update of N replicas takes at least N times the drain
+  period of the replicas it replaces, and KubeSwift sets the launcher pod's
+  termination grace period to the drain plus 15 seconds, which node drains
+  wait for.
+- SpinApp authors can now set a drain period of up to 10 minutes on their
+  SpinApps. Set `spin.kubeswift.io/max-drain-period` on executors whose
+  SpinApp authors should not hold capacity or slow node maintenance that
+  long.
+
 ## v0.1.0 (2026-10-11)
 
 First release. kubeswift-spin is an external SpinKube executor that runs

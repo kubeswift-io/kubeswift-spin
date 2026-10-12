@@ -393,7 +393,7 @@ executor names a cosign key Secret.
   kept running for up to the 30-second termination grace period: any pod
   in the cluster could reach the Spin port by pod IP and `ingress-from` was
   not enforced (observed on the lab cluster with v0.16.2). That is one
-  reason v0.16.3 is the supported baseline. The egress restriction is
+  reason v0.16.3 is the minimum supported release. The egress restriction is
   enforced inside the launcher pod and is not affected by any of this.
 - kubeswift-spin creates no NetworkPolicy, Service, EndpointSlice or proxy
   and never patches, labels or execs into launcher pods. Launcher pod labels
@@ -411,24 +411,29 @@ executor names a cosign key Secret.
 
 ## Namespace tenancy
 
-- A SpinApp can only use an executor in its own namespace, and executors
-  are created by whoever can create SpinAppExecutors there (by default the
-  Helm chart). Profile settings are under the control of executor authors,
-  not SpinApp authors. However, any SpinApp author in a namespace can select
-  any executor in that namespace: nothing ties an executor to particular
-  applications. Put executors with weaker isolation, in particular
-  `network-mode: open` or a broad `egress-allow`, only in namespaces whose
-  SpinApp authors are trusted with them.
+- A SpinApp can only use an executor in its own namespace, and executors are
+  created by whoever can create SpinAppExecutors there (by default the Helm
+  chart). Profile settings are under the control of executor authors, not
+  SpinApp authors, with one exception: a SpinApp author can set the drain
+  period of the SpinApp's replicas (`spin.kubeswift.io/drain-period`), up to
+  the executor's `spin.kubeswift.io/max-drain-period` (KubeSwift's 10
+  minutes by default; see [Denial of service and
+  capacity](#denial-of-service-and-capacity)). However, any SpinApp author
+  in a namespace can select any executor in that namespace: nothing ties an
+  executor to particular applications. Put executors with weaker isolation,
+  in particular `network-mode: open` or a broad `egress-allow`, only in
+  namespaces whose SpinApp authors are trusted with them.
 - Sandboxes are created in the SpinApp's namespace, and KubeSwift resolves
   kernels and Secrets in that namespace.
 - Ownership is by controller owner reference UID, so a user cannot make
   kubeswift-spin adopt, modify or delete a SwiftSandbox it did not create,
   even with matching labels. A name collision is reported as
   `SandboxConflict`, except that a sandbox of a deleted SpinApp with the
-  same name that is still terminating is waited for, for at most 2
-  minutes. On KubeSwift v0.16.3 a pod named like a replica's launcher
-  (`<spinapp>-<ordinal>`) that someone else created blocks that replica
-  (`LauncherPodConflict`); KubeSwift does not adopt it.
+  same name that is still terminating is waited for, for at most 2 minutes
+  plus that sandbox's drain period (up to about 12 minutes). On KubeSwift
+  v0.16.3 a pod named like a replica's launcher (`<spinapp>-<ordinal>`) that
+  someone else created blocks that replica (`LauncherPodConflict`);
+  KubeSwift does not adopt it.
 - The controller cache holds only SwiftSandboxes with its managed-by label.
 
 ## Malicious SpinApp input
@@ -519,9 +524,36 @@ kubectl delete swiftsandbox <name> -n <namespace> --cascade=foreground
 
 Each deleted ordinal is recreated at the new revision once the old one is
 gone, and the surge replica at the new revision too while the rollout lasts.
-A deleted replica drains for 5 seconds and is then stopped (KubeSwift
-v0.16.3; up to 30 seconds on earlier releases). `spec.replicas: 0` is not
-supported and leaves every sandbox in place.
+A deleted replica drains for 5 seconds, or for the
+`spin.kubeswift.io/drain-period` of its SpinApp or executor (up to 10
+minutes), and is then stopped (KubeSwift v0.16.3; up to 30 seconds on
+earlier releases). Deleting old SwiftSandboxes therefore removes them only
+after their drain: until then each keeps running with its old
+configuration (runtime image, egress allowlist, secret files) and stays
+reachable by its `ingress-from` peers, although no longer through the
+Service. `spec.replicas: 0` is not supported and leaves every sandbox in
+place.
+
+The drain period is the only kubeswift-spin setting a SpinApp author
+controls, and it affects the platform:
+
+- A deleted replica keeps its node capacity for its drain, up to about 10
+  minutes and 15 seconds alongside its replacement. Draining SwiftSandboxes
+  and their launcher pods count against ResourceQuota until they are gone.
+- A rollout replaces one replica per drain period of the old replicas, so
+  an executor change made by the platform operator, such as a new runtime
+  image, reaches every replica of a SpinApp with a 10-minute drain only
+  after about N times 10 minutes.
+- KubeSwift sets the launcher pod's termination grace period to the drain
+  plus 15 seconds, so draining a node, upgrading it or evicting the pod
+  waits up to about 10 minutes and 15 seconds per launcher pod.
+
+The platform operator bounds this per executor with
+`spin.kubeswift.io/max-drain-period` (chart value
+`executors[].maxDrainPeriod`): a SpinApp that asks for more is reported
+`UnsupportedConfiguration` and nothing is created or replaced for it. An
+admission policy on SpinApps (for example a ValidatingAdmissionPolicy) can
+forbid the annotation entirely.
 
 ## Finalizers and deletion
 
@@ -536,9 +568,10 @@ on every SwiftSandbox and `kubeswift.io/launcher-isolation` on every
 launcher NetworkPolicy. Deleting SwiftSandboxes, and so namespaces that
 contain them (and SpinApps deleted with `--cascade=foreground`), then needs
 the KubeSwift controller running; a SpinApp deleted with the default
-propagation goes at once and leaves its sandboxes terminating. the sandbox
+propagation goes at once and leaves its sandboxes terminating. The sandbox
 finalizer is released by KubeSwift at the latest 30 seconds after the
-launcher's grace period, and the NetworkPolicy finalizer only once the
+launcher's grace period (the drain period plus 15 seconds, so up to about
+10 minutes and 45 seconds after the deletion), and the NetworkPolicy finalizer only once the
 launcher pod has finished. Before downgrading KubeSwift, remove these
 finalizers as its release notes describe.
 

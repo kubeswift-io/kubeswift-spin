@@ -11,7 +11,8 @@ that ran; nothing else is implied.
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
-| KubeSwift | v0.16.3 | KVM e2e, rolling updates under traffic, termination and `ingress-from` through deletion, re-creation under the same name, readiness startup and the startup benchmark on the lab cluster; contract test of `internal/sandboxapi` against the v0.16.3 Go types and CRDs; v0.16.3 sandbox CRDs in envtest. The supported baseline |
+| KubeSwift | v0.16.4 | drain period: default, `0s`, `10s` and a request longer than the drain, through rolling updates, scale-down and a broken replacement under traffic, `ingress-from` through a 10-second drain, invalid values; warm-pool checkout and refill on the lab cluster (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); contract test of `internal/sandboxapi` against the v0.16.4 Go types and CRDs; v0.16.4 sandbox CRDs in envtest. The recommended baseline |
+| KubeSwift | v0.16.3 | KVM e2e, rolling updates under traffic, termination and `ingress-from` through deletion, re-creation under the same name, readiness startup and the startup benchmark on the lab cluster; contract test against the v0.16.3 Go types and CRDs in kubeswift-spin v0.1.0 (now v0.16.4). The minimum for the termination behavior kubeswift-spin relies on |
 | KubeSwift | v0.16.0 to v0.16.2 | KVM e2e, startup benchmark and, on v0.16.2, rolling updates with earlier builds on the lab cluster; see [Known upstream issues](#known-upstream-issues) for what they lack |
 | KubeSwift | v0.15.1 | legacy mode only: unit and envtest tests with a feature detector that reports no optional features. Legacy mode uses only the API subset that was contract-tested against v0.15.1 before the module moved to v0.16.0. Not run on a v0.15.1 cluster since the v0.16.0 integration. |
 | cert-manager | v1.21.1 | KVM e2e cluster (the kind integration test pins v1.21.2) |
@@ -104,15 +105,80 @@ exited. With the broken revision the surge replica failed and was retried
 with backoff while the old replicas kept serving and the SpinApp stayed
 `Available`.
 
+### Drain period on KubeSwift v0.16.4
+
+KubeSwift v0.16.4 release images (controller, swiftletd and
+sandbox-materialize verified with cosign against the KubeSwift release
+workflow; every launcher ran the signed swiftletd digest), the lab cluster
+above, kubeswift-spin v0.1.0 for the baseline and a development build of
+the drain-period change. The published outbound-http example served the
+traffic: each `/fetch` called an in-cluster upstream that answered after a
+set delay and recorded which replica called it, so requests in flight and
+requests that reached a replica after its withdrawal could be counted.
+Short requests (`/healthz`, four loops) ran alongside. Times are from the
+old replica's deletion; "withdrawn" is its endpoint turning not ready.
+
+| Case | `drainPeriod` in the spec | Withdrawn | Launcher exited | Requests (long / short) | Failed |
+|---|---|---:|---:|---:|---:|
+| unset, v0.1.0, rolling update, 3-second requests | unset | 46 ms | 5.4 s | 67 / 16,080 | 0 |
+| unset, rolling update, 3-second requests | unset | 36 to 89 ms | 5.5 to 5.7 s | 134 / 30,844 (two runs) | 0 |
+| SpinApp `0s`, rolling update, 1-second requests | `0s` | 33 ms | 0.5 s | 57 / 13,778 | 2 / 3 |
+| SpinApp `10s` over executor `30s`, rolling update, 7-second requests | `10s` | 33 to 63 ms | 10.6 to 10.7 s | 163 / 36,022 (two runs) | 0 |
+| SpinApp `10s`, rolling update, 20-second requests | `10s` | 37 ms | 10.7 s | 110 / 22,767 | 32 / 0 |
+| SpinApp `10s`, 2 replicas, rolling update, 3-second requests | `10s` | 53 to 86 ms | 10.6 to 10.8 s | 118 / 23,096 | 0 |
+| executor `10s`, scale-down 3 to 1 | `10s` | 52 to 85 ms | 10.8 to 12.0 s | 55 / 12,272 | 0 |
+| executor `10s`, broken replacement held 90 s, 1 replica | `10s` | not deleted | | 208 / 45,319 | 0 |
+
+- Without a setting, `spec.termination` stayed unset on the old and new
+  replicas and KubeSwift applied its 5-second drain, as with v0.1.0.
+- Every request in flight when a replica was withdrawn and shorter than
+  its drain completed (6 per unset run, 14 per 10-second run with
+  7-second requests). A few requests reached a replica up to 0.9 seconds
+  after its withdrawal, before kube-proxy's next sync; they were served
+  like the others (in the 20-second case they too outlasted the drain).
+- With `0s` the replica stopped about half a second after its deletion: the
+  2 requests in flight and 3 short requests in kube-proxy's sync window
+  failed.
+- With 20-second requests and a 10-second drain, the requests still running
+  when the drain ended failed: the stopped microVM sends no reset, so the
+  client saw no response and waited for its own timeout (30 seconds).
+  Requests that could finish within the drain completed, and the replica
+  and its sandbox were gone 11 seconds after the deletion.
+- The scale-down deleted replicas 1 and 2 at once (replica 0 was ready and
+  kept serving) and each drained for 10 seconds. With the broken
+  replacement the old replica was never deleted, the SpinApp stayed
+  `Available` and reported `Progressing=False` with `SandboxFailed`.
+- `ingress-from` through a 10-second drain (two runs): a pod outside the
+  peers got no answer from the old replica (0 of 164 and 0 of 160
+  attempts), while an allowed pod was served until the drain ended (last
+  answer 10.0 and 10.1 seconds after the deletion); the NetworkPolicy was
+  removed with the launcher's exit.
+- Invalid values on a SpinApp (`abc`, `-5s`, `11m`, `30`) and above an
+  executor's `max-drain-period` gave `UnsupportedConfiguration` and a
+  Warning Event and created no sandbox; `11m` on an executor gave
+  `ExecutorInvalid`. A misspelled key added with `kubectl annotate` got a
+  Warning Event, and correcting an invalid value by annotation alone
+  created the replica.
+- Warm pool (kubeswift-spin v0.1.0, KubeSwift v0.16.4): a new two-slot pool
+  reported its slots as warming until their guests answered, then four
+  checkouts, the first right after the pool was ready, all claimed a warm
+  slot (`GuestRunning=True/CheckedOut`), the pool refilled after each, and
+  no `ExecFailed`, `GuestAgentUnreachable` or `PoolColdFallback` Event
+  occurred. SpinApp creation to `Available` was 1.88 and 1.98 seconds
+  without a readiness check and 3.38 and 3.40 seconds with the example's
+  check (client side, including the apply).
+
 ### Not tested
 
-- On KubeSwift v0.16.3: a request longer than the 5-second drain during a
-  replacement (that it is cut follows from the KubeSwift source), a
-  launcher pod on an unreachable node (KubeSwift's release 30 seconds past
-  the grace period), `LauncherPodConflict`, a force-deleted launcher pod,
-  and downgrading KubeSwift after removing its finalizers. The 2-minute
-  `SandboxConflict` for a terminating same-named sandbox ran only in
-  envtest.
+- On KubeSwift v0.16.3: a launcher pod on an unreachable node (KubeSwift's
+  release 30 seconds past the grace period), `LauncherPodConflict`, a
+  force-deleted launcher pod, and downgrading KubeSwift after removing its
+  finalizers. The `SandboxConflict` after 2 minutes plus the drain period
+  for a terminating same-named sandbox ran only in envtest.
+- The drain-period annotations on a KubeSwift v0.16.3 cluster (run only on
+  v0.16.4), their rejection on KubeSwift v0.16.0 to v0.16.2 (unit and
+  envtest only), and drain periods other than 0s and 10s, in particular
+  minutes-long drains with node drains and ResourceQuota.
 - arm64 (images are built and published but not validated), other CNIs
   than Calico, other Kubernetes distributions, and more than one cluster.
 - A Wasm component actively trying to read guest files or credentials; the
@@ -146,8 +212,8 @@ read the SwiftSandbox features from it (see below).
 kubeswift-spin reads the OpenAPI v3 schema of `sandbox.kubeswift.io/v1alpha1`
 and uses a SwiftSandbox feature only when its fields are present. Exposure,
 secrets and egress first appear in KubeSwift v0.16.0, readiness startup in
-v0.16.2 and termination in v0.16.3. KubeSwift v0.16.3 or later is the
-supported baseline: earlier releases lack the termination and launcher
+v0.16.2 and termination in v0.16.3. KubeSwift v0.16.3 is the minimum and
+v0.16.4 or later the recommended baseline: earlier releases lack the termination and launcher
 ownership behavior described below.
 
 | Feature | Detected when the schema has | Enables |
@@ -156,7 +222,7 @@ ownership behavior described below.
 | secrets | `spec.secretFiles` (the same release honors `env[].valueFrom.secretKeyRef`) | `secretKeyRef` variables and runtime-config options, `runtimeConfig.loadFromSecret`, `imagePullSecrets` |
 | egress | `spec.network.egress` | `spin.kubeswift.io/egress-allow` |
 | readiness startup | `spec.readinessStartup` | replicas reported ready about when they first answer; `spin.kubeswift.io/readiness-startup` (see [executor-contract.md](executor-contract.md#readiness-startup)) |
-| termination | `spec.termination` | nothing to configure: kubeswift-spin reports the feature at startup and, on KubeSwift v0.16.0 to v0.16.2 (exposure detected, termination not), logs that KubeSwift is older than v0.16.3. KubeSwift drains and stops deleted replicas itself (see below) |
+| termination | `spec.termination` | `spin.kubeswift.io/drain-period` on a SpinApp or executor (optional; KubeSwift's 5-second drain applies without it). kubeswift-spin reports the feature at startup and, on KubeSwift v0.16.0 to v0.16.2 (exposure detected, termination not), logs that KubeSwift is older than v0.16.3; the annotation makes the executor invalid, or the SpinApp unsupported, there. KubeSwift drains and stops deleted replicas itself (see below) |
 
 KubeSwift v0.16.3 also changes behavior that kubeswift-spin relies on but
 does not configure, so no schema field marks it:
@@ -164,9 +230,10 @@ does not configure, so no schema field marks it:
 - **Termination.** A deleted sandbox that exposes ports is taken out of
   Service endpoints, keeps running for a drain (`spec.termination.drainPeriod`,
   default 5 s), then has its microVM stopped; its launcher pod ends
-  `Succeeded`. kubeswift-spin does not set `drainPeriod`: every replica
-  exposes the Spin port, so the default applies, and leaving the spec
-  unchanged means upgrading kubeswift-spin replaces no replica.
+  `Succeeded`. kubeswift-spin sets `drainPeriod` only when the SpinApp or
+  its executor has the `spin.kubeswift.io/drain-period` annotation;
+  otherwise every replica, which exposes the Spin port, gets the default,
+  and the spec, and so every replica, stays unchanged.
 - **Isolation through termination.** The sandbox's NetworkPolicy is created
   before its launcher pod and kept until the launcher has stopped.
 - **Launcher ownership.** A sandbox uses only a launcher pod it controls; a
@@ -229,6 +296,17 @@ Existing sandboxes keep running.
 When exposure is detected, a SpinApp name longer than 52 characters is
 rejected: the label `core.spinkube.dev/app.<name>.status` that the SpinApp
 Service selects would exceed the 63-character limit of a label name.
+
+## SpinApp annotations
+
+kubeswift-spin reads one annotation on a SpinApp. An invalid value stops
+reconciliation like an unsupported field (`UnsupportedConfiguration`). Any
+other annotation under `spin.kubeswift.io/` is reported in a Warning Event
+and otherwise ignored, so SpinApps that reconciled before keep doing so.
+
+| Annotation | Effect |
+|---|---|
+| `spin.kubeswift.io/drain-period` | The replicas' `spec.termination.drainPeriod`, overriding the executor's annotation of the same name; a duration with units from `0s` to the executor's `spin.kubeswift.io/max-drain-period` (default `10m`). Needs KubeSwift v0.16.3 or later. See [executor-contract.md](executor-contract.md#drain-period). |
 
 ## SpinAppExecutor field support
 
@@ -321,6 +399,12 @@ The profile annotations, including `spin.kubeswift.io/egress-allow` and
   re-reads the schema at most every `--capability-refresh` (default 5
   minutes) and renders the new spec at the next reconcile of each SpinApp;
   restarting the controller applies it at once.
+- **Upgrading KubeSwift from v0.16.3 to v0.16.4** changes no SwiftSandbox
+  that kubeswift-spin renders. Apply its CRDs (`swiftsandboxpools` gains
+  `status.warmingReplicas`) and run its controller and swiftletd at the
+  same release: a pool reports a slot as warm a few seconds later than
+  before, once the guest answers, and with an older swiftletd every
+  checkout boots cold.
 - **Upgrading KubeSwift from v0.16.2 to v0.16.3** changes no SwiftSandbox that
   kubeswift-spin renders, so it replaces no replica. Apply the v0.16.3 CRDs
   as its upgrade notes say. Its controller adds finalizers to every

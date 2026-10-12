@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -467,6 +468,59 @@ func TestV16StillRejects(t *testing.T) {
 	for _, f := range Analyze(a, profile(), v16opts()) {
 		if f.Field == "name" {
 			t.Fatalf("52-character name rejected: %s", f.Message)
+		}
+	}
+}
+
+func TestSpinAppAnnotations(t *testing.T) {
+	withTermination := opts()
+	withTermination.Features = capabilities.Sandbox{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true, ReadinessStartup: true, Termination: true}
+	annotated := func(kv ...string) *spinv1alpha1.SpinApp {
+		a := app()
+		a.Annotations = map[string]string{}
+		for i := 0; i < len(kv); i += 2 {
+			a.Annotations[kv[i]] = kv[i+1]
+		}
+		return a
+	}
+	if fs := Analyze(annotated(executor.AnnDrainPeriod, "10s", "example.com/other", "x"), profile(), withTermination); len(fs) != 0 {
+		t.Fatalf("valid drain period: %+v", fs)
+	}
+	for _, v := range []string{"0", "-1s", "11m", "soon"} {
+		fs := Analyze(annotated(executor.AnnDrainPeriod, v), profile(), withTermination)
+		if !Blocking(fs) || fs[0].Field != "metadata.annotations" || !strings.Contains(fs[0].Message, executor.AnnDrainPeriod) {
+			t.Fatalf("%q: %+v", v, fs)
+		}
+	}
+	if fs := Analyze(annotated(executor.AnnDrainPeriod, "10s"), profile(), opts()); !Blocking(fs) || !strings.Contains(fs[0].Message, "v0.16.3") {
+		t.Fatalf("without spec.termination: %+v", fs)
+	}
+	// Above the executor's limit.
+	capped := profile()
+	minute := time.Minute
+	capped.DrainPeriodLimit = &minute
+	if fs := Analyze(annotated(executor.AnnDrainPeriod, "2m"), capped, withTermination); !Blocking(fs) || !strings.Contains(fs[0].Message, executor.AnnMaxDrainPeriod) {
+		t.Fatalf("above the executor limit: %+v", fs)
+	}
+	if fs := Analyze(annotated(executor.AnnDrainPeriod, "1m"), capped, withTermination); len(fs) != 0 {
+		t.Fatalf("at the executor limit: %+v", fs)
+	}
+	// An unknown key under the prefix warns but does not block, so a
+	// SpinApp that reconciled on v0.1.0 still does.
+	fs := Analyze(annotated(executor.Prefix+"drain-perod", "10s"), profile(), withTermination)
+	if Blocking(fs) || len(fs) != 1 || !strings.Contains(fs[0].Message, "drain-perod") {
+		t.Fatalf("unknown annotation: %+v", fs)
+	}
+}
+
+func TestAppAnnotationsDocumented(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/compatibility.md")
+	if err != nil {
+		t.Skipf("docs/compatibility.md not readable: %v", err)
+	}
+	for _, k := range AppAnnotations {
+		if !strings.Contains(string(doc), "| `"+k+"` |") {
+			t.Errorf("docs/compatibility.md lacks a row for the SpinApp annotation %s", k)
 		}
 	}
 }

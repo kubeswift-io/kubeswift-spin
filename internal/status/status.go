@@ -13,6 +13,7 @@ package status
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -123,8 +124,14 @@ func Compute(in Input) Result {
 	var failed []Instance
 	pending, materializing, outdated := 0, 0, 0
 	var waiting *Instance
+	var leaving []string
 	for i := range in.Instances {
 		inst := in.Instances[i]
+		if inst.Deleting && inst.Ordinal < int(in.Replicas) {
+			// Its name is recreated at the current revision only once
+			// KubeSwift has drained and removed it.
+			leaving = append(leaving, inst.Name)
+		}
 		if inst.Deleting || inst.Stale {
 			continue
 		}
@@ -209,8 +216,12 @@ func Compute(in Input) Result {
 		r.Progressing = cond(TypeProgressing, metav1.ConditionTrue, ReasonSandboxMaterializing,
 			fmt.Sprintf("%d of %d sandboxes are materializing the runtime rootfs", materializing, in.Replicas))
 	case pending > 0 || current < in.Replicas:
-		r.Progressing = cond(TypeProgressing, metav1.ConditionTrue, ReasonSandboxCreating,
-			fmt.Sprintf("%d of %d sandboxes running", running, in.Replicas))
+		msg := fmt.Sprintf("%d of %d sandboxes running", running, in.Replicas)
+		if len(leaving) > 0 {
+			sort.Strings(leaving)
+			msg += "; waiting for deleted sandbox " + strings.Join(leaving, ", ") + " to finish terminating"
+		}
+		r.Progressing = cond(TypeProgressing, metav1.ConditionTrue, ReasonSandboxCreating, msg)
 	default:
 		r.Progressing = cond(TypeProgressing, metav1.ConditionTrue, ReasonSandboxRunning,
 			fmt.Sprintf("%d of %d sandboxes running at revision %s", running, in.Replicas, in.Revision))

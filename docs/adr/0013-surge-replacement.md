@@ -106,7 +106,8 @@ the old name while the old sandbox still exists.
 Old replicas leave the Service through KubeSwift's termination, not through
 anything kubeswift-spin does. From KubeSwift v0.16.3 a deleted sandbox is
 taken out of Service endpoints, drains for `spec.termination.drainPeriod`
-(kubeswift-spin leaves the default of 5 seconds for exposed sandboxes) while
+(KubeSwift's default of 5 seconds for exposed sandboxes, or the
+`spin.kubeswift.io/drain-period` of the SpinApp or its executor) while
 kube-proxy catches up, and then has its microVM stopped; its NetworkPolicy
 stays until the launcher has stopped. kubeswift-spin adds no sleep, drain or
 endpoint handling of its own. The reliance on the guest ignoring the ACPI
@@ -114,5 +115,7 @@ power button and the NetworkPolicy window described above apply to KubeSwift
 v0.16.2 and earlier only. KubeSwift v0.16.3 is therefore the supported
 baseline; the proposal was
 [kubeswift-sandbox-termination-drain.md](../upstream/kubeswift-sandbox-termination-drain.md).
-A request still running when the 5-second drain ends is cut, where v0.16.2
-let it run for up to about 30 seconds.
+A request still running when the drain ends is cut. The default of
+5 seconds is shorter than the up to about 30 seconds v0.16.2 allowed; a
+SpinApp or executor can set a longer drain with
+`spin.kubeswift.io/drain-period`.

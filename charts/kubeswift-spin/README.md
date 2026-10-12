@@ -84,8 +84,8 @@ executors:
 Fields: `networkMode`, `rootfsMode`, `kernelProfile`, `sandboxPool`,
 `nodeSelector`, `defaultCPU`, `defaultMemory`, `runtimeImage`,
 `runtimeImagePullSecret`, `runtimeImageVerifyKeySecret`, `egressAllow`,
-`ingressFrom`, `readinessStartup`, `otel`. The namespaces must exist before
-installing.
+`ingressFrom`, `readinessStartup`, `drainPeriod`, `maxDrainPeriod`, `otel`. The namespaces
+must exist before installing.
 
 `egressAllow` (1 to 32 rules, each a `service` with `name` and optional
 `namespace`, or a `cidr`, with optional `ports`) renders the
@@ -103,6 +103,22 @@ then does not delay the first checks; see
 [docs/executor-contract.md](../../docs/executor-contract.md#readiness-startup).
 On KubeSwift before v0.16.2, `always` makes the executor invalid and
 `auto` changes nothing.
+
+`drainPeriod` (a duration with units from `0s` to `10m`, for example `30s`)
+renders `spin.kubeswift.io/drain-period`: how long a deleted replica keeps
+running after its readiness was withdrawn, so requests in flight can finish,
+before KubeSwift stops it. It is the default for the executor's SpinApps; a
+SpinApp's own `spin.kubeswift.io/drain-period` annotation overrides it.
+Without either, KubeSwift's default applies (5 seconds for exposed
+sandboxes) and requests running longer than that are cut when a replica is
+replaced. A rolling update of N replicas takes at least N times the drain
+period, and values below about 2 seconds leave little margin for kube-proxy
+and can fail requests during rolling updates. It needs KubeSwift v0.16.3 or
+later; setting or changing it replaces the affected replicas once; see
+[docs/executor-contract.md](../../docs/executor-contract.md#drain-period).
+`maxDrainPeriod` renders `spin.kubeswift.io/max-drain-period`, the longest
+drain period the executor's SpinApps may set (default: KubeSwift's 10
+minutes); a SpinApp asking for more is reported `UnsupportedConfiguration`.
 
 `sandboxPool` names a SwiftSandboxPool that you create in the same
 namespace. Its `image` must equal the controller's runtime image reference

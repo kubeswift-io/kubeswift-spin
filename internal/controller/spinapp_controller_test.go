@@ -20,6 +20,7 @@ import (
 
 	spinv1alpha1 "github.com/spinkube/spin-operator/api/v1alpha1"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 	"github.com/kubeswift-io/kubeswift-spin/internal/status"
@@ -981,7 +982,7 @@ func TestRejectedSurgeKeepsTheOldReplicaAndRecovers(t *testing.T) {
 
 // predecessorSandbox is a sandbox left by a deleted SpinApp named app (another
 // UID), still held by KubeSwift's termination finalizer.
-func predecessorSandbox(t *testing.T, ns, app, name string, owned bool) *sandboxv1alpha1.SwiftSandbox {
+func predecessorSandbox(t *testing.T, ns, app, name string, owned bool, mutate ...func(*sandboxv1alpha1.SwiftSandbox)) *sandboxv1alpha1.SwiftSandbox {
 	t.Helper()
 	sb := &sandboxv1alpha1.SwiftSandbox{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: translate.Labels(app, "kubeswift", "deadbeef00", 0),
@@ -991,6 +992,9 @@ func predecessorSandbox(t *testing.T, ns, app, name string, owned bool) *sandbox
 	if owned {
 		sb.OwnerReferences = []metav1.OwnerReference{{APIVersion: spinv1alpha1.GroupVersion.String(), Kind: "SpinApp",
 			Name: app, UID: "00000000-0000-0000-0000-000000000001", Controller: ptr.To(true)}}
+	}
+	for _, m := range mutate {
+		m(sb)
 	}
 	mustCreate(t, sb)
 	if err := testClient.Delete(ctx, sb); err != nil {
@@ -1052,11 +1056,31 @@ func TestStuckTerminatingSandboxIsReported(t *testing.T) {
 	predecessorSandbox(t, ns, "hello", "hello-0", true)
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
 	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxConflict)
-	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, "has been terminating for") || !strings.Contains(m, "kubeswift.io/sandbox-termination") {
+	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, "has been terminating since") || !strings.Contains(m, "kubeswift.io/sandbox-termination") {
 		t.Fatalf("message %q", m)
 	}
 	releaseFinalizer(t, ns, "hello-0")
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxCreating)
+}
+
+// The wait for a predecessor's sandbox grows by the drain period in that
+// sandbox's own spec, not the current executor's: a predecessor that drains
+// longer than the wait is not reported while it drains.
+func TestLeavingWaitUsesThePredecessorsDrain(t *testing.T) {
+	startManager(t, harnessOpts{leavingTimeout: 2 * time.Second})
+	ns := newNamespace(t)
+	predecessorSandbox(t, ns, "hello", "hello-0", true, func(sb *sandboxv1alpha1.SwiftSandbox) {
+		sb.Spec.Termination = &sandboxv1alpha1.SandboxTermination{DrainPeriod: &metav1.Duration{Duration: time.Hour}}
+	})
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	consistently(t, "no conflict reported while the old sandbox drains", 4*time.Second, func() error {
+		if c := findCond(getApp(t, ns, "hello"), status.TypeProgressing); c != nil && c.Reason == status.ReasonSandboxConflict {
+			return fmt.Errorf("conflict reported: %s", c.Message)
+		}
+		return nil
+	})
+	releaseFinalizer(t, ns, "hello-0")
+	expectSandboxes(t, ns, "hello-0")
 }
 
 // A terminating sandbox that no same-named SpinApp owned is a conflict at
@@ -1068,4 +1092,137 @@ func TestTerminatingForeignSandboxIsAConflict(t *testing.T) {
 	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
 	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonSandboxConflict)
 	releaseFinalizer(t, ns, "hello-0")
+}
+
+func TestDrainPeriodAnnotation(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", map[string]string{executor.AnnDrainPeriod: "30s"}), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	sb := getSandbox(t, ns, "hello-0")
+	if sb.Spec.Termination == nil || sb.Spec.Termination.DrainPeriod == nil || sb.Spec.Termination.DrainPeriod.Duration != 30*time.Second {
+		t.Fatalf("termination %+v", sb.Spec.Termination)
+	}
+}
+
+// A SpinApp's own drain-period annotation overrides the executor's, and
+// changing it rolls the replicas to the new value.
+func TestSpinAppDrainPeriodOverridesExecutor(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	app := spinApp(ns, "hello", "kubeswift", 1)
+	app.Annotations = map[string]string{executor.AnnDrainPeriod: "10s"}
+	mustCreate(t, managedExecutor(ns, "kubeswift", map[string]string{executor.AnnDrainPeriod: "30s"}), app)
+	expectSandboxes(t, ns, "hello-0")
+	if d := getSandbox(t, ns, "hello-0").Spec.Termination; d == nil || d.DrainPeriod == nil || d.DrainPeriod.Duration != 10*time.Second {
+		t.Fatalf("termination %+v, want the SpinApp's 10s", d)
+	}
+	setReady(t, ns, "hello-0")
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxRunning)
+	// An annotation edit does not change the generation; it must still
+	// roll the replica, through a surge replica with the executor's 30s.
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { delete(a.Annotations, executor.AnnDrainPeriod) })
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	if d := getSandbox(t, ns, "hello-1").Spec.Termination; d == nil || d.DrainPeriod == nil || d.DrainPeriod.Duration != 30*time.Second {
+		t.Fatalf("surge replica termination %+v, want the executor's 30s", d)
+	}
+}
+
+// An invalid SpinApp drain-period is reported before any sandbox exists.
+func TestInvalidSpinAppDrainPeriod(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	app := spinApp(ns, "hello", "kubeswift", 1)
+	app.Annotations = map[string]string{executor.AnnDrainPeriod: "11m"}
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), app)
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonUnsupportedConfiguration)
+	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, executor.AnnDrainPeriod) || !strings.Contains(m, "10m") {
+		t.Fatalf("message %q", m)
+	}
+	if n := len(listSandboxes(t, ns)); n != 0 {
+		t.Fatalf("%d sandboxes for an invalid SpinApp", n)
+	}
+}
+
+// Fixing an invalid SpinApp annotation, an edit that does not change the
+// generation, unblocks the SpinApp.
+func TestFixedSpinAppDrainPeriodRecovers(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	app := spinApp(ns, "hello", "kubeswift", 1)
+	app.Annotations = map[string]string{executor.AnnDrainPeriod: "30"}
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), app)
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonUnsupportedConfiguration)
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Annotations[executor.AnnDrainPeriod] = "30s" })
+	expectSandboxes(t, ns, "hello-0")
+	if d := getSandbox(t, ns, "hello-0").Spec.Termination; d == nil || d.DrainPeriod == nil || d.DrainPeriod.Duration != 30*time.Second {
+		t.Fatalf("termination %+v", d)
+	}
+}
+
+// A misspelled spin.kubeswift.io/ annotation added to a running SpinApp is
+// reported in a Warning Event, although the generation does not change.
+func TestUnknownSpinAppAnnotationWarns(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	setReady(t, ns, "hello-0")
+	expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionTrue, status.ReasonSandboxRunning)
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) {
+		a.Annotations = map[string]string{executor.Prefix + "drain-perod": "30s"}
+	})
+	eventually(t, "a Warning Event naming the misspelled key", func() error {
+		var l eventsv1.EventList
+		if err := testClient.List(ctx, &l, client.InNamespace(ns)); err != nil {
+			return err
+		}
+		for _, e := range l.Items {
+			if e.Regarding.Name == "hello" && e.Type == corev1.EventTypeWarning && strings.Contains(e.Note, "drain-perod") {
+				return nil
+			}
+		}
+		return fmt.Errorf("none among %d events", len(l.Items))
+	})
+}
+
+// A SpinApp cannot ask for more than its executor's max-drain-period.
+func TestSpinAppDrainPeriodAboveExecutorLimit(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	app := spinApp(ns, "hello", "kubeswift", 1)
+	app.Annotations = map[string]string{executor.AnnDrainPeriod: "2m"}
+	mustCreate(t, managedExecutor(ns, "kubeswift", map[string]string{executor.AnnMaxDrainPeriod: "1m"}), app)
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonUnsupportedConfiguration)
+	if m := findCond(a, status.TypeProgressing).Message; !strings.Contains(m, executor.AnnMaxDrainPeriod) {
+		t.Fatalf("message %q", m)
+	}
+	if n := len(listSandboxes(t, ns)); n != 0 {
+		t.Fatalf("%d sandboxes above the limit", n)
+	}
+}
+
+// Without any drain-period the field stays unset, as in v0.1.0.
+func TestNoDrainPeriodLeavesTerminationUnset(t *testing.T) {
+	startManager(t, harnessOpts{})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", nil), spinApp(ns, "hello", "kubeswift", 1))
+	expectSandboxes(t, ns, "hello-0")
+	if d := getSandbox(t, ns, "hello-0").Spec.Termination; d != nil {
+		t.Fatalf("termination %+v, want unset", d)
+	}
+}
+
+func TestDrainPeriodNeedsKubeSwiftTermination(t *testing.T) {
+	v0162 := capabilities.Static{Ports: true, ReadinessProbe: true, PodMetadata: true, SecretFiles: true, Egress: true, ReadinessStartup: true}
+	startManager(t, harnessOpts{detector: v0162})
+	ns := newNamespace(t)
+	mustCreate(t, managedExecutor(ns, "kubeswift", map[string]string{executor.AnnDrainPeriod: "30s"}), spinApp(ns, "hello", "kubeswift", 1))
+	a := expectCondition(t, ns, "hello", status.TypeProgressing, metav1.ConditionFalse, status.ReasonExecutorInvalid)
+	if msg := findCond(a, status.TypeProgressing).Message; !strings.Contains(msg, executor.AnnDrainPeriod) || !strings.Contains(msg, "v0.16.3") {
+		t.Fatalf("message %q", msg)
+	}
+	if n := len(listSandboxes(t, ns)); n != 0 {
+		t.Fatalf("%d sandboxes for an invalid executor", n)
+	}
 }

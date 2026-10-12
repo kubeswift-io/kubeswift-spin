@@ -44,6 +44,8 @@ relying on it in production.
   variables and runtime-config options, `runtimeConfig.loadFromSecret`, and
   private application registries through `imagePullSecrets`.
 - Egress allowlists, ingress restriction and warm pools, set per executor.
+- A configurable drain period for deleted replicas, so that long requests
+  in flight can finish ([drain period](docs/executor-contract.md#drain-period)).
 
 ## How it works
 
@@ -69,12 +71,13 @@ Details: [architecture](docs/architecture.md) and
 ## Requirements
 
 - Kubernetes 1.31 or later (the chart's minimum; 1.34 was tested)
-- KubeSwift v0.16.3 or later (v0.16.3 tested), the supported baseline. kubeswift-spin
-  relies on its termination order (a deleted replica leaves the Service,
-  drains and is then stopped), on its network isolation being kept until a
-  replica has stopped, and on a re-created sandbox never taking over the
-  previous one's launcher. Older KubeSwift releases run with the
-  limitations in [compatibility](docs/compatibility.md#kubeswift-features).
+- KubeSwift v0.16.4 or later, the recommended baseline (v0.16.3 is the
+  minimum). kubeswift-spin relies on its termination order (a deleted
+  replica leaves the Service, drains and is then stopped), on its network
+  isolation being kept until a replica has stopped, and on a re-created
+  sandbox never taking over the previous one's launcher. Older KubeSwift
+  releases run with the limitations in
+  [compatibility](docs/compatibility.md#kubeswift-features).
 - a node labelled `kubeswift.io/kernel-node=true`, and a Ready SwiftKernel
   named `sandbox` in every namespace that runs SpinApps (6.6.14 or later
   for secret files)
@@ -134,9 +137,10 @@ and an experimental MCP server, are in [examples](examples/).
 
 - Validated on linux/amd64 and one cluster only; arm64 images are
   published but have not been run.
-- A deleted replica (rolling update, scale-down, deletion) keeps serving
-  for KubeSwift's default drain of 5 seconds and is then stopped; a request
-  still running after that is cut.
+- A deleted replica (rolling update, scale-down, deletion) keeps running
+  for its drain period, KubeSwift's 5 seconds unless the SpinApp or
+  executor sets `spin.kubeswift.io/drain-period`, and is then stopped; a
+  request still running after that is cut.
 - Force-deleting a launcher pod (`--force`) bypasses the drain and the
   network isolation kept through it (not tested; see the
   [security model](docs/security-model.md#network-isolation)).
