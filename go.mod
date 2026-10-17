@@ -6,7 +6,7 @@ require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/kubeswift-io/kubeswift v0.16.4
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/prometheus/client_golang v1.24.1
+	github.com/prometheus/client_golang v1.25.0
 	github.com/spinkube/spin-operator v0.6.1
 	go.uber.org/zap v1.28.0
 	golang.org/x/sys v0.49.0
