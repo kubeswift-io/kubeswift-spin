@@ -44,8 +44,10 @@ const maxPools = 16
 // needs any more. Keying by namespace makes every decision from a complete
 // view of the namespace's SpinApps and records.
 type NamespaceReconciler struct {
-	Client   client.Client
-	Defaults executor.Defaults
+	Client client.Client
+	// APIReader reads a record that already exists past the cache.
+	APIReader client.Reader
+	Defaults  executor.Defaults
 	// Options are the controller's compatibility options: a SpinApp the
 	// controller refuses to run gets no compiled cache either.
 	Options  compatibility.Options
@@ -72,6 +74,9 @@ func (r *NamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	if r.MaxRecords == 0 {
 		r.MaxRecords = 32
+	}
+	if r.APIReader == nil {
+		r.APIReader = mgr.GetAPIReader()
 	}
 	toNamespace := func(_ context.Context, o client.Object) []reconcile.Request {
 		return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: o.GetNamespace()}}}
@@ -149,8 +154,19 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			continue
 		}
 		if len(records) >= r.MaxRecords {
-			logger.Info("namespace reached its compiled cache record limit; not recording more", "limit", r.MaxRecords, "source", w.id.Source)
-			break
+			// Make room by deleting the oldest record nobody needs (not in
+			// use, not a rollback target), even before its retention ends:
+			// a SpinApp's current version comes first.
+			victim := oldestUnneeded(records, v.apps)
+			if victim == "" {
+				logger.Info("namespace reached its compiled cache record limit; not recording more", "limit", r.MaxRecords, "source", w.id.Source)
+				break
+			}
+			if err := r.delete(ctx, records[victim]); err != nil {
+				return ctrl.Result{}, err
+			}
+			logger.Info("deleted the oldest unused compiled cache record to stay within the limit", "record", victim, "limit", r.MaxRecords)
+			delete(records, victim)
 		}
 		rec, err := r.create(ctx, ns, w.id)
 		if err != nil {
@@ -203,9 +219,8 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Delete what nobody needs.
 	for _, name := range Expired(records, v.apps, r.Retention, now) {
 		rec := records[name]
-		uid := rec.UID
-		if err := r.Client.Delete(ctx, rec, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
-			return ctrl.Result{}, fmt.Errorf("delete SpinCompiledCache %s: %w", name, err)
+		if err := r.delete(ctx, rec); err != nil {
+			return ctrl.Result{}, err
 		}
 		logger.Info("deleted unused compiled cache record", "record", name, "source", rec.Spec.Source)
 		delete(records, name)
@@ -227,6 +242,31 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, fmt.Errorf("some compiled cache requests of namespace %s could not be recorded", ns)
 	}
 	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// delete deletes a record if it is still the version this decision was
+// made on.
+func (r *NamespaceReconciler) delete(ctx context.Context, rec *cachev1alpha1.SpinCompiledCache) error {
+	uid, rv := rec.UID, rec.ResourceVersion
+	if err := r.Client.Delete(ctx, rec, client.Preconditions{UID: &uid, ResourceVersion: &rv}); err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+		return fmt.Errorf("delete SpinCompiledCache %s: %w", rec.Name, err)
+	}
+	return nil
+}
+
+// oldestUnneeded returns the record nobody needs that was used longest ago,
+// or "".
+func oldestUnneeded(records map[string]*cachev1alpha1.SpinCompiledCache, apps map[string]bool) string {
+	// Expired with no retention is exactly the set nobody needs.
+	victim := ""
+	var at time.Time
+	for _, name := range Expired(records, apps, 0, time.Now().Add(time.Hour)) {
+		t := retainedUntil(records[name], 0)
+		if victim == "" || t.Before(at) {
+			victim, at = name, t
+		}
+	}
+	return victim
 }
 
 // create creates the record of an identity. It returns nil, nil when a
@@ -253,7 +293,7 @@ func (r *NamespaceReconciler) create(ctx context.Context, ns string, id compiled
 		return nil, fmt.Errorf("create SpinCompiledCache %s: %w", rec.Name, err)
 	}
 	var existing cachev1alpha1.SpinCompiledCache
-	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(rec), &existing); err != nil {
+	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(rec), &existing); err != nil {
 		return nil, err
 	}
 	if !id.Matches(&existing) || existing.Labels[compiledcache.LabelNamespace] != ns {

@@ -57,6 +57,7 @@ EXPECTED = {
     ]),
     "cache-manager": norm([
         {"apiGroups": ["core.spinkube.dev"], "resources": ["spinapps", "spinappexecutors"], "verbs": ["get", "list", "watch"]},
+        {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftsandboxes"], "verbs": ["get", "list", "watch", "create", "delete"]},
         {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftsandboxpools"], "verbs": ["get", "list", "watch"]},
         {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "watch"]},
     ]),

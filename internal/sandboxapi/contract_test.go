@@ -38,6 +38,8 @@ var sharedTypes = map[reflect.Type]bool{
 	reflect.TypeOf(metav1.ListMeta{}):                true,
 	reflect.TypeOf(corev1.Probe{}):                   true,
 	reflect.TypeOf(networkingv1.NetworkPolicyPeer{}): true,
+	reflect.TypeOf(metav1.Duration{}):                true,
+	reflect.TypeOf(metav1.Time{}):                    true,
 }
 
 func jsonName(f reflect.StructField) string {
@@ -126,9 +128,21 @@ func TestConstantsMatchUpstream(t *testing.T) {
 	eq("phase Running", string(ours.SwiftSandboxRunning), string(upstream.SwiftSandboxRunning))
 	eq("phase Completed", string(ours.SwiftSandboxCompleted), string(upstream.SwiftSandboxCompleted))
 	eq("phase Failed", string(ours.SwiftSandboxFailed), string(upstream.SwiftSandboxFailed))
+	eq("phase Exporting", string(ours.SwiftSandboxExporting), string(upstream.SwiftSandboxExporting))
 	eq("condition Resolved", ours.SwiftSandboxConditionResolved, upstream.SwiftSandboxConditionResolved)
 	eq("condition GuestRunning", ours.SwiftSandboxConditionGuestRunning, upstream.SwiftSandboxConditionGuestRunning)
 	eq("condition WorkloadReady", ours.SwiftSandboxConditionWorkloadReady, upstream.SwiftSandboxConditionWorkloadReady)
+	for _, o := range []struct{ ours, up string }{
+		{string(ours.SandboxOutputPending), string(upstream.SandboxOutputPending)},
+		{string(ours.SandboxOutputCollecting), string(upstream.SandboxOutputCollecting)},
+		{string(ours.SandboxOutputPackaged), string(upstream.SandboxOutputPackaged)},
+		{string(ours.SandboxOutputUploading), string(upstream.SandboxOutputUploading)},
+		{string(ours.SandboxOutputExported), string(upstream.SandboxOutputExported)},
+		{string(ours.SandboxOutputSkipped), string(upstream.SandboxOutputSkipped)},
+		{string(ours.SandboxOutputFailed), string(upstream.SandboxOutputFailed)},
+	} {
+		eq("output state "+o.ours, o.ours, o.up)
+	}
 }
 
 // TestRoundTrip encodes a fully populated sandbox with our types and decodes
@@ -162,9 +176,17 @@ func TestRoundTrip(t *testing.T) {
 			PodMetadata:      &ours.SandboxPodMetadata{Labels: map[string]string{"a": "b"}, Annotations: map[string]string{"c": "d"}},
 			ReadinessProbe:   &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromString("http-app")}}},
 			LivenessProbe:    &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http-app")}}},
+			Timeout:          &metav1.Duration{Duration: 300e9},
+			TTL:              &metav1.Duration{Duration: 3600e9},
+			Outputs: []ours.SandboxOutput{{Name: "wasmtime-cache", Path: "/var/lib/kubeswift-spin-output", Repository: "registry.example.com/c/ns/wasmtime-cache",
+				MaxSize: ptrQ("512Mi"), MaxEntries: ptr64(1000), ArtifactType: "application/vnd.example.v1", Annotations: map[string]string{"a": "b"}}},
 		},
 		Status: ours.SwiftSandboxStatus{Phase: ours.SwiftSandboxRunning, Message: "m",
-			Conditions: []metav1.Condition{{Type: "GuestRunning", Status: metav1.ConditionTrue, Reason: "GuestRunning"}}},
+			Conditions: []metav1.Condition{{Type: "GuestRunning", Status: metav1.ConditionTrue, Reason: "GuestRunning"}},
+			ExitCode:   ptr(0),
+			Outputs: []ours.SandboxOutputStatus{{Name: "wasmtime-cache", State: ours.SandboxOutputExported, Reason: "r", Message: "m",
+				Repository: "registry.example.com/c/ns/wasmtime-cache", Reference: "registry.example.com/c/ns/wasmtime-cache@sha256:00",
+				Digest: "sha256:00", Size: 10, Entries: 3}}},
 	}
 	b, err := json.Marshal(sb)
 	if err != nil {
@@ -230,3 +252,10 @@ func TestRequiredFieldsDeclared(t *testing.T) {
 }
 
 func ptr(v int32) *int32 { return &v }
+
+func ptr64(v int64) *int64 { return &v }
+
+func ptrQ(v string) *resource.Quantity {
+	q := resource.MustParse(v)
+	return &q
+}

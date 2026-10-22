@@ -112,6 +112,11 @@ type SignatureStatus struct {
 	// (repository@sha256:...). It equals compile.artifact once signed.
 	// +optional
 	Artifact string `json:"artifact,omitempty"`
+	// SandboxUID is the compiler sandbox whose output the signer judged. A
+	// rejection applies to that attempt only: a later attempt that exports
+	// the same bytes is judged again.
+	// +optional
+	SandboxUID types.UID `json:"sandboxUID,omitempty"`
 	// KeyID identifies the signing key: the SHA-256 of its
 	// SubjectPublicKeyInfo, as SwiftArtifactVerificationPolicy reports it.
 	// +optional

@@ -99,3 +99,26 @@ func TestExpired(t *testing.T) {
 		t.Fatalf("expired %v, want %v (current, previous and retained are kept)", got, want)
 	}
 }
+
+func TestOldestUnneeded(t *testing.T) {
+	now := time.Now()
+	mk := func(name string, last time.Time, consumers ...cachev1alpha1.Consumer) *cachev1alpha1.SpinCompiledCache {
+		r := rec(name, consumers...)
+		r.Status.LastReferencedAt = &metav1.Time{Time: last}
+		return r
+	}
+	records := map[string]*cachev1alpha1.SpinCompiledCache{
+		"current":  mk("current", now.Add(-72*time.Hour), cachev1alpha1.Consumer{Name: "hello", Current: true}),
+		"previous": mk("previous", now.Add(-72*time.Hour), cachev1alpha1.Consumer{Name: "hello", ReplacedAt: &metav1.Time{Time: now}}),
+		"old":      mk("old", now.Add(-5*time.Hour)),
+		"older":    mk("older", now.Add(-6*time.Hour)),
+	}
+	if got := oldestUnneeded(records, map[string]bool{"hello": true}); got != "older" {
+		t.Fatalf("victim %q, want older (current and previous are needed)", got)
+	}
+	delete(records, "old")
+	delete(records, "older")
+	if got := oldestUnneeded(records, map[string]bool{"hello": true}); got != "" {
+		t.Fatalf("victim %q among needed records", got)
+	}
+}

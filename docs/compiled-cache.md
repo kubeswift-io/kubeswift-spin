@@ -20,12 +20,12 @@ current revision does.
 | Opt-in (chart, executor and SpinApp annotations) | implemented |
 | Lookup identity and `SpinCompiledCache` records, consumers, garbage collection | implemented |
 | SpinApp `CompiledCache` condition and Events | implemented |
-| Compilation in a SwiftSandbox and KubeSwift output export | not yet |
+| Compilation in a SwiftSandbox and KubeSwift output export | implemented |
 | Signing and verification policy | not yet |
 | Placement on warm-pool nodes and mounting in replicas | not yet |
 
-Until the remaining stages land, records report `Compiled=False/Pending`
-and replicas start without a cache.
+Until signing lands, records stop at `Trusted=False/Signing` and replicas
+start without a cache.
 
 ## Requirements
 
@@ -105,6 +105,70 @@ A SpinApp on that executor can opt out with
 `spin.kubeswift.io/compiled-cache: disabled`. A SpinApp cannot opt in on an
 executor that does not enable caches.
 
+## Compilation
+
+For each record the cache manager compiles the application in a compiler
+SwiftSandbox in the record's namespace:
+
+- The runtime image is the record's (by digest), started in compile mode
+  ([runtime-image.md](runtime-image.md#compile-mode)). It pulls the
+  application with the SpinApp's `imagePullSecrets`, so it can pull exactly
+  what the SpinApp can. It gets the SpinApp's literal variables and no
+  Secret-backed value.
+- It runs where the SpinApp's replicas run (the executor's node selector,
+  kernel profile, rootfs mode, network mode and egress rules, plus
+  `kubernetes.io/arch`), so the entries match their CPU class. It exposes no
+  port and carries no launcher labels.
+- It is bounded: `compiledCache.compiler.cpu`, `memory`, `timeout`,
+  `maxSize` and `maxEntries`, and at most `maxConcurrent` compilers run at
+  once, `maxConcurrentPerNamespace` per namespace. KubeSwift boots it cold:
+  sandboxes with outputs do not use warm slots.
+- When compile mode exits 0, KubeSwift exports its output directory as an
+  OCI artifact to `<repository>/<namespace>/wasmtime-cache`, pushed by a
+  KubeSwift Job with the platform's credential; the guest never sees it. The
+  record's `status.compile.artifact` names the exported digest.
+- A failure (compile mode exits non-zero, the export is refused, the
+  sandbox is deleted or exceeds its time) is recorded with its reason, a
+  Warning Event on the record and the `CompiledCache=False/CompileFailed`
+  condition on the SpinApp, and retried after 1 minute, doubling to at most
+  6 hours. The SpinApp itself is never affected.
+
+The compiler sandbox stays until the signer has checked it, then the cache
+manager deletes it; it also carries a one-hour TTL. Compilers count against
+the namespace's ResourceQuota (one SwiftSandbox, `compiler.cpu` and
+`compiler.memory` each, `maxConcurrentPerNamespace` at a time): leave that
+much headroom, or a replica created during a rollout can be refused while a
+compiler runs.
+
+### Export policy
+
+KubeSwift exports only to repositories an administrator allows, with a
+credential in the KubeSwift namespace:
+
+```yaml
+apiVersion: sandbox.kubeswift.io/v1alpha1
+kind: SwiftArtifactExportPolicy
+metadata:
+  name: kubeswift-spin-compiled-cache
+spec:
+  namespaceSelector:
+    matchLabels:
+      spin.kubeswift.io/compiled-cache: enabled
+  repositories:
+    - registry.example.com/kubeswift-spin-cache/{namespace}/wasmtime-cache
+  defaultRepository: registry.example.com/kubeswift-spin-cache/{namespace}/wasmtime-cache
+  credentialsSecretRef:
+    name: kubeswift-spin-cache-push
+  maxSize: 512Mi
+```
+
+The Secret `kubeswift-spin-cache-push` is a `kubernetes.io/dockerconfigjson`
+Secret in the KubeSwift namespace with the label
+`kubeswift.io/export-credentials=true`; give it push access to the cache
+repositories only. `{namespace}` gives each namespace its own repository,
+so no namespace can export into another's. Without a policy the compiler's
+output is refused (`OutputDestinationDenied`).
+
 ## What a SpinApp reports
 
 The `CompiledCache` condition is separate from `Available` and
@@ -118,7 +182,7 @@ The `CompiledCache` condition is separate from `Available` and
 | False | `ImageNotPinned`, `RuntimeNotPinned` | The application or runtime image has no digest |
 | False | `RuntimeNotAllowed` | The executor's runtime image is not one the platform builds caches for |
 | False | `Requested` | Waiting for the cache manager to record the request |
-| False | `Compiling`, `CompileFailed` | Compilation pending, running, or failed (retried with backoff) |
+| False | `Compiling`, `CompileFailed` | Compilation pending (including while waiting for a compiler slot), running, or failed (retried with backoff) |
 | False | `Signing`, `SignFailed` | Waiting for, or refused by, the signer |
 | True | `Placing`, `PlacementFailed` | New replicas mount the cache; warm-pool nodes are still being prepared, or preparing failed |
 | True | `Ready` | New replicas mount the cache |

@@ -151,6 +151,52 @@ type SwiftSandboxSpec struct {
 	LivenessProbe      *corev1.Probe                `json:"livenessProbe,omitempty"`
 	ReadinessStartup   *SandboxReadinessStartup     `json:"readinessStartup,omitempty"`
 	Termination        *SandboxTermination          `json:"termination,omitempty"`
+	// Timeout bounds the workload's run time (KubeSwift v0.8.0); TTL removes
+	// a finished sandbox after this long. Only compiler sandboxes set them.
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
+	TTL     *metav1.Duration `json:"ttl,omitempty"`
+	// Outputs are guest directories KubeSwift exports as OCI artifacts when
+	// the workload exits 0 (KubeSwift v0.19.0). Only compiler sandboxes set
+	// them.
+	Outputs []SandboxOutput `json:"outputs,omitempty"`
+}
+
+// SandboxOutput is a guest directory exported as an OCI artifact.
+type SandboxOutput struct {
+	Name         string             `json:"name"`
+	Path         string             `json:"path"`
+	Repository   string             `json:"repository,omitempty"`
+	MaxSize      *resource.Quantity `json:"maxSize,omitempty"`
+	MaxEntries   *int64             `json:"maxEntries,omitempty"`
+	ArtifactType string             `json:"artifactType,omitempty"`
+	Annotations  map[string]string  `json:"annotations,omitempty"`
+}
+
+// SandboxOutputState is the export state of one output.
+type SandboxOutputState string
+
+const (
+	SandboxOutputPending    SandboxOutputState = "Pending"
+	SandboxOutputCollecting SandboxOutputState = "Collecting"
+	SandboxOutputPackaged   SandboxOutputState = "Packaged"
+	SandboxOutputUploading  SandboxOutputState = "Uploading"
+	SandboxOutputExported   SandboxOutputState = "Exported"
+	SandboxOutputSkipped    SandboxOutputState = "Skipped"
+	SandboxOutputFailed     SandboxOutputState = "Failed"
+)
+
+// SandboxOutputStatus reports one output's export.
+type SandboxOutputStatus struct {
+	Name       string             `json:"name"`
+	State      SandboxOutputState `json:"state"`
+	Reason     string             `json:"reason,omitempty"`
+	Message    string             `json:"message,omitempty"`
+	Repository string             `json:"repository,omitempty"`
+	Reference  string             `json:"reference,omitempty"`
+	Digest     string             `json:"digest,omitempty"`
+	Size       int64              `json:"size,omitempty"`
+	Entries    int64              `json:"entries,omitempty"`
+	ExportedAt *metav1.Time       `json:"exportedAt,omitempty"`
 }
 
 // SandboxReadinessStartup runs the readiness probe every Interval from the
@@ -175,7 +221,10 @@ const (
 	SwiftSandboxMaterializing SwiftSandboxPhase = "Materializing"
 	SwiftSandboxRunning       SwiftSandboxPhase = "Running"
 	SwiftSandboxCompleted     SwiftSandboxPhase = "Completed"
-	SwiftSandboxFailed        SwiftSandboxPhase = "Failed"
+	// SwiftSandboxExporting is between the workload's exit and the end of
+	// its outputs' export (KubeSwift v0.19.0).
+	SwiftSandboxExporting SwiftSandboxPhase = "Exporting"
+	SwiftSandboxFailed    SwiftSandboxPhase = "Failed"
 )
 
 // Sandbox condition types read by kubeswift-spin.
@@ -192,6 +241,10 @@ type SwiftSandboxStatus struct {
 	Phase      SwiftSandboxPhase  `json:"phase,omitempty"`
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	Message    string             `json:"message,omitempty"`
+	// Outputs reports each spec.outputs entry's export (KubeSwift v0.19.0).
+	Outputs []SandboxOutputStatus `json:"outputs,omitempty"`
+	// ExitCode is the workload's exit code once it ended.
+	ExitCode *int32 `json:"exitCode,omitempty"`
 }
 
 // SwiftSandbox is a KubeSwift microVM sandbox.

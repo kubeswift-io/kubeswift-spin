@@ -632,6 +632,7 @@ the `SpinCompiledCache` record. With the feature enabled the chart adds:
 | controller | `spincompiledcaches` | get, list, watch | release namespace |
 | controller | `namespaces` | get, list, watch | cluster |
 | cache manager | `spinapps`, `spinappexecutors`, `swiftsandboxpools`, `namespaces` | get, list, watch | cluster |
+| cache manager | `swiftsandboxes` (compilers) | get, list, watch, create, delete | cluster |
 | cache manager | `spincompiledcaches` | get, list, watch, create, delete | release namespace |
 | cache manager | `spincompiledcaches/status` | get, patch | release namespace |
 | cache manager | `leases` | create; get, update on its own Lease | release namespace |

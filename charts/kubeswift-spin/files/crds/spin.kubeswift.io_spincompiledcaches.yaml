@@ -390,6 +390,12 @@ spec:
                       pass the signer's checks and is never signed. The cache manager
                       compiles again after a backoff.
                     type: boolean
+                  sandboxUID:
+                    description: |-
+                      SandboxUID is the compiler sandbox whose output the signer judged. A
+                      rejection applies to that attempt only: a later attempt that exports
+                      the same bytes is judged again.
+                    type: string
                   signedAt:
                     description: SignedAt is when the artifact was signed.
                     format: date-time

@@ -7,7 +7,7 @@ every SpinApp: the application is not baked in, Spin pulls it at start.
 ## Versioning
 
 The runtime image is versioned independently of the controller. Its tag is
-in `runtime/VERSION` (currently `spin-4.2.1-r2`: the Spin version and a
+in `runtime/VERSION` (currently `spin-4.2.1-r3`: the Spin version and a
 revision for entrypoint or base image changes), and the chart's
 `runtimeImage.tag` must match it (`make helm-lint` checks this). The release
 workflow builds and pushes the runtime image only when that tag does not
@@ -35,7 +35,8 @@ KubeSwift runs the sandbox command as root and ignores the image `USER`.
 The entrypoint (`cmd/spin-entrypoint`) is therefore what makes Spin
 unprivileged:
 
-1. Accept only `up ...` (the controller's arguments) or `--version`.
+1. Accept only `up ...` (the controller's arguments), `compile ...` (see
+   [Compile mode](#compile-mode)) or `--version`.
 2. Create `/var/lib/kubeswift-spin/{state,home,tmp}` with mode 0700.
 3. Runtime configuration, at most 64 KiB, written to
    `/var/lib/kubeswift-spin/runtime-config.toml` with mode 0600. It comes
@@ -76,6 +77,54 @@ trigger processes; in the Docker test it exits with status 0 within about
 
 The paths and variable names are defined once in
 `internal/runtimecontract` and shared by the controller and the entrypoint.
+
+## Compile mode
+
+Since `spin-4.2.1-r3` the entrypoint also compiles an application into a
+Wasmtime cache for the compiled cache
+([compiled-cache.md](compiled-cache.md)). The cache manager runs it in a
+compiler SwiftSandbox:
+
+```text
+kubeswift-spin-entrypoint compile --source=<repository@sha256:...> \
+  --runtime=<runtime repository@sha256:...> --architecture=<amd64|arm64>
+```
+
+1. Refuse anything but these three flags, a tag instead of a digest, an
+   architecture other than the image's own, and an output directory
+   (`/var/lib/kubeswift-spin-output`, the sandbox's KubeSwift output) that
+   is missing or not empty.
+2. Prepare the guest and registry credentials as in `up` mode; then, as UID
+   65532 with `no_new_privs`, `spin registry pull` the application into a
+   fresh cache.
+3. Read the locked application. Select the components of HTTP triggers
+   (other triggers are left out with `--component-id` when present; an
+   application without an HTTP trigger fails). Give every required variable
+   that has no value in the environment a placeholder value, and write a
+   runtime configuration with a `spin` store, a file in the guest's memory
+   backed scratch directory, for every key-value and SQLite label other than
+   `default`. Neither is part of the compiled code. Component IDs must be
+   Spin component IDs.
+4. Run `spin up` on `127.0.0.1:3999` with a Wasmtime cache directory of its
+   own. Spin compiles every component before it opens the listener, so the
+   first TCP connection the listener accepts ends the run: the entrypoint
+   sends SIGINT. No request is ever sent to the application, and nothing
+   outside the guest can reach the listener. After the pull and after the
+   run every process of UID 65532 is killed, so none runs while root reads
+   its files.
+5. Copy the cache entries (regular files named by Wasmtime's 43-character
+   key, owned by UID 65532 with a single link and opened without following
+   symbolic links; never statistics or temporary files) to
+   `cache/modules/wasmtime-<version>/` in the output directory, and write
+   `metadata.json`: source, runtime, architecture, Spin version, Wasmtime
+   cache directory, entries and components, with no timestamps. Exit 0.
+
+The directories UID 65532 writes are its own; the work directory that
+holds them and every file root writes after Spin ran belong to root, so a
+compromised Spin process cannot redirect root's writes. Any failure exits
+non-zero, and KubeSwift then exports nothing. The
+compiled entries are the ones a normal start of the same application writes
+on the same CPU class (the Docker test compares the keys).
 
 ## Building
 

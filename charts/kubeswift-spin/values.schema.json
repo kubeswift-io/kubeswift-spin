@@ -393,6 +393,42 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 1000
+        },
+        "compiler": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256
+            },
+            "memory": {
+              "$ref": "#/definitions/quantity"
+            },
+            "timeout": {
+              "type": "string",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(s|m|h))+$"
+            },
+            "maxSize": {
+              "$ref": "#/definitions/quantity"
+            },
+            "maxEntries": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 1048576
+            },
+            "maxConcurrent": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "maxConcurrentPerNamespace": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            }
+          }
         }
       }
     }

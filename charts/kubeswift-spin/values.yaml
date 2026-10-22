@@ -18,7 +18,7 @@ image:
 # changing it replaces every replica that uses it.
 runtimeImage:
   repository: ghcr.io/kubeswift-io/kubeswift-spin-runtime
-  tag: spin-4.2.1-r2
+  tag: spin-4.2.1-r3
   digest: ""
 
 imagePullSecrets: []
@@ -146,6 +146,18 @@ compiledCache:
   retention: 24h
   # Most records kept for one namespace.
   maxRecordsPerNamespace: 32
+  # Compiler sandboxes: one per record and attempt, in the SpinApp's
+  # namespace, cold-booted (KubeSwift outputs do not use warm slots).
+  compiler:
+    cpu: 1
+    memory: 1Gi
+    timeout: 10m
+    # Largest exported cache and most files and directories in it.
+    maxSize: 512Mi
+    maxEntries: 10000
+    # Compilers running at once, cluster-wide and per namespace.
+    maxConcurrent: 4
+    maxConcurrentPerNamespace: 1
   manager:
     replicaCount: 1
     logLevel: info
