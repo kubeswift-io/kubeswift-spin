@@ -18,6 +18,8 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
+	"github.com/kubeswift-io/kubeswift-spin/internal/metrics"
+	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 )
 
 // Compiled-cache Event reasons. They are API: do not rename them.
@@ -154,4 +156,73 @@ func (r *SpinAppReconciler) appsForRecord(ctx context.Context, o client.Object) 
 		return nil
 	}
 	return requestsFor(apps.Items)
+}
+
+// decorateCache adds the SpinApp's signed compiled cache to a new replica
+// and counts the lookup. It runs after the revision fingerprint is
+// computed: the cache is never part of a replica's revision.
+func (r *SpinAppReconciler) decorateCache(sb *sandboxv1alpha1.SwiftSandbox, cv cacheView) {
+	switch {
+	case cv.cond == nil && cv.id == nil:
+		// The SpinApp does not ask for a cache, or the reconcile could not
+		// tell; nothing to count.
+		return
+	case cv.id == nil:
+		metrics.CompiledCacheLookups.WithLabelValues("skipped").Inc()
+	case cv.artifact == "":
+		metrics.CompiledCacheLookups.WithLabelValues("miss").Inc()
+	default:
+		metrics.CompiledCacheLookups.WithLabelValues("hit").Inc()
+		r.CacheDelivery.Decorate(sb, *cv.id, cv.artifact)
+	}
+}
+
+// countAttachments counts, once per replica, what KubeSwift did with the
+// compiled cache of a replica that carried one: mounted (reason Cached or
+// Fetched) or skipped (and why). Replicas created before this process
+// started are not counted, so a restart does not count them again.
+func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1.SwiftSandbox) {
+	r.attachMu.Lock()
+	defer r.attachMu.Unlock()
+	if r.attached == nil {
+		r.attached = map[types.UID]string{}
+	}
+	live := make(map[types.UID]bool, len(owned))
+	for i := range owned {
+		sb := &owned[i]
+		live[sb.UID] = true
+		if _, done := r.attached[sb.UID]; done || sb.CreationTimestamp.Time.Before(r.startedAt) {
+			continue
+		}
+		for _, a := range sb.Status.Artifacts {
+			if a.Name != compiledcache.ArtifactName {
+				continue
+			}
+			switch a.State {
+			case sandboxv1alpha1.SandboxArtifactMounted:
+				metrics.CompiledCacheAttachments.WithLabelValues("mounted", metrics.Reason(a.Reason)).Inc()
+			case sandboxv1alpha1.SandboxArtifactSkipped, sandboxv1alpha1.SandboxArtifactFailed:
+				metrics.CompiledCacheAttachments.WithLabelValues("skipped", metrics.Reason(a.Reason)).Inc()
+			default:
+				continue
+			}
+			r.attached[sb.UID] = key
+		}
+	}
+	for uid, k := range r.attached {
+		if k == key && !live[uid] {
+			delete(r.attached, uid)
+		}
+	}
+}
+
+// forgetAttachments drops what countAttachments remembers of a SpinApp.
+func (r *SpinAppReconciler) forgetAttachments(key string) {
+	r.attachMu.Lock()
+	defer r.attachMu.Unlock()
+	for uid, k := range r.attached {
+		if k == key {
+			delete(r.attached, uid)
+		}
+	}
 }

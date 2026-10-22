@@ -26,10 +26,15 @@ rules:
   - apiGroups: ["sandbox.kubeswift.io"]
     resources: ["swiftsandboxes"]
     verbs: ["get", "list", "watch", "create", "delete"]
-  # Warm pools whose nodes receive placements (from a later release stage).
+  # Warm pools whose nodes receive placements.
   - apiGroups: ["sandbox.kubeswift.io"]
     resources: ["swiftsandboxpools"]
     verbs: ["get", "list", "watch"]
+  # One placement per signed cache and warm pool, in the pool's namespace.
+  # Placements have no status the cache manager writes.
+  - apiGroups: ["sandbox.kubeswift.io"]
+    resources: ["swiftartifactplacements"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
   # Namespaces opt in with the label spin.kubeswift.io/compiled-cache.
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -142,6 +147,7 @@ spec:
             {{- end }}
             {{- include "kubeswift-spin.profileArgs" . | nindent 12 }}
             {{- include "kubeswift-spin.compiledCacheArgs" . | nindent 12 }}
+            {{- include "kubeswift-spin.compiledCacheDeliveryArgs" . | nindent 12 }}
             - --compiled-cache-retention={{ .Values.compiledCache.retention }}
             - --compiled-cache-max-records-per-namespace={{ .Values.compiledCache.maxRecordsPerNamespace }}
             {{- with .Values.compiledCache.compiler }}

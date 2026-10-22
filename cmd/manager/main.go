@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -67,6 +68,8 @@ type options struct {
 	cacheNamespace    string
 	cacheArchitecture string
 	cacheRetention    time.Duration
+	cachePullSecret   string
+	cacheFetchTimeout time.Duration
 	cacheRuntimes     string
 	cacheMaxRecords   int
 	compilerCPU       int
@@ -116,6 +119,8 @@ func main() {
 	flag.IntVar(&o.maxCompilers, "compiled-cache-max-compilers", 4, "Most compiler sandboxes running at once, cluster-wide.")
 	flag.IntVar(&o.maxCompilersPerNS, "compiled-cache-max-compilers-per-namespace", 1, "Most compiler sandboxes running at once in one namespace.")
 	flag.DurationVar(&o.cacheRetention, "compiled-cache-retention", 24*time.Hour, "How long the cache manager keeps a SpinCompiledCache that no SpinApp uses (the most recently replaced one of each SpinApp is always kept).")
+	flag.StringVar(&o.cachePullSecret, "compiled-cache-pull-secret", "", "Name of a docker-registry Secret, in every enabled namespace, that reads that namespace's cache repository. Empty uses the runtime image pull Secret for replicas and anonymous reads for placements.")
+	flag.DurationVar(&o.cacheFetchTimeout, "compiled-cache-fetch-timeout", compiledcache.DefaultColdFetchTimeout, "How long a replica that does not come from a warm pool may wait for its compiled cache before it starts without it (0s to 5m). Warm-pool replicas never wait.")
 	zapOpts := zap.Options{}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -158,6 +163,13 @@ func run(o options) error {
 	if err := settings.Validate(); err != nil {
 		return fmt.Errorf("--compiled-cache-repository, --compiled-cache-architecture, --compiled-cache-runtimes: %w", err)
 	}
+	delivery := compiledcache.Delivery{PullSecret: o.cachePullSecret, ColdFetchTimeout: o.cacheFetchTimeout}
+	if err := delivery.Validate(); err != nil {
+		return fmt.Errorf("--compiled-cache-fetch-timeout: %w", err)
+	}
+	if errs := validation.IsDNS1123Subdomain(o.cachePullSecret); o.cachePullSecret != "" && len(errs) > 0 {
+		return fmt.Errorf("--compiled-cache-pull-secret %q is not a Secret name: %s", o.cachePullSecret, strings.Join(errs, "; "))
+	}
 	cachesServed := false
 	if settings.Configured() {
 		if cachesServed, err = capabilities.Served(cs.Discovery(), capabilities.CompiledCaches); err != nil {
@@ -176,6 +188,13 @@ func run(o options) error {
 	case modeCacheManager:
 		if !settings.Configured() {
 			return fmt.Errorf("--mode=%s needs --compiled-cache-repository and --compiled-cache-namespace", modeCacheManager)
+		}
+		placementsServed, err := capabilities.Served(cs.Discovery(), capabilities.Placements)
+		if err != nil {
+			return fmt.Errorf("discover %s: %w", capabilities.Placements.String(), err)
+		}
+		if !placementsServed {
+			return fmt.Errorf("the SwiftArtifactPlacement API (%s) is not installed; compiled caches need KubeSwift v0.19.1 or later", capabilities.Placements.String())
 		}
 		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, cacheManagerBase(), cacheManagerChecks(settings)); err != nil {
 			return err
@@ -211,6 +230,8 @@ func run(o options) error {
 		// SpinApps' replicas.
 		cacheOpts.ByObject[&sandboxapi.SwiftSandbox{}] = cache.ByObject{Label: labels.SelectorFromSet(labels.Set{
 			translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: compiledcache.ComponentCompiler})}
+		cacheOpts.ByObject[&sandboxapi.SwiftArtifactPlacement{}] = cache.ByObject{Label: labels.SelectorFromSet(labels.Set{
+			translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: compiledcache.ComponentPlacement})}
 	}
 
 	metricsOpts := metricsserver.Options{BindAddress: o.metricsAddr, SecureServing: o.metricsSecure}
@@ -258,6 +279,7 @@ func run(o options) error {
 			Client:                   mgr.GetClient(),
 			APIReader:                mgr.GetAPIReader(),
 			Settings:                 settings,
+			Delivery:                 delivery,
 			Compiler:                 compiler,
 			Defaults:                 defaults,
 			Recorder:                 mgr.GetEventRecorder("kubeswift-spin-cache-manager"),
@@ -278,6 +300,7 @@ func run(o options) error {
 			PoolsServed:          poolsServed,
 			CompiledCache:        settings,
 			CompiledCachesServed: cachesServed,
+			CacheDelivery:        delivery,
 		}
 		if err := r.SetupWithManager(ctx, mgr); err != nil {
 			return err
@@ -472,6 +495,12 @@ func cacheManagerBase() []check {
 		{"sandbox.kubeswift.io", "swiftsandboxes", "", "watch"},
 		{"sandbox.kubeswift.io", "swiftsandboxes", "", "create"},
 		{"sandbox.kubeswift.io", "swiftsandboxes", "", "delete"},
+		// Placements on the warm pools of consumer SpinApps.
+		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "list"},
+		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "watch"},
+		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "create"},
+		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "update"},
+		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "delete"},
 	}
 }
 

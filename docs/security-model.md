@@ -636,6 +636,7 @@ the `SpinCompiledCache` record. With the feature enabled the chart adds:
 | controller | `namespaces` | get, list, watch | cluster |
 | cache manager | `spinapps`, `spinappexecutors`, `swiftsandboxpools`, `namespaces` | get, list, watch | cluster |
 | cache manager | `swiftsandboxes` (compilers) | get, list, watch, create, delete | cluster |
+| cache manager | `swiftartifactplacements` | get, list, watch, create, update, delete | cluster |
 | cache manager | `spincompiledcaches` | get, list, watch, create, delete | release namespace |
 | cache manager | `spincompiledcaches/status` | get, patch | release namespace |
 | cache manager | `leases` | create; get, update on its own Lease | release namespace |
@@ -664,3 +665,8 @@ Residual risks:
 - Claims bind a namespace by name: a namespace deleted and re-created by
   another principal inherits its predecessor's signed caches until they are
   removed from the registry.
+- The controller sets the expected identity on each replica and the
+  entrypoint compares it with the mounted metadata, but the guarantee that
+  the mounted code is the signed code is KubeSwift's: the entrypoint cannot
+  verify a signature. A mount that is not read-only, or whose metadata
+  names anything else, is not used.

@@ -98,6 +98,8 @@ type SpinAppReconciler struct {
 	// the SpinCompiledCache API is installed.
 	CompiledCache        compiledcache.Settings
 	CompiledCachesServed bool
+	// CacheDelivery says how new replicas mount a signed cache.
+	CacheDelivery compiledcache.Delivery
 
 	Metrics *metrics.Tracker
 	Backoff *Backoff
@@ -118,6 +120,12 @@ type SpinAppReconciler struct {
 	// still reports its findings.
 	annMu   sync.Mutex
 	annSeen map[string]string
+
+	// attached remembers which replicas' compiled-cache outcome was
+	// counted, so each replica is counted once.
+	attachMu  sync.Mutex
+	attached  map[types.UID]string
+	startedAt time.Time
 }
 
 // SetupWithManager registers the controller, its watches and the field index.
@@ -128,6 +136,7 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	if r.Backoff == nil {
 		r.Backoff = NewBackoff()
 	}
+	r.startedAt = r.Now()
 	if r.Metrics == nil {
 		r.Metrics = metrics.NewTracker()
 	}
@@ -247,6 +256,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	r.countAttachments(key, owned)
 
 	var exec spinv1alpha1.SpinAppExecutor
 	var execErr error = apierrors.NewNotFound(spinv1alpha1.GroupVersion.WithResource("spinappexecutors").GroupResource(), app.Spec.Executor)
@@ -380,6 +390,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		if ord == int(app.Spec.Replicas) {
 			sb.Labels[translate.LabelSurge] = "true"
 		}
+		r.decorateCache(sb, cache)
 		if err := controllerutil.SetControllerReference(&app, sb, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -835,6 +846,7 @@ func (r *SpinAppReconciler) forget(key string) {
 	r.annMu.Lock()
 	delete(r.annSeen, key)
 	r.annMu.Unlock()
+	r.forgetAttachments(key)
 }
 
 // annotationsChanged records the SpinApp's spin.kubeswift.io/ annotations

@@ -30,7 +30,8 @@ var GroupVersion = schema.GroupVersion{Group: "sandbox.kubeswift.io", Version: "
 
 // AddToScheme registers SwiftSandbox and SwiftSandboxPool.
 func AddToScheme(s *runtime.Scheme) error {
-	s.AddKnownTypes(GroupVersion, &SwiftSandbox{}, &SwiftSandboxList{}, &SwiftSandboxPool{}, &SwiftSandboxPoolList{})
+	s.AddKnownTypes(GroupVersion, &SwiftSandbox{}, &SwiftSandboxList{}, &SwiftSandboxPool{}, &SwiftSandboxPoolList{},
+		&SwiftArtifactPlacement{}, &SwiftArtifactPlacementList{})
 	metav1.AddToGroupVersion(s, GroupVersion)
 	return nil
 }
@@ -159,6 +160,40 @@ type SwiftSandboxSpec struct {
 	// the workload exits 0 (KubeSwift v0.19.0). Only compiler sandboxes set
 	// them.
 	Outputs []SandboxOutput `json:"outputs,omitempty"`
+	// Artifacts are OCI artifacts mounted read-only in the guest. Only a
+	// replica's compiled cache uses them (KubeSwift v0.18.0 fields).
+	Artifacts []SandboxArtifact `json:"artifacts,omitempty"`
+}
+
+// SandboxArtifact is one OCI artifact mounted read-only in the guest.
+type SandboxArtifact struct {
+	Name                        string                       `json:"name"`
+	Ref                         string                       `json:"ref"`
+	MountPath                   string                       `json:"mountPath"`
+	Layout                      string                       `json:"layout,omitempty"`
+	PullSecretRef               *corev1.LocalObjectReference `json:"pullSecretRef,omitempty"`
+	Optional                    bool                         `json:"optional,omitempty"`
+	FetchTimeout                *metav1.Duration             `json:"fetchTimeout,omitempty"`
+	Claims                      map[string]string            `json:"claims,omitempty"`
+	RequirePlatformVerification bool                         `json:"requirePlatformVerification,omitempty"`
+}
+
+// SandboxArtifactState is where an artifact stands.
+type SandboxArtifactState string
+
+const (
+	SandboxArtifactMounted SandboxArtifactState = "Mounted"
+	SandboxArtifactSkipped SandboxArtifactState = "Skipped"
+	SandboxArtifactFailed  SandboxArtifactState = "Failed"
+)
+
+// SandboxArtifactStatus reports one artifact.
+type SandboxArtifactStatus struct {
+	Name    string               `json:"name"`
+	Digest  string               `json:"digest,omitempty"`
+	State   SandboxArtifactState `json:"state,omitempty"`
+	Reason  string               `json:"reason,omitempty"`
+	Message string               `json:"message,omitempty"`
 }
 
 // SandboxOutput is a guest directory exported as an OCI artifact.
@@ -245,6 +280,58 @@ type SwiftSandboxStatus struct {
 	Outputs []SandboxOutputStatus `json:"outputs,omitempty"`
 	// ExitCode is the workload's exit code once it ended.
 	ExitCode *int32 `json:"exitCode,omitempty"`
+	// Artifacts reports each spec.artifacts entry.
+	Artifacts []SandboxArtifactStatus `json:"artifacts,omitempty"`
+}
+
+// SwiftArtifactPlacementSpec prepares artifacts on the nodes of a pool
+// (KubeSwift v0.17.0).
+type SwiftArtifactPlacementSpec struct {
+	PoolRef   corev1.LocalObjectReference `json:"poolRef"`
+	Artifacts []PlacementArtifact         `json:"artifacts"`
+}
+
+// PlacementArtifact is one artifact to prepare. A checkout uses the
+// prepared entry when its own artifact names the same repository, digest,
+// layout, key and claims.
+type PlacementArtifact struct {
+	Name                        string                       `json:"name"`
+	Ref                         string                       `json:"ref"`
+	Layout                      string                       `json:"layout,omitempty"`
+	PullSecretRef               *corev1.LocalObjectReference `json:"pullSecretRef,omitempty"`
+	Claims                      map[string]string            `json:"claims,omitempty"`
+	RequirePlatformVerification bool                         `json:"requirePlatformVerification,omitempty"`
+}
+
+// SwiftArtifactPlacementStatus is the subset kubeswift-spin reads.
+type SwiftArtifactPlacementStatus struct {
+	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
+	TargetNodes        int32              `json:"targetNodes"`
+	PreparedNodes      int32              `json:"preparedNodes"`
+	Conditions         []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// PlacementConditionPrepared is True when every target node holds every
+// artifact.
+const PlacementConditionPrepared = "Prepared"
+
+// SwiftArtifactPlacement prepares OCI artifacts on the nodes of a pool.
+//
+// +kubebuilder:object:root=true
+type SwiftArtifactPlacement struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              SwiftArtifactPlacementSpec   `json:"spec,omitempty"`
+	Status            SwiftArtifactPlacementStatus `json:"status,omitempty"`
+}
+
+// SwiftArtifactPlacementList is a list of SwiftArtifactPlacement.
+//
+// +kubebuilder:object:root=true
+type SwiftArtifactPlacementList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []SwiftArtifactPlacement `json:"items"`
 }
 
 // SwiftSandbox is a KubeSwift microVM sandbox.

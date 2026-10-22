@@ -22,10 +22,7 @@ current revision does.
 | SpinApp `CompiledCache` condition and Events | implemented |
 | Compilation in a SwiftSandbox and KubeSwift output export | implemented |
 | Signing and verification policy | implemented |
-| Placement on warm-pool nodes and mounting in replicas | not yet |
-
-Until placement and mounting land, records stop at `Trusted=True` with
-`Placed` waiting, and replicas start without a cache.
+| Placement on warm-pool nodes and mounting in replicas | implemented; KVM lab validation pending |
 
 ## Requirements
 
@@ -87,6 +84,8 @@ compiledCache:
   extraRuntimes: []           # other runtime images caches may be built for, by digest
   retention: 24h
   maxRecordsPerNamespace: 32
+  pullSecretName: cache-read  # in every enabled namespace; reads only its cache repository
+  fetchTimeout: 3s            # most a cold replica waits for its cache
 ```
 
 This installs the `SpinCompiledCache` CRD and the cache manager, a second
@@ -284,6 +283,98 @@ cache even with read access to its repository.
 To rotate the key, add the new key to the policy as a second authority,
 switch the signer to it, and remove the old key once the caches it signed
 are no longer used.
+
+## Delivery
+
+### Placement on warm pools
+
+Once a record is signed (`Trusted=True`), the cache manager creates one
+`SwiftArtifactPlacement` per warm pool its current consumers check out
+from, in the consumer namespace, named `<record>-<hash of the pool>`.
+KubeSwift fetches and verifies the artifact on every node of the pool
+ahead of time. The placement names exactly what a replica mounts: the
+same reference, `layout: unpacked`, pull Secret, claims and
+`requirePlatformVerification`, so a checkout finds the prepared entry.
+
+The record's `status.placements` copies each placement's `Prepared`
+condition and node counts. `Placed` is True once every pool reports every
+node prepared, and `Ready` is `Trusted` and `Placed`. A placement whose
+pool no consumer uses any more, or whose record is no longer trusted or
+is deleted, is deleted. An object the cache manager did not create that
+holds a placement's name is never changed; the record reports
+`PlacementConflict`.
+
+### Replicas
+
+Replicas created while the record is trusted get one more entry in
+`spec.artifacts`:
+
+```yaml
+- name: wasmtime-cache
+  ref: registry.example.com/kubeswift-spin-cache/team-a/wasmtime-cache@sha256:...
+  mountPath: /opt/kubeswift-spin-cache
+  layout: unpacked
+  optional: true
+  fetchTimeout: 0s            # 3s (compiledCache.fetchTimeout) for a cold replica
+  pullSecretRef: {name: cache-read}
+  requirePlatformVerification: true
+  claims:
+    spin.kubeswift.io/kind: wasmtime-cache
+    spin.kubeswift.io/namespace: team-a
+    spin.kubeswift.io/source: ghcr.io/org/app@sha256:...
+    spin.kubeswift.io/runtime: ghcr.io/kubeswift-io/kubeswift-spin-runtime@sha256:...
+    spin.kubeswift.io/architecture: amd64
+```
+
+They also get `KUBESWIFT_SPIN_CACHE_SOURCE`, `KUBESWIFT_SPIN_CACHE_RUNTIME`
+and `KUBESWIFT_SPIN_CACHE_ARCHITECTURE`, the identity the cache must have.
+A replica from a warm pool uses the cache only if its node already holds
+it, and never waits; a cold replica waits at most `fetchTimeout`. The
+artifact and the variables are not part of the replica's revision: a cache
+that becomes available, or goes away, never replaces running replicas.
+
+### Runtime mount contract
+
+The runtime entrypoint decides, before it starts Spin, and logs the
+decision. It uses the cache only when:
+
+- `/opt/kubeswift-spin-cache` is a mount point and the mount is read-only
+  (`/proc/self/mountinfo`);
+- `metadata.json` there is compiled cache metadata naming exactly the
+  expected source, runtime and architecture, the architecture the
+  entrypoint was built for, and the Wasmtime cache version of the image's
+  own Spin;
+- the entry directory `cache/modules/<version>` exists and is not a link.
+
+It then writes `[cache] directory = "/opt/kubeswift-spin-cache/cache"` to
+`/var/lib/kubeswift-spin/wasmtime-cache.toml` and sets
+`WASMTIME_CACHE_FILE` for Spin. `WASMTIME_CACHE_FILE` and
+`DISABLE_WASMTIME_CACHE` are reserved: values from anywhere else are
+dropped, and the log names the dropped variable. In every other case Spin
+starts with its normal cache and compiles as before.
+
+### Fallback
+
+The cache never stops a replica:
+
+| Situation | Result |
+|---|---|
+| No record, compiling, failed, signing, rejected | No artifact; Spin compiles |
+| The node does not hold the cache in time; the registry refuses; verification or claims fail | KubeSwift skips the optional artifact (`status.artifacts` says why); Spin compiles |
+| Mount missing, writable, or with other metadata | The entrypoint starts Spin without it |
+| CPU features or Wasmtime version not in the cache | Wasmtime misses and compiles |
+
+### Metrics
+
+| Metric | Labels |
+|---|---|
+| `kubeswift_spin_compiled_cache_lookups_total` | `result`: `hit` (a signed cache was attached), `miss` (none yet), `skipped` (the SpinApp cannot have one) |
+| `kubeswift_spin_compiled_cache_attachments_total` | `result`: `mounted`, `skipped`; `reason`: KubeSwift's (`Cached`, `Fetched`, `FetchTimeout`, `PolicyDenied`, ...) |
+| `kubeswift_spin_compiled_cache_compilations_total` | `result`, `reason` |
+| `kubeswift_spin_compiled_cache_signatures_total` | `result` |
+
+Attachments are counted once per replica by the controller process that
+created it; replicas created before the process started are not counted.
 
 ## What a SpinApp reports
 

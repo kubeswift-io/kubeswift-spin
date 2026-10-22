@@ -57,6 +57,7 @@ type RecordReconciler struct {
 	// cache: every decision, and every deletion, is made on current data.
 	APIReader client.Reader
 	Settings  compiledcache.Settings
+	Delivery  compiledcache.Delivery
 	Compiler  compiledcache.CompilerSettings
 	Defaults  executor.Defaults
 	Recorder  events.EventRecorder
@@ -97,6 +98,10 @@ func (r *RecordReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
 				return o.GetLabels()[compiledcache.LabelComponent] == compiledcache.ComponentCompiler
 			}))).
+		Watches(&sandboxv1alpha1.SwiftArtifactPlacement{}, handler.EnqueueRequestsFromMapFunc(r.recordsForPlacement),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
+				return o.GetLabels()[compiledcache.LabelComponent] == compiledcache.ComponentPlacement
+			}))).
 		Complete(r)
 }
 
@@ -130,18 +135,27 @@ func (r *RecordReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	var rec cachev1alpha1.SpinCompiledCache
 	if err := r.APIReader.Get(ctx, req.NamespacedName, &rec); err != nil {
 		if apierrors.IsNotFound(err) {
-			// The record is gone: so are its compilers.
-			return ctrl.Result{}, r.deleteCompilers(ctx, "", req.Name, nil)
+			// The record is gone: so are its compilers and placements.
+			if err := r.deleteCompilers(ctx, "", req.Name, nil); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, r.deletePlacements(ctx, "", req.Name, nil)
 		}
 		return ctrl.Result{}, err
 	}
 	if !rec.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, r.deleteCompilers(ctx, rec.Spec.Namespace, rec.Name, nil)
+		if err := r.deleteCompilers(ctx, rec.Spec.Namespace, rec.Name, nil); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, r.deletePlacements(ctx, rec.Spec.Namespace, rec.Name, nil)
 	}
 	logger := log.FromContext(ctx).WithValues("record", rec.Name, "namespace", rec.Spec.Namespace)
 	ctx = log.IntoContext(ctx, logger)
 
 	requeue, err := r.compile(ctx, &rec)
+	if err == nil {
+		err = r.place(ctx, &rec)
+	}
 	if err == nil {
 		err = r.writeConditions(ctx, &rec)
 	}

@@ -18,6 +18,8 @@ import (
 	cachev1alpha1 "github.com/kubeswift-io/kubeswift-spin/api/v1alpha1"
 	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
+	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
+	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
 )
 
 const (
@@ -317,4 +319,55 @@ func TestCompiledCacheRuntimeNotAllowed(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// A trusted cache is added to replicas created after it became trusted,
+// outside the revision: existing replicas are not replaced.
+func TestCompiledCacheDecoratesNewReplicas(t *testing.T) {
+	s := cacheSettings(t)
+	startManager(t, harnessOpts{compiledCache: s, delivery: compiledcache.Delivery{PullSecret: "cache-read", ColdFetchTimeout: 3 * time.Second}})
+	ns := enabledNamespace(t)
+	mustCreate(t, cacheExecutor(ns, true), pinnedApp(ns, "one", ccDigestA))
+	expectSandboxes(t, ns, "one-0")
+	first := getSandbox(t, ns, "one-0")
+	if len(first.Spec.Artifacts) != 0 {
+		t.Fatalf("a replica got a cache before one was trusted: %+v", first.Spec.Artifacts)
+	}
+
+	id := compiledcache.Identity{Namespace: ns, Source: ccAppRepo + "@" + ccDigestA, Runtime: ccRuntime, Architecture: "amd64",
+		Repository: s.NamespaceRepository(ns)}
+	mustCreate(t, &cachev1alpha1.SpinCompiledCache{ObjectMeta: metav1.ObjectMeta{Namespace: s.Namespace, Name: id.RecordName()}, Spec: id.Spec()})
+	art := id.Repository + "@" + ccDigestB
+	patchRecordStatus(t, s.Namespace, id.RecordName(), map[string]any{
+		"compile":   map[string]any{"attempt": 1, "artifact": art},
+		"signature": map[string]any{"artifact": art, "keyID": "k1", "signedAt": time.Now().UTC().Format(time.RFC3339)},
+	})
+	expectCondition(t, ns, "one", compiledcache.TypeCompiledCache, metav1.ConditionTrue, compiledcache.ReasonReady)
+
+	updateApp(t, ns, "one", func(a *spinv1alpha1.SpinApp) { a.Spec.Replicas = 2 })
+	expectSandboxes(t, ns, "one-0", "one-1")
+	second := getSandbox(t, ns, "one-1")
+	if second.Labels[translate.LabelRevision] != first.Labels[translate.LabelRevision] {
+		t.Fatalf("the cache changed the revision: %s, %s", second.Labels[translate.LabelRevision], first.Labels[translate.LabelRevision])
+	}
+	if got := getSandbox(t, ns, "one-0"); got.UID != first.UID || len(got.Spec.Artifacts) != 0 {
+		t.Fatal("the existing replica was replaced or changed")
+	}
+	if len(second.Spec.Artifacts) != 1 {
+		t.Fatalf("artifacts %+v", second.Spec.Artifacts)
+	}
+	a := second.Spec.Artifacts[0]
+	if a.Name != compiledcache.ArtifactName || a.Ref != art || a.MountPath != runtimecontract.CompiledCacheDir || a.Layout != "unpacked" ||
+		!a.Optional || !a.RequirePlatformVerification || a.FetchTimeout == nil || a.FetchTimeout.Duration != 3*time.Second ||
+		a.PullSecretRef == nil || a.PullSecretRef.Name != "cache-read" || a.Claims[compiledcache.ClaimNamespace] != ns {
+		t.Fatalf("artifact %+v", a)
+	}
+	env := map[string]string{}
+	for _, e := range second.Spec.Env {
+		env[e.Name] = e.Value
+	}
+	if env[runtimecontract.CompiledCacheSourceEnv] != id.Source || env[runtimecontract.CompiledCacheRuntimeEnv] != ccRuntime ||
+		env[runtimecontract.CompiledCacheArchitectureEnv] != "amd64" {
+		t.Fatalf("env %v", env)
+	}
 }

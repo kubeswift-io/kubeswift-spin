@@ -64,7 +64,7 @@ func compilerSandbox(uid types.UID, args []string) *sandboxv1alpha1.SwiftSandbox
 func newRecordReconciler(t *testing.T, now time.Time, objs ...client.Object) (*RecordReconciler, client.Client) {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(scheme.New()).WithObjects(objs...).
-		WithStatusSubresource(&cachev1alpha1.SpinCompiledCache{}, &sandboxv1alpha1.SwiftSandbox{}).Build()
+		WithStatusSubresource(&cachev1alpha1.SpinCompiledCache{}, &sandboxv1alpha1.SwiftSandbox{}, &sandboxv1alpha1.SwiftArtifactPlacement{}).Build()
 	return &RecordReconciler{Client: c, APIReader: c, Settings: testSettings, Compiler: compiledcache.DefaultCompilerSettings(),
 		MaxCompilers: 4, MaxCompilersPerNamespace: 1, Now: func() time.Time { return now }, NewToken: func() string { return "new" }}, c
 }

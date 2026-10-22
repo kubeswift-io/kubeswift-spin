@@ -51,6 +51,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 - --compiled-cache-runtimes={{ join "," (prepend .Values.compiledCache.extraRuntimes (printf "%s@%s" .Values.runtimeImage.repository .Values.runtimeImage.digest)) }}
 {{- end -}}
 
+{{/* How replicas and placements read signed caches: the controller and the
+cache manager build the same artifact from these. */}}
+{{- define "kubeswift-spin.compiledCacheDeliveryArgs" -}}
+- --compiled-cache-fetch-timeout={{ .Values.compiledCache.fetchTimeout }}
+{{- with .Values.compiledCache.pullSecretName }}
+- --compiled-cache-pull-secret={{ . }}
+{{- end }}
+{{- end -}}
+
 {{/* Flags that shape how the controller and the cache manager read executors. */}}
 {{- define "kubeswift-spin.profileArgs" -}}
 - --runtime-image={{ include "kubeswift-spin.imageRef" (list .Values.runtimeImage (required "runtimeImage.tag or runtimeImage.digest is required" (.Values.runtimeImage.tag | default .Values.runtimeImage.digest))) }}

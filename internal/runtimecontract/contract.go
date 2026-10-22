@@ -113,6 +113,33 @@ const (
 	// CompiledCacheKind is the "kind" of compiled cache metadata.
 	CompiledCacheKind = "kubeswift-spin.wasmtime-cache"
 
+	// WasmtimeCacheVersion is the version directory of the Wasmtime cache
+	// layout of the Spin in this runtime image. Compile mode refuses to
+	// write another, and the entrypoint uses only a cache that names it.
+	// Update it with Spin; hack/test-runtime-image.sh checks it.
+	WasmtimeCacheVersion = "wasmtime-49.0.1"
+
+	// CompiledCacheDir is where a replica's signed compiled cache is
+	// mounted, read-only, when KubeSwift delivers it (ADR 0014).
+	CompiledCacheDir = "/opt/kubeswift-spin-cache"
+
+	// CompiledCacheConfigPath is the Wasmtime cache configuration the
+	// entrypoint writes when it uses the mounted cache.
+	CompiledCacheConfigPath = BaseDir + "/wasmtime-cache.toml"
+
+	// The controller sets these on replicas that get a compiled cache: the
+	// application, runtime image and architecture the cache must have been
+	// built for. The entrypoint compares them with the cache metadata and
+	// never passes them to Spin.
+	CompiledCacheSourceEnv       = "KUBESWIFT_SPIN_CACHE_SOURCE"
+	CompiledCacheRuntimeEnv      = "KUBESWIFT_SPIN_CACHE_RUNTIME"
+	CompiledCacheArchitectureEnv = "KUBESWIFT_SPIN_CACHE_ARCHITECTURE"
+
+	// WasmtimeCacheFileEnv and DisableWasmtimeCacheEnv are read by Spin.
+	// Only the entrypoint sets them; values from anywhere else are dropped.
+	WasmtimeCacheFileEnv    = "WASMTIME_CACHE_FILE"
+	DisableWasmtimeCacheEnv = "DISABLE_WASMTIME_CACHE"
+
 	// RunAsUID and RunAsGID are the unprivileged identity the entrypoint
 	// switches to before exec'ing Spin. They match the distroless "nonroot"
 	// user shipped in the runtime image.

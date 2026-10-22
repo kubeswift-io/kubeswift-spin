@@ -162,7 +162,9 @@ func placedCondition(rec *cachev1alpha1.SpinCompiledCache, trusted bool) metav1.
 // is a failure rather than progress.
 func placementFailed(reason string) bool {
 	switch reason {
-	case "PrepareFailed", "VerificationFailed", "ClaimMismatch", "PolicyDenied", "ArtifactRefused", "PoolNotFound":
+	case "PrepareFailed", "VerificationFailed", "ClaimMismatch", "PolicyDenied", "ArtifactRefused", "PoolNotFound",
+		// The cache manager's own: another object holds the placement's name.
+		"PlacementConflict":
 		return true
 	}
 	return false
