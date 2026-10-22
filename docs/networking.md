@@ -113,6 +113,7 @@ discovery access, and no CRD read permission.
 | exposure | `spec.network.ports`, `spec.readinessProbe` and `spec.podMetadata` | ports, probes, launcher pod labels, `ingress-from` |
 | secrets | `spec.secretFiles` | Secret references (see [security-model.md](security-model.md#secrets)) |
 | egress | `spec.network.egress` | `egress-allow` |
+| compiledCache | `spec.artifacts[].optional`, `fetchTimeout`, `claims`, `requirePlatformVerification`, and `spec.outputs` | compiled caches ([compiled-cache.md](compiled-cache.md)) |
 
 The controller does not start reconciling until one detection has succeeded;
 if the schema cannot be read it exits with
@@ -123,7 +124,8 @@ On success it logs the result:
 kubectl -n kubeswift-spin-system logs deploy/kubeswift-spin | grep "SwiftSandbox features detected"
 ```
 
-The line carries `exposure`, `secrets` and `egress` as `true` or `false`.
+The line carries `exposure`, `secrets`, `egress`, `readinessStartup`,
+`termination` and `compiledCache` as `true` or `false`.
 The schema is re-read at most every `--capability-refresh` (default 5
 minutes). A failed read keeps the last successful result, because the
 features shape every sandbox spec and a transient error must not replace

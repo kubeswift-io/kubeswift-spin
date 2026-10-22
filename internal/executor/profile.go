@@ -87,6 +87,18 @@ const (
 	// how long a SpinApp author can keep deleted replicas, and their
 	// launcher pods' termination grace period, around.
 	AnnMaxDrainPeriod = Prefix + "max-drain-period"
+	// AnnCompiledCache turns on the trusted compiled Wasmtime cache (ADR
+	// 0014) for the executor's SpinApps: "enabled" or "disabled" (the
+	// default). A SpinApp can opt out with the same annotation set to
+	// "disabled". The platform must also configure the feature (chart value
+	// compiledCache.enabled).
+	AnnCompiledCache = Prefix + "compiled-cache"
+)
+
+// Values of AnnCompiledCache.
+const (
+	CompiledCacheEnabled  = "enabled"
+	CompiledCacheDisabled = "disabled"
 )
 
 // MaxDrainPeriod is KubeSwift's upper bound for spec.termination.drainPeriod.
@@ -157,6 +169,7 @@ var knownAnnotations = map[string]bool{
 	AnnReadinessStartup:       true,
 	AnnDrainPeriod:            true,
 	AnnMaxDrainPeriod:         true,
+	AnnCompiledCache:          true,
 }
 
 // KnownAnnotations returns the supported profile annotation keys, sorted.
@@ -210,6 +223,9 @@ type Profile struct {
 	DrainPeriod *time.Duration
 	// DrainPeriodLimit is AnnMaxDrainPeriod; nil allows MaxDrainPeriod.
 	DrainPeriodLimit *time.Duration
+
+	// CompiledCache is AnnCompiledCache=enabled.
+	CompiledCache bool
 }
 
 // CheckFeatures reports profile settings the installed KubeSwift cannot
@@ -392,6 +408,16 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 			if p.DrainPeriod != nil && *p.DrainPeriod > d {
 				add("annotation %s is %s, above the executor's %s of %s", AnnDrainPeriod, *p.DrainPeriod, AnnMaxDrainPeriod, d)
 			}
+		}
+	}
+
+	if v, ok := ann[AnnCompiledCache]; ok {
+		switch v {
+		case CompiledCacheEnabled:
+			p.CompiledCache = true
+		case CompiledCacheDisabled:
+		default:
+			add("annotation %s must be %q or %q, got %q", AnnCompiledCache, CompiledCacheEnabled, CompiledCacheDisabled, bounded(v))
 		}
 	}
 

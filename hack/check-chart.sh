@@ -15,6 +15,18 @@ render | check
 render --set metrics.secure=true --set metrics.serviceMonitor.enabled=true | check
 render --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
        --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 | check
+render --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 \
+       --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/kubeswift-spin-cache | check
+render --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 \
+       --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/kubeswift-spin-cache \
+       --set metrics.secure=true | check
+# compiledCache.enabled needs a repository and a runtime image digest.
+if render --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/c >/dev/null 2>&1; then
+  echo "compiledCache.enabled rendered without runtimeImage.digest" >&2; exit 1
+fi
+if render --set compiledCache.enabled=true --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 >/dev/null 2>&1; then
+  echo "compiledCache.enabled rendered without compiledCache.repository" >&2; exit 1
+fi
 
 # The chart's default runtime image must be the version in runtime/VERSION.
 want="$(cat runtime/VERSION)"

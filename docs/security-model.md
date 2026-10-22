@@ -47,6 +47,7 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 | Executor authors | trusted like SwiftSandbox creators | Whoever can create or update a SpinAppExecutor in a namespace decides, through the controller, the runtime image, node selector, kernel profile, network mode (`open` removes the cloud metadata block), egress allowlist and warm pool of every sandbox for that namespace. That is the power of creating SwiftSandboxes there. kubeswift-spin has no administrator policy that limits executor profiles; grant executor write access only to platform operators. |
 | SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to, and can make any Secret in that namespace available to their application (see [Secrets](#secrets)). Their `spec.podLabels` become launcher pod labels, so they can match pod-label based NetworkPolicy peers and Services in their namespace (see [Network isolation](#network-isolation)). |
 | Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest. |
+| kubeswift-spin cache manager | trusted control plane component | Only with compiled caches enabled. Its own ServiceAccount: reads SpinApps, executors, pools and Namespaces, and writes `SpinCompiledCache` records in the release namespace. From the compilation stage on it also creates compiler SwiftSandboxes with SpinApps' pull Secrets, so, like the controller, treat its credentials like a cluster-wide Secret reader. See [compiled-cache.md](compiled-cache.md). |
 
 ## Threat actors
 
@@ -618,3 +619,39 @@ They never contain values of variables or runtime-config options.
 ## Reporting vulnerabilities
 
 See [SECURITY.md](../SECURITY.md).
+
+## Compiled caches
+
+Compiled Wasmtime caches are native code mounted into replicas
+([ADR 0014](adr/0014-compiled-wasmtime-cache.md)). The trust anchor is
+KubeSwift's platform verification of the signer's signature and claims, not
+the `SpinCompiledCache` record. With the feature enabled the chart adds:
+
+| Identity | Resource | Verbs | Scope |
+|---|---|---|---|
+| controller | `spincompiledcaches` | get, list, watch | release namespace |
+| controller | `namespaces` | get, list, watch | cluster |
+| cache manager | `spinapps`, `spinappexecutors`, `swiftsandboxpools`, `namespaces` | get, list, watch | cluster |
+| cache manager | `spincompiledcaches` | get, list, watch, create, delete | release namespace |
+| cache manager | `spincompiledcaches/status` | get, patch | release namespace |
+| cache manager | `leases` | create; get, update on its own Lease | release namespace |
+| cache manager | core and `events.k8s.io` `events` | create, patch | release namespace |
+
+`hack/check_chart_policy.py` ties each rule set to the ServiceAccount
+allowed to hold it, so the controller cannot be granted the cache manager's
+write access by a chart change.
+
+Tenants must not be able to write in the release namespace: install
+kubeswift-spin into a namespace of its own. Namespaces that use compiled
+caches must meet the [prerequisites](compiled-cache.md#prerequisites); in
+particular, no non-platform principal may exec into, attach to or modify
+pods there, because KubeSwift's fetch pods can write the node's shared
+artifact cache.
+
+Residual risks:
+
+- A tenant's application can influence the native code compiled for that
+  tenant's namespace, as a Cranelift bug would let any Wasm module do.
+- Claims bind a namespace by name: a namespace deleted and re-created by
+  another principal inherits its predecessor's signed caches until they are
+  removed from the registry.

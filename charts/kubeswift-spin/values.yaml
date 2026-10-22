@@ -121,3 +121,39 @@ metrics:
     enabled: false
     interval: 30s
     labels: {}
+
+# Trusted compiled Wasmtime cache (ADR 0014). Off by default. When enabled,
+# the chart installs the SpinCompiledCache CRD and the cache manager, and
+# executors opt in with the annotation spin.kubeswift.io/compiled-cache:
+# enabled. It needs KubeSwift v0.19.1 or later and the administrator setup in
+# docs/compiled-cache.md (export policy, verification policy, signer key).
+compiledCache:
+  enabled: false
+  # Base repository of compiled caches: registry host and path, lowercase,
+  # no tag or digest. Each namespace's caches go to
+  # <repository>/<namespace>/wasmtime-cache.
+  repository: ""
+  # Architecture for executors whose node selector does not name
+  # kubernetes.io/arch: amd64 or arm64.
+  architecture: amd64
+  # Runtime images, besides runtimeImage (which must be pinned by digest),
+  # that compiled caches are built and signed for, as
+  # repository@sha256:<digest>. An executor with any other runtime image
+  # gets no cache.
+  extraRuntimes: []
+  # How long a record that no SpinApp uses is kept. The most recently
+  # replaced record of each SpinApp is always kept.
+  retention: 24h
+  # Most records kept for one namespace.
+  maxRecordsPerNamespace: 32
+  manager:
+    replicaCount: 1
+    logLevel: info
+    extraArgs: []
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi

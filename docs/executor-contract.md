@@ -69,6 +69,7 @@ for example `kubeswift`, `kubeswift-open` and `kubeswift-warm`.
 | `spin.kubeswift.io/readiness-startup` | `auto`, `always`, `never`; see [Readiness startup](#readiness-startup); `always` needs KubeSwift v0.16.2 | `auto` |
 | `spin.kubeswift.io/drain-period` | a duration with units from `0s` to `10m` (for example `30s`): how long a deleted replica keeps running after its readiness was withdrawn, before KubeSwift stops it (`spec.termination.drainPeriod`); the default for the executor's SpinApps, which a SpinApp's own annotation overrides; see [Drain period](#drain-period); needs KubeSwift v0.16.3 | unset (KubeSwift's default, 5 seconds for exposed sandboxes) |
 | `spin.kubeswift.io/max-drain-period` | a duration with units from `0s` to `10m`: the longest drain period the executor's SpinApps, and its own `drain-period`, may set | `10m` (KubeSwift's limit) |
+| `spin.kubeswift.io/compiled-cache` | `enabled`, `disabled`: new replicas of the executor's SpinApps mount a trusted, precompiled Wasmtime cache when one is ready, and start without it otherwise; the platform must enable the feature (chart value `compiledCache.enabled`); see [compiled-cache.md](compiled-cache.md) | `disabled` |
 
 Any other annotation with the `spin.kubeswift.io/` prefix makes the executor
 invalid, so a misspelled key is reported rather than ignored. Network mode
@@ -771,7 +772,8 @@ mechanism only: kubeswift-spin still creates one SwiftSandbox per replica.
 ## Status
 
 kubeswift-spin writes `status.activeScheduler` (the executor name),
-`status.readyReplicas`, and the `Available` and `Progressing` conditions,
+`status.readyReplicas`, the `Available` and `Progressing` conditions, and,
+for SpinApps that ask for a compiled cache, the `CompiledCache` condition,
 using a JSON merge patch with the resource version it read. Conditions of
 other types are preserved. When the SpinApp changed in between, the API
 server rejects the patch with a conflict and the reconcile is retried on
@@ -805,6 +807,7 @@ v0.15.1 sandboxes have no probe, so `readyReplicas` stays 0.
 | Available | False | `ApplicationNotReady` | sandboxes run, but too few pass the readiness probe yet ("N of M replicas ready; K running sandboxes do not pass the readiness check yet") |
 | Available | False | `NetworkUnavailable` | KubeSwift before v0.16.0 only: sandboxes run, but readiness cannot be verified and the app cannot be exposed |
 | Available | False | same as Progressing | nothing is running yet |
+| CompiledCache | True or False | see [compiled-cache.md](compiled-cache.md#what-a-spinapp-reports) | only for SpinApps whose executor enables compiled caches; it never affects `Available` or `Progressing` and is removed when the SpinApp no longer asks for a cache |
 
 Messages name fields, variables and objects, never values. A condition
 message lists at most five problems ("and N more problems"), echoes names
@@ -817,7 +820,10 @@ Events are recorded on the SpinApp with the `events.k8s.io/v1` API:
 `SandboxCreated`, `SandboxDeleted`, `SandboxFailed`,
 `UnsupportedConfiguration`, `PartiallySupported`, `ExecutorInvalid`,
 `ExecutorNotFound`, `WarmPoolIncompatible`, `SandboxConflict`,
-`SandboxRejected`, `ExecutorChanged`. Configuration Events fire once per
+`SandboxRejected`, `ExecutorChanged`, and for compiled caches
+`CompiledCacheRequested`, `CompiledCacheReady`, `CompiledCacheFailed`,
+`CompiledCacheSkipped` and `CompiledCachePlacementFailed` (once per change
+of the `CompiledCache` reason). Configuration Events fire once per
 SpinApp generation, when a `spin.kubeswift.io/` annotation of the SpinApp
 changes, or when the message changes.
 

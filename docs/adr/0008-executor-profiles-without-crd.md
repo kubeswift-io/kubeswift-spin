@@ -18,7 +18,8 @@ the Helm chart.
 
 ## Consequences
 
-- No CRD to install, version or migrate.
+- No CRD to install, version or migrate. ADR 0014 adds one for platform
+  state (compiled caches), not for executor profiles or applications.
 - Annotations are untyped; strict validation and the Helm values schema
   compensate.
 - A CRD would be reconsidered only if profiles need structure that

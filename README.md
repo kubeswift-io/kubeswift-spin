@@ -12,8 +12,9 @@ boundary.
 - **kubeswift-spin** owns the adapter.
 - **KubeSwift** owns the isolated compute primitive.
 
-kubeswift-spin adds no CRD and requires no change to Spin, SpinKube or
-KubeSwift. Read [why kubeswift-spin](docs/why-kubeswift-spin.md) for when a
+kubeswift-spin requires no change to Spin, SpinKube or KubeSwift, and adds
+no CRD for applications: the optional compiled cache keeps platform records
+in its own namespace ([ADR 0014](docs/adr/0014-compiled-wasmtime-cache.md)). Read [why kubeswift-spin](docs/why-kubeswift-spin.md) for when a
 microVM around a Wasm application is worth its cost, and when standard
 SpinKube is the better choice.
 

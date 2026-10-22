@@ -7,6 +7,31 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## Unreleased (v0.2.0)
+
+### Added
+
+- Trusted compiled Wasmtime cache, in progress (ADR 0014,
+  docs/compiled-cache.md). Off by default. The chart value
+  `compiledCache.enabled` installs the `SpinCompiledCache` CRD
+  (`spin.kubeswift.io/v1alpha1`) and the cache manager
+  (`manager --mode=cache-manager`, its own ServiceAccount); executors opt in
+  with `spin.kubeswift.io/compiled-cache: enabled` and SpinApps can opt out.
+  Administrators enable namespaces with the label
+  `spin.kubeswift.io/compiled-cache=enabled` after checking the
+  prerequisites in docs/compiled-cache.md, and caches are built only for the
+  platform's runtime images (`runtimeImage.digest`,
+  `compiledCache.extraRuntimes`). This revision records one cache per
+  namespace, application digest, runtime digest, architecture and
+  repository, tracks its consumers, deletes unused records after a
+  retention period, and reports the SpinApp condition `CompiledCache` with
+  Events. Compilation, signing and delivery follow.
+- The chart's Leases are restricted to each component's own Lease name.
+
+### Changed
+
+- The KubeSwift test dependency is v0.19.1, and Go is 1.26.10.
+
 ## v0.1.1 (2026-10-12)
 
 A patch release: the drain period of deleted replicas is configurable.

@@ -440,7 +440,7 @@ func validateAppImage(ref string) error {
 
 // AppAnnotations are the spin.kubeswift.io/ annotations kubeswift-spin
 // reads on a SpinApp. docs/compatibility.md lists them.
-var AppAnnotations = []string{executor.AnnDrainPeriod}
+var AppAnnotations = []string{executor.AnnCompiledCache, executor.AnnDrainPeriod}
 
 // annotationsField is the Finding field (and metric label) for SpinApp
 // annotations.
@@ -467,6 +467,20 @@ func analyzeAnnotations(ann map[string]string, p *executor.Profile, f capabiliti
 					k, d, limit, p.ExecutorName, executor.AnnMaxDrainPeriod)
 			} else if !f.Termination {
 				block(annotationsField, Unsupported, "annotation %s needs spec.termination, KubeSwift v0.16.3 or later", k)
+			}
+		case executor.AnnCompiledCache:
+			// A SpinApp can only opt out: whether compiled caches are built
+			// is a platform and executor decision.
+			switch ann[k] {
+			case executor.CompiledCacheDisabled:
+			case executor.CompiledCacheEnabled:
+				if !p.CompiledCache {
+					note(annotationsField, Unsupported, "annotation %s=%s has no effect: executor %q does not enable compiled caches, and a SpinApp can only opt out",
+						k, executor.CompiledCacheEnabled, p.ExecutorName)
+				}
+			default:
+				block(annotationsField, Unsupported, "annotation %s must be %q or %q, got %s", k,
+					executor.CompiledCacheEnabled, executor.CompiledCacheDisabled, quoteName(ann[k]))
 			}
 		default:
 			note(annotationsField, Unsupported, "annotation %s is not a kubeswift-spin SpinApp annotation and is ignored; known: %s",

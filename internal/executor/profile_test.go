@@ -312,3 +312,21 @@ func TestParseMaxDrainPeriod(t *testing.T) {
 		t.Fatalf("unbounded message: %v", err)
 	}
 }
+
+func TestParseCompiledCache(t *testing.T) {
+	p, err := Parse(managed("kubeswift", nil), defaults())
+	if err != nil || p.CompiledCache {
+		t.Fatalf("default: %v %v", err, p.CompiledCache)
+	}
+	for v, want := range map[string]bool{CompiledCacheEnabled: true, CompiledCacheDisabled: false} {
+		p, err := Parse(managed("kubeswift", map[string]string{AnnCompiledCache: v}), defaults())
+		if err != nil || p.CompiledCache != want {
+			t.Fatalf("%q: %v %v", v, err, p.CompiledCache)
+		}
+	}
+	for _, v := range []string{"", "true", "Enabled", "on", "strict"} {
+		if _, err := Parse(managed("kubeswift", map[string]string{AnnCompiledCache: v}), defaults()); err == nil {
+			t.Errorf("%q accepted", v)
+		}
+	}
+}

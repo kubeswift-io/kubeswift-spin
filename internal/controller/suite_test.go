@@ -31,8 +31,10 @@ import (
 
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/cachemanager"
 	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/compatibility"
+	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/scheme"
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
@@ -87,6 +89,8 @@ func TestMain(m *testing.M) {
 				filepath.Join(spinDir, "config", "crd", "bases"),
 				filepath.Join(ksDir, "config", "crd", "bases", "sandbox.kubeswift.io_swiftsandboxes.yaml"),
 				filepath.Join(ksDir, "config", "crd", "bases", "sandbox.kubeswift.io_swiftsandboxpools.yaml"),
+				filepath.Join(ksDir, "config", "crd", "bases", "sandbox.kubeswift.io_swiftartifactplacements.yaml"),
+				filepath.Join("..", "..", "charts", "kubeswift-spin", "files", "crds"),
 			},
 			ErrorIfPathMissing: true,
 		},
@@ -117,6 +121,10 @@ type harnessOpts struct {
 	detector       capabilities.SandboxDetector
 	maxReplicas    int32
 	leavingTimeout time.Duration
+	// compiledCache configures compiled caches; cacheManager also runs the
+	// cache manager's reconcilers in the same manager.
+	compiledCache compiledcache.Settings
+	cacheManager  bool
 }
 
 func startManager(t *testing.T, o harnessOpts) *harness {
@@ -126,7 +134,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 	}
 	mgr, err := ctrl.NewManager(testCfg, ctrl.Options{
 		Scheme:  testScheme,
-		Cache:   CacheOptions(nil),
+		Cache:   CacheOptions(nil, o.compiledCache.Namespace),
 		Metrics: metricsserver.Options{BindAddress: "0"},
 		// Each test starts its own manager in the same process.
 		Controller: config.Controller{SkipNameValidation: ptr.To(true)},
@@ -136,7 +144,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 	}
 	if o.detector == nil {
 		// The real detector against the envtest API server, which serves
-		// the KubeSwift v0.16.4 CRDs: every optional feature is present.
+		// the KubeSwift v0.19.1 CRDs: every optional feature is present.
 		o.detector = &capabilities.OpenAPIDetector{Discovery: discovery.NewDiscoveryClientForConfigOrDie(testCfg), TTL: time.Minute}
 	}
 	if o.maxReplicas == 0 {
@@ -159,11 +167,26 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		Backoff:        b,
 		WaitingRequeue: 500 * time.Millisecond,
 		LeavingTimeout: o.leavingTimeout,
+
+		CompiledCache:        o.compiledCache,
+		CompiledCachesServed: o.compiledCache.Configured(),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := r.SetupWithManager(ctx, mgr); err != nil {
 		cancel()
 		t.Fatal(err)
+	}
+	if o.cacheManager {
+		ns := &cachemanager.NamespaceReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Settings: o.compiledCache, Detector: o.detector, Retention: time.Hour}
+		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: o.compiledCache}
+		if err := ns.SetupWithManager(mgr); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		if err := rec.SetupWithManager(mgr); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
 	}
 	h := &harness{t: t, cancel: cancel, r: r}
 	h.done.Add(1)

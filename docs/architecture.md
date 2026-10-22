@@ -216,9 +216,12 @@ flowchart LR
     SB0 -- KubeSwift --> NP0[NetworkPolicy app-0-restricted]
 ```
 
-kubeswift-spin creates only SwiftSandboxes. Everything below a SwiftSandbox
-belongs to KubeSwift; the Service belongs to Spin Operator. There is no
-kubeswift-spin CRD and no finalizer.
+kubeswift-spin creates only SwiftSandboxes for SpinApps. Everything below a
+SwiftSandbox belongs to KubeSwift; the Service belongs to Spin Operator.
+There is no finalizer. The optional compiled cache adds platform records
+(`SpinCompiledCache`, in the kubeswift-spin namespace) and compiler
+sandboxes ([compiled-cache.md](compiled-cache.md)); without it there is no
+kubeswift-spin CRD.
 
 ## Two OCI artifacts
 
