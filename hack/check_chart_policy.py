@@ -70,6 +70,17 @@ EXPECTED = {
         {"apiGroups": [""], "resources": ["events"], "verbs": ["create", "patch"]},
         {"apiGroups": ["events.k8s.io"], "resources": ["events"], "verbs": ["create", "patch"]},
     ]),
+    # The cache signer reads compiler sandboxes one at a time.
+    "cache-signer": norm([
+        {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftsandboxes"], "verbs": ["get"]},
+    ]),
+    # The signer's records, Lease and Events, in the release namespace.
+    "cache-signer-records": norm([
+        {"apiGroups": ["spin.kubeswift.io"], "resources": ["spincompiledcaches"], "verbs": ["get", "list", "watch"]},
+        {"apiGroups": ["spin.kubeswift.io"], "resources": ["spincompiledcaches/status"], "verbs": ["get", "patch"]},
+        {"apiGroups": ["coordination.k8s.io"], "resources": ["leases"], "verbs": ["get", "create", "update"]},
+        {"apiGroups": [""], "resources": ["events"], "verbs": ["create", "patch"]},
+    ]),
 }
 
 # Which component's ServiceAccount may be bound to each rule set: the
@@ -78,19 +89,22 @@ EXPECTED = {
 ALLOWED_COMPONENTS = {
     "controller": {"controller"},
     "leader-election": {"controller"},
-    "metrics-auth": {"controller", "cache-manager"},
+    "metrics-auth": {"controller", "cache-manager", "cache-signer"},
     "metrics-reader": set(),
     "compiled-cache-reader": {"controller"},
     "compiled-cache-namespaces": {"controller"},
     "cache-manager": {"cache-manager"},
     "cache-manager-records": {"cache-manager"},
+    "cache-signer": {"cache-signer"},
+    "cache-signer-records": {"cache-signer"},
 }
 
 # The kind each approved rule set must have: leader election is confined to
 # the release namespace; everything else is cluster-wide by design.
 EXPECTED_KIND = {"controller": "ClusterRole", "leader-election": "Role", "metrics-auth": "ClusterRole", "metrics-reader": "ClusterRole",
                  "compiled-cache-reader": "Role", "compiled-cache-namespaces": "ClusterRole",
-                 "cache-manager": "ClusterRole", "cache-manager-records": "Role"}
+                 "cache-manager": "ClusterRole", "cache-manager-records": "Role",
+                 "cache-signer": "ClusterRole", "cache-signer-records": "Role"}
 
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
 errors = []
@@ -102,7 +116,11 @@ pod_accounts = {d["spec"]["template"]["spec"].get("serviceAccountName") for d in
 
 
 def component(dep):
-    """The component a Deployment runs: its manager --mode."""
+    """The component a Deployment runs: its component label, else its
+    manager --mode."""
+    label = dep["metadata"].get("labels", {}).get("app.kubernetes.io/component")
+    if label == "cache-signer":
+        return label
     for c in dep["spec"]["template"]["spec"]["containers"]:
         for a in c.get("args", []):
             if a.startswith("--mode="):

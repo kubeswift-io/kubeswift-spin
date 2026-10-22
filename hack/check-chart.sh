@@ -15,11 +15,16 @@ render | check
 render --set metrics.secure=true --set metrics.serviceMonitor.enabled=true | check
 render --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
        --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 | check
-render --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 \
-       --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/kubeswift-spin-cache | check
-render --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 \
-       --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/kubeswift-spin-cache \
-       --set metrics.secure=true | check
+cc=(--set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
+    --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/kubeswift-spin-cache
+    --set compiledCache.signer.registryCredentialsSecret=cache-registry)
+render "${cc[@]}" --set compiledCache.signer.key.secretName=cache-signing-key | check
+render "${cc[@]}" --set compiledCache.signer.key.kmsRef=gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k --set metrics.secure=true | check
+# The signer needs exactly one key source and registry credentials.
+if render "${cc[@]}" >/dev/null 2>&1; then echo "compiledCache rendered without a signing key" >&2; exit 1; fi
+if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set compiledCache.signer.key.kmsRef=gcpkms://x >/dev/null 2>&1; then
+  echo "compiledCache rendered with two signing keys" >&2; exit 1
+fi
 # compiledCache.enabled needs a repository and a runtime image digest.
 if render --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/c >/dev/null 2>&1; then
   echo "compiledCache.enabled rendered without runtimeImage.digest" >&2; exit 1

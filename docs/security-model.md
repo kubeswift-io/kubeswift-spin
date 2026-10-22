@@ -47,6 +47,7 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 | Executor authors | trusted like SwiftSandbox creators | Whoever can create or update a SpinAppExecutor in a namespace decides, through the controller, the runtime image, node selector, kernel profile, network mode (`open` removes the cloud metadata block), egress allowlist and warm pool of every sandbox for that namespace. That is the power of creating SwiftSandboxes there. kubeswift-spin has no administrator policy that limits executor profiles; grant executor write access only to platform operators. |
 | SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to, and can make any Secret in that namespace available to their application (see [Secrets](#secrets)). Their `spec.podLabels` become launcher pod labels, so they can match pod-label based NetworkPolicy peers and Services in their namespace (see [Network isolation](#network-isolation)). |
 | Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest. |
+| kubeswift-spin cache signer | trusted, holds the signing key | Only with compiled caches enabled. Its own ServiceAccount and image: gets compiler SwiftSandboxes, reads and patches the status of records in the release namespace. The signing key (or KMS access) and a registry credential that writes signatures are volumes of its pod; it has no Secret RBAC and never runs tenant code. It parses exported artifacts with size and entry limits. Prefer a KMS key, so a compromise of the pod does not reveal key material. |
 | kubeswift-spin cache manager | trusted control plane component | Only with compiled caches enabled. Its own ServiceAccount: reads SpinApps, executors, pools and Namespaces, and writes `SpinCompiledCache` records in the release namespace. From the compilation stage on it also creates compiler SwiftSandboxes with SpinApps' pull Secrets, so, like the controller, treat its credentials like a cluster-wide Secret reader. See [compiled-cache.md](compiled-cache.md). |
 
 ## Threat actors
@@ -637,6 +638,11 @@ the `SpinCompiledCache` record. With the feature enabled the chart adds:
 | cache manager | `spincompiledcaches/status` | get, patch | release namespace |
 | cache manager | `leases` | create; get, update on its own Lease | release namespace |
 | cache manager | core and `events.k8s.io` `events` | create, patch | release namespace |
+| cache signer | `swiftsandboxes` | get | cluster |
+| cache signer | `spincompiledcaches` | get, list, watch | release namespace |
+| cache signer | `spincompiledcaches/status` | get, patch | release namespace |
+| cache signer | `leases` | create; get, update on its own Lease | release namespace |
+| cache signer | core `events` | create, patch | release namespace |
 
 `hack/check_chart_policy.py` ties each rule set to the ServiceAccount
 allowed to hold it, so the controller cannot be granted the cache manager's

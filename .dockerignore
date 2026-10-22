@@ -5,6 +5,8 @@
 !api/
 !cmd/
 !internal/
+!signer/signing-config.json
+!signer/cosign/
 !test/perf/startupbench/
 api/**/*_test.go
 cmd/**/*_test.go

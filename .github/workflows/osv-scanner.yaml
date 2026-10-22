@@ -31,3 +31,4 @@ jobs:
       scan-args: |-
         --lockfile=go.mod
         --lockfile=examples/Cargo.lock
+        --lockfile=signer/cosign/go.mod

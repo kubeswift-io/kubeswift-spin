@@ -21,11 +21,11 @@ current revision does.
 | Lookup identity and `SpinCompiledCache` records, consumers, garbage collection | implemented |
 | SpinApp `CompiledCache` condition and Events | implemented |
 | Compilation in a SwiftSandbox and KubeSwift output export | implemented |
-| Signing and verification policy | not yet |
+| Signing and verification policy | implemented |
 | Placement on warm-pool nodes and mounting in replicas | not yet |
 
-Until signing lands, records stop at `Trusted=False/Signing` and replicas
-start without a cache.
+Until placement and mounting land, records stop at `Trusted=True` with
+`Placed` waiting, and replicas start without a cache.
 
 ## Requirements
 
@@ -168,6 +168,112 @@ Secret in the KubeSwift namespace with the label
 repositories only. `{namespace}` gives each namespace its own repository,
 so no namespace can export into another's. Without a policy the compiler's
 output is refused (`OutputDestinationDenied`).
+
+## Signing
+
+The cache signer is a third Deployment (`kubeswift-spin-cache-signer`
+image) with its own ServiceAccount. It is the only holder of the signing
+key and of the credential that writes signatures. It never runs tenant
+code and has no Secret RBAC: the key and the registry credential are
+volumes of its pod.
+
+For each record whose compiler exported an artifact, it signs only after
+these checks, made independently of the cache manager:
+
+1. The compiler sandbox the record names exists, has the recorded UID and
+   is not being deleted.
+2. Its whole stored spec hashes to the hash recorded at creation, and every
+   field is one a compiler has: no artifacts, model, scratch disk, GPU,
+   probes, pool or pod metadata, only literal Spin variables and the
+   registry credential list in its environment, only registry credentials
+   as secret files, no port, the record's architecture, an allowed runtime
+   in compile mode for the record's source and repository.
+3. It completed, and the export tag `<sandbox UID>.wasmtime-cache`, which
+   only KubeSwift's export Job pushes, names the record's digest.
+4. The artifact is the manifest KubeSwift's export produces, with one gzip
+   tar layer of only `metadata.json` and cache entries (regular files and
+   directories, within `compiler.maxSize` and `maxEntries`), and its
+   metadata names the record's source, runtime and architecture.
+
+It then signs the digest with cosign (v3.1.3, the version KubeSwift
+verifies with, built from source in the image) and the claims
+`spin.kubeswift.io/kind=wasmtime-cache`, `namespace`, `source`, `runtime`,
+`architecture` and `compiler`, inside the signed payload, and records the
+signed digest and key ID in `status.signature`. An artifact that fails a
+check is marked rejected and never signed; the cache manager compiles again
+after its backoff. A decision names the compiler it judged.
+
+### Signing key and registry credential
+
+The key is a cosign key in a Secret in the release namespace, or a KMS key
+(preferred where available):
+
+```bash
+cosign generate-key-pair k8s://kubeswift-spin-system/kubeswift-spin-cache-signing-key
+```
+
+This creates the Secret with `cosign.key`, `cosign.pub` and
+`cosign.password`. Nothing but the signer mounts it. For a KMS key, set
+`compiledCache.signer.key.kmsRef` (for example `gcpkms://...`), give the
+signer's ServiceAccount access with `signer.serviceAccountAnnotations` or
+`signer.extraEnv`, and leave `secretName` empty.
+
+The signer needs a `kubernetes.io/dockerconfigjson` Secret in the release
+namespace that can read the cache repositories and push signatures to them:
+
+```yaml
+compiledCache:
+  signer:
+    key:
+      secretName: kubeswift-spin-cache-signing-key
+    registryCredentialsSecret: kubeswift-spin-cache-signer-registry
+```
+
+### Verification policy
+
+Replicas mount a cache only through KubeSwift, which refuses it unless a
+`SwiftArtifactVerificationPolicy` governs its repository and the signature
+by a policy key carries every claim the replica asks for. kubeswift-spin
+requires the namespace, source, runtime and architecture claims on each
+replica itself; the policy must name the signer's key and bind the
+namespace:
+
+```yaml
+apiVersion: sandbox.kubeswift.io/v1alpha1
+kind: SwiftArtifactVerificationPolicy
+metadata:
+  name: kubeswift-spin-compiled-cache
+spec:
+  namespaceSelector:
+    matchLabels:
+      spin.kubeswift.io/compiled-cache: enabled
+  repositories:
+    - registry.example.com/kubeswift-spin-cache/**
+  otherRepositories: Allow
+  digestPinning: Required
+  authorities:
+    - name: kubeswift-spin-cache-signer
+      key:
+        publicKey: |
+          -----BEGIN PUBLIC KEY-----
+          ...the signer's cosign.pub...
+          -----END PUBLIC KEY-----
+  claims:
+    - key: spin.kubeswift.io/kind
+      value: wasmtime-cache
+    - key: spin.kubeswift.io/namespace
+      fromNamespace: true
+```
+
+Get the public key with `cosign public-key --key k8s://kubeswift-spin-system/kubeswift-spin-cache-signing-key`
+(or `--key <kmsRef>`). `kubectl get savp` shows the policy `Ready` with the
+key's ID, which matches the record's `status.signature.keyID`. The
+`fromNamespace` claim keeps a namespace from mounting another namespace's
+cache even with read access to its repository.
+
+To rotate the key, add the new key to the policy as a second authority,
+switch the signer to it, and remove the old key once the caches it signed
+are no longer used.
 
 ## What a SpinApp reports
 
