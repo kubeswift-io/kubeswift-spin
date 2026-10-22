@@ -2,9 +2,11 @@
 *
 !go.mod
 !go.sum
+!api/
 !cmd/
 !internal/
 !test/perf/startupbench/
+api/**/*_test.go
 cmd/**/*_test.go
 internal/**/*_test.go
 test/**/*_test.go
