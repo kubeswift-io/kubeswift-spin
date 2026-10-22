@@ -55,7 +55,7 @@ type compileOpts struct {
 }
 
 var (
-	pinnedRef   = regexp.MustCompile(`^[^@\s]+@sha256:[a-f0-9]{64}$`)
+	pinnedRef   = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$`)
 	spinVarName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	storeLabel  = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 	componentID = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)

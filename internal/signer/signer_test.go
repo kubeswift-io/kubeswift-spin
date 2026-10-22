@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -189,6 +190,7 @@ func newHarness(t *testing.T, files func(spec cachev1alpha1.SpinCompiledCacheSpe
 
 	rec := &cachev1alpha1.SpinCompiledCache{ObjectMeta: metav1.ObjectMeta{Namespace: settings.Namespace, Name: "spincc-1"},
 		Spec: cachev1alpha1.SpinCompiledCacheSpec{Namespace: "team-a", Source: "ghcr.io/org/app@" + appDigest, Runtime: testRT, Architecture: "amd64", Repository: repo}}
+	rec.Name = compiledcache.IdentityOf(rec).RecordName()
 	app := &spinv1alpha1.SpinApp{}
 	app.Namespace, app.Name, app.Spec.Image = "team-a", "hello", "ghcr.io/org/app@"+appDigest
 	p := &executor.Profile{ExecutorName: "kubeswift", RuntimeImage: testRT, CompiledCache: true, NetworkMode: sandboxv1alpha1.SandboxNetworkRestricted}
@@ -316,7 +318,12 @@ func TestRejects(t *testing.T) {
 		}, "CompilerCheckFailed"},
 		{"runtime no longer allowed", keep, compiledcache.ArtifactType, func(h *harness) {
 			h.r.Settings.Runtimes = []string{"ghcr.io/other/rt@" + appDigest}
-		}, "CompilerCheckFailed"},
+		}, "RecordInvalid"},
+		{"record outside the namespace's cache repository", keep, compiledcache.ArtifactType, func(h *harness) {
+			// A record written by someone other than the cache manager:
+			// the signer would push a signature to its repository.
+			h.r.Settings.Repository += "-other"
+		}, "RecordInvalid"},
 		{"record names another digest than the export tag", keep, compiledcache.ArtifactType, func(h *harness) {
 			// A forged status.outputs or record: an artifact the tenant
 			// exported from another sandbox.
@@ -408,5 +415,51 @@ func TestDecisionsNameTheCompiler(t *testing.T) {
 	s := h.reconcile()
 	if s.SignedAt == nil || s.Rejected || s.SandboxUID != "uid-1" {
 		t.Fatalf("signature %+v", s)
+	}
+}
+
+func TestZeroPadding(t *testing.T) {
+	if err := zeroPadding(bytes.NewReader(make([]byte, 4096)), 1<<20); err != nil {
+		t.Fatalf("zero padding refused: %v", err)
+	}
+	if err := zeroPadding(bytes.NewReader([]byte{0, 0, 1}), 1<<20); err == nil {
+		t.Fatal("non-zero data after the archive accepted")
+	}
+	if err := zeroPadding(bytes.NewReader(make([]byte, 2048)), 1024); err == nil {
+		t.Fatal("padding over the limit accepted")
+	}
+}
+
+func TestManifestsAreBounded(t *testing.T) {
+	big := strings.Repeat("x", maxManifest+10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("chunked") != "" {
+			w.(http.Flusher).Flush() // no Content-Length
+		}
+		_, _ = io.WriteString(w, big)
+	}))
+	defer srv.Close()
+	rt := limitManifests{next: http.DefaultTransport}
+	for _, q := range []string{"", "?chunked=1"} {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v2/r/manifests/sha256:x"+q, nil)
+		resp, err := rt.RoundTrip(req)
+		if err == nil {
+			_, err = io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+		}
+		if err == nil {
+			t.Fatalf("a %d-byte manifest was read (%q)", len(big), q)
+		}
+	}
+	// Blobs are bounded elsewhere (Limits.MaxSize), not by this transport.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v2/r/blobs/sha256:x", nil)
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if len(b) != len(big) {
+		t.Fatalf("blob read %d bytes", len(b))
 	}
 }

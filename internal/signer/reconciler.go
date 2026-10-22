@@ -41,6 +41,9 @@ type Reconciler struct {
 	// NameOptions are passed when parsing references (tests: insecure).
 	NameOptions []name.Option
 	Now         func() time.Time
+	// RegistryTimeout bounds the registry calls of one signing decision;
+	// 2 minutes when zero.
+	RegistryTimeout time.Duration
 
 	keyMu sync.Mutex
 	keyID string
@@ -144,6 +147,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 // means it must never be signed.
 func (r *Reconciler) sign(ctx context.Context, rec *cachev1alpha1.SpinCompiledCache) error {
 	c := rec.Status.Compile
+	if err := r.Settings.CheckRecord(rec); err != nil {
+		return invalid("RecordInvalid", "%v", err)
+	}
+	// Registry calls share one deadline, so a stalled registry cannot hold
+	// the signer.
+	ctx, cancel := context.WithTimeout(ctx, r.registryTimeout())
+	defer cancel()
 	// The sandbox is read as stored, every field included, so a field
 	// kubeswift-spin's own types do not declare cannot hide from the check.
 	var obj unstructured.Unstructured
@@ -164,7 +174,7 @@ func (r *Reconciler) sign(ctx context.Context, rec *cachev1alpha1.SpinCompiledCa
 	if sb.Status.Phase != sandboxv1alpha1.SwiftSandboxCompleted {
 		return invalid("CompilerCheckFailed", "compiler sandbox %s is %s, not Completed", sb.Name, sb.Status.Phase)
 	}
-	digest, err := r.Fetcher.ResolveExportTag(rec.Spec.Repository, compiledcache.ExportTag(&sb), r.NameOptions...)
+	digest, err := r.Fetcher.ResolveExportTag(ctx, rec.Spec.Repository, compiledcache.ExportTag(&sb), r.NameOptions...)
 	if err != nil {
 		var terr *transport.Error
 		if errors.As(err, &terr) && terr.StatusCode == http.StatusNotFound {
@@ -175,12 +185,14 @@ func (r *Reconciler) sign(ctx context.Context, rec *cachev1alpha1.SpinCompiledCa
 	if want := rec.Spec.Repository + "@" + digest; want != c.Artifact {
 		return invalid("DigestMismatch", "the compiler's export tag names %s, the record names %s", want, c.Artifact)
 	}
-	if _, err := r.Fetcher.Check(rec, c.Artifact, r.NameOptions...); err != nil {
+	if _, err := r.Fetcher.Check(ctx, rec, c.Artifact, r.NameOptions...); err != nil {
 		return err
 	}
-	id := compiledcache.Identity{Namespace: rec.Spec.Namespace, Source: rec.Spec.Source, Runtime: rec.Spec.Runtime,
-		Architecture: rec.Spec.Architecture, Repository: rec.Spec.Repository}
-	return r.Signer.Sign(ctx, c.Artifact, id.Claims(r.Identity))
+	claims := compiledcache.IdentityOf(rec).Claims(r.Identity)
+	if err := compiledcache.ValidClaims(claims); err != nil {
+		return invalid("RecordInvalid", "%v", err)
+	}
+	return r.Signer.Sign(ctx, c.Artifact, claims)
 }
 
 func (r *Reconciler) key(ctx context.Context) (string, error) {
@@ -214,4 +226,11 @@ func (r *Reconciler) patch(ctx context.Context, rec *cachev1alpha1.SpinCompiledC
 		return fmt.Errorf("patch SpinCompiledCache %s signature: %w", rec.Name, err)
 	}
 	return nil
+}
+
+func (r *Reconciler) registryTimeout() time.Duration {
+	if r.RegistryTimeout > 0 {
+		return r.RegistryTimeout
+	}
+	return 2 * time.Minute
 }

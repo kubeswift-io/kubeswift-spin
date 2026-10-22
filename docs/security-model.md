@@ -265,7 +265,7 @@ Three scanners run, each for a different question; none replaces another:
 
 | Scanner | Question it answers | Where |
 |---|---|---|
-| `govulncheck` | Does kubeswift-spin's Go code call a vulnerable function? Call-graph analysis of every package in the Go module (`./...`), including the controller and the runtime entrypoint. | CI Go job (Kubernetes 1.37 leg), `make vulncheck` |
+| `govulncheck` | Does kubeswift-spin's Go code call a vulnerable function? Call-graph analysis of every package in the Go module (`./...`), including the controller and the runtime entrypoint. It does not cover the nested `signer/cosign` module, which only OSV-Scanner and Grype scan. | CI Go job (Kubernetes 1.37 leg), `make vulncheck` |
 | OSV-Scanner | Which dependencies in `go.mod` and `examples/Cargo.lock` have known vulnerabilities, today? Inventory against the OSV database, with Go call analysis to mark uncalled findings. | `.github/workflows/osv-scanner-pr.yaml`, `osv-scanner.yaml`, the release workflow, `make osv-scan` |
 | Grype | What do the built images contain? Packages that Syft catalogs in the controller and runtime images: the base image packages and the Go modules of the controller and entrypoint binaries. Fails on fixable high or critical findings. | CI image jobs |
 
@@ -324,8 +324,8 @@ without a reason or review date, and package-wide ignores. Exceptions
 still need careful review: the `main` ruleset requires no approving review,
 and a pull request's own scan reads its own configuration. Dependency
 presence alone is not treated as exploitability, and neither is its absence
-from a call graph treated as a reason to stop tracking it. There are no
-exceptions today.
+from a call graph treated as a reason to stop tracking it. The exceptions
+are the two cosign advisories of the cache signer listed below.
 
 The release gate covers the source dependency manifests. The images are
 scanned by Grype in CI on every change to `main`, not again at release
@@ -342,6 +342,8 @@ Current findings:
 | ID | Package | Classification | Reason |
 |---|---|---|---|
 | GO-2026-6094 | `github.com/google/cel-go` v0.29.2 (fixed in v0.30.0 according to the Go vulnerability database; the GitHub advisory GHSA-gcjh-h69q-9w9g lists v0.29.0, so Grype does not report it), indirect through `k8s.io/apiserver` and controller-runtime's metrics authorization | unreachable | The vulnerable symbols (`ext.NativeTypes`, `ext.ParseStructTag`) are not called: `govulncheck` reports no affected code, and OSV-Scanner's Go call analysis classifies it as uncalled, which does not fail the scan. cel-go stays at the version Kubernetes pins; it is upgraded with the Kubernetes dependencies. |
+| GO-2026-6225 | cosign v3.1.3 (`signer/cosign`), its Azure Container Registry credential helper | exception, review by 2027-01-31 | The helper can send Azure credentials from `AZURE_*` variables to registries that are not Azure. The chart refuses `azurekms://` keys and `AZURE_*` variables for the signer, so there are none to send. No fixed cosign release exists. |
+| GO-2026-5932 | `golang.org/x/crypto/openpgp`, through cosign (`signer/cosign`) | exception, review by 2027-01-31 | Deprecated and unmaintained. The signer signs with a cosign or KMS key and never reads or verifies OpenPGP data. No fixed version exists. |
 
 ## Application artifacts
 

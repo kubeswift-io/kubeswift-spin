@@ -171,7 +171,8 @@ compiledCache:
       # key) and cosign.password. Mounted into the signer only.
       secretName: ""
       # Or a key reference cosign understands (awskms://, gcpkms://,
-      # azurekms://, hashivault://); preferred where a KMS is available.
+      # hashivault://); preferred where a KMS is available. azurekms:// is
+      # refused until cosign fixes GO-2026-6225.
       kmsRef: ""
     # A kubernetes.io/dockerconfigjson Secret in the release namespace that
     # can read the exported caches and push their signatures (the same

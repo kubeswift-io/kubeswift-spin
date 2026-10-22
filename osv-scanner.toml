@@ -4,12 +4,14 @@
 
 # signer/cosign: cosign v3.1.3 links the Azure Container Registry credential
 # helper, which can send Azure credentials from AZURE_* environment variables
-# to non-ACR hosts. The cache signer is given no Azure credentials, so the
-# helper has none to send. No fixed version exists.
+# to non-ACR hosts. The chart refuses azurekms:// keys and AZURE_* variables
+# for the signer, so the helper has no credentials to send, and cosign only
+# contacts the record's cache repository, which the signer checks is the
+# platform's. No fixed version exists.
 [[IgnoredVulns]]
 id = "GO-2026-6225"
 ignoreUntil = 2027-01-31
-reason = "cache signer cosign: Azure ACR credential helper; the signer has no Azure credentials; no fix released"
+reason = "cache signer cosign: Azure ACR credential helper; the chart refuses AZURE_* variables and azurekms keys for the signer; no fix released"
 
 # signer/cosign: golang.org/x/crypto/openpgp is deprecated and unmaintained.
 # The cache signer signs with a cosign key or KMS key and never reads or

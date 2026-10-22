@@ -56,6 +56,13 @@ kubeswift-spin cannot check them:
   [kubeswift-artifact-cache-tenant-isolation.md](upstream/kubeswift-artifact-cache-tenant-isolation.md)).
 - No principal other than the platform can write `swiftsandboxes/status`
   in the namespace.
+- No principal other than the platform can create, update, patch or delete
+  ConfigMaps or SwiftKernels in the namespace. A compiler's launcher reads
+  its command, arguments and environment from a ConfigMap KubeSwift writes
+  next to it (immutable, but one that is deleted and recreated before the
+  launcher starts is not detected), and runs the kernel its
+  `kernelProfileRef` names. Either would change what the compiler runs
+  while its spec, which the signer checks, stays the same.
 - The namespace's cache repository (`<repository>/<namespace>/**`) is
   readable only with that namespace's pull credential, and the registry
   denies anonymous reads: compiled code reveals as much as the application.
@@ -216,7 +223,10 @@ This creates the Secret with `cosign.key`, `cosign.pub` and
 `cosign.password`. Nothing but the signer mounts it. For a KMS key, set
 `compiledCache.signer.key.kmsRef` (for example `gcpkms://...`), give the
 signer's ServiceAccount access with `signer.serviceAccountAnnotations` or
-`signer.extraEnv`, and leave `secretName` empty.
+`signer.extraEnv`, and leave `secretName` empty. The chart refuses
+`azurekms://` and `AZURE_*` variables: cosign v3.1.3 can send Azure
+credentials to registries that are not Azure (GO-2026-6225), and no fixed
+release exists yet.
 
 The signer needs a `kubernetes.io/dockerconfigjson` Secret in the release
 namespace that can read the cache repositories and push signatures to them:

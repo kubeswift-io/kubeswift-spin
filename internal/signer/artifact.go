@@ -7,10 +7,12 @@ package signer
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"path"
 	"regexp"
 	"slices"
@@ -61,19 +63,67 @@ type Fetcher struct {
 	Options []remote.Option
 }
 
-func (f *Fetcher) opts() []remote.Option {
-	return append([]remote.Option{remote.WithAuthFromKeychain(f.Keychain)}, f.Options...)
+// maxManifest bounds a manifest the signer reads. KubeSwift's export writes
+// a manifest of well under 1 KiB.
+const maxManifest = 64 << 10
+
+func (f *Fetcher) opts(ctx context.Context) []remote.Option {
+	return append([]remote.Option{
+		remote.WithAuthFromKeychain(f.Keychain),
+		remote.WithContext(ctx),
+		remote.WithTransport(limitManifests{next: remote.DefaultTransport}),
+	}, f.Options...)
 }
+
+// limitManifests fails a manifest response larger than maxManifest, so a
+// hostile registry cannot make the signer buffer a large document.
+type limitManifests struct{ next http.RoundTripper }
+
+func (l limitManifests) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := l.next.RoundTrip(req)
+	if err != nil || !strings.Contains(req.URL.Path, "/manifests/") {
+		return resp, err
+	}
+	if resp.ContentLength > maxManifest {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("manifest of %d bytes is larger than %d", resp.ContentLength, maxManifest)
+	}
+	resp.Body = &limitedBody{rc: resp.Body, left: maxManifest}
+	return resp, nil
+}
+
+type limitedBody struct {
+	rc   io.ReadCloser
+	left int64
+}
+
+func (b *limitedBody) Read(p []byte) (int, error) {
+	if b.left <= 0 {
+		var one [1]byte
+		if n, _ := b.rc.Read(one[:]); n > 0 {
+			return 0, fmt.Errorf("manifest is larger than %d bytes", maxManifest)
+		}
+		return 0, io.EOF
+	}
+	if int64(len(p)) > b.left {
+		p = p[:b.left]
+	}
+	n, err := b.rc.Read(p)
+	b.left -= int64(n)
+	return n, err
+}
+
+func (b *limitedBody) Close() error { return b.rc.Close() }
 
 // ResolveExportTag returns the digest the export tag of a compiler sandbox
 // names. Only KubeSwift's export Job pushes that tag, so its digest binds the
 // artifact to the compiler without trusting the sandbox's status.
-func (f *Fetcher) ResolveExportTag(repository, tag string, nameOpts ...name.Option) (string, error) {
+func (f *Fetcher) ResolveExportTag(ctx context.Context, repository, tag string, nameOpts ...name.Option) (string, error) {
 	ref, err := name.NewTag(repository+":"+tag, nameOpts...)
 	if err != nil {
 		return "", invalid("ExportTagInvalid", "export tag %s:%s is not a valid reference", repository, tag)
 	}
-	desc, err := remote.Head(ref, f.opts()...)
+	desc, err := remote.Head(ref, f.opts(ctx)...)
 	if err != nil {
 		return "", fmt.Errorf("resolve export tag %s: %w", ref, err)
 	}
@@ -100,12 +150,12 @@ type manifest struct {
 // for rec: the manifest KubeSwift's export produces, one gzip tar layer with
 // only metadata.json and Wasmtime cache entries, within the limits, and
 // metadata that names the record's identity. It returns the metadata.
-func (f *Fetcher) Check(rec *cachev1alpha1.SpinCompiledCache, artifact string, nameOpts ...name.Option) (*runtimecontract.CacheMetadata, error) {
+func (f *Fetcher) Check(ctx context.Context, rec *cachev1alpha1.SpinCompiledCache, artifact string, nameOpts ...name.Option) (*runtimecontract.CacheMetadata, error) {
 	ref, err := name.NewDigest(artifact, nameOpts...)
 	if err != nil {
 		return nil, invalid("ArtifactInvalid", "%s is not a digest reference", artifact)
 	}
-	img, err := remote.Image(ref, f.opts()...)
+	img, err := remote.Image(ref, f.opts(ctx)...)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", artifact, err)
 	}
@@ -221,9 +271,9 @@ func (f *Fetcher) checkLayer(rec *cachev1alpha1.SpinCompiledCache, r io.Reader) 
 			return nil, invalid("EntryInvalid", "%q is not a regular file or directory", bounded(p))
 		}
 	}
-	// Drain the rest so the digest check covers the whole stream; padding
-	// after the archive must be small.
-	if n, err := io.Copy(io.Discard, io.LimitReader(gz, 1<<20)); err != nil || n == 1<<20 {
+	// Drain the rest so the digest check covers the whole stream. Only
+	// zero padding may follow the archive, as KubeSwift's export writes.
+	if err := zeroPadding(io.LimitReader(gz, 1<<20+1), 1<<20); err != nil {
 		return nil, invalid("LayerInvalid", "the layer is truncated or has data after the archive")
 	}
 	if meta == nil {
@@ -265,4 +315,29 @@ func bounded(s string) string {
 		return s[:96] + "..."
 	}
 	return s
+}
+
+// zeroPadding reads r to the end and fails unless it holds at most limit
+// bytes, all zero.
+func zeroPadding(r io.Reader, limit int64) error {
+	buf := make([]byte, 32<<10)
+	var total int64
+	for {
+		n, err := r.Read(buf)
+		total += int64(n)
+		if total > limit {
+			return errors.New("too much data after the archive")
+		}
+		for _, b := range buf[:n] {
+			if b != 0 {
+				return errors.New("data after the archive")
+			}
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 }

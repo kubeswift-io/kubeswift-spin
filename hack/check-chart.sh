@@ -22,6 +22,10 @@ render "${cc[@]}" --set compiledCache.signer.key.secretName=cache-signing-key | 
 render "${cc[@]}" --set compiledCache.signer.key.kmsRef=gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k --set metrics.secure=true | check
 # The signer needs exactly one key source and registry credentials.
 if render "${cc[@]}" >/dev/null 2>&1; then echo "compiledCache rendered without a signing key" >&2; exit 1; fi
+if render "${cc[@]}" --set compiledCache.signer.key.kmsRef=azurekms://vault/key >/dev/null 2>&1; then echo "the signer rendered with an azurekms key (GO-2026-6225)" >&2; exit 1; fi
+if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set 'compiledCache.signer.extraEnv[0].name=AZURE_CLIENT_SECRET' --set 'compiledCache.signer.extraEnv[0].value=x' >/dev/null 2>&1; then
+  echo "the signer rendered with AZURE_* variables (GO-2026-6225)" >&2; exit 1
+fi
 if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set compiledCache.signer.key.kmsRef=gcpkms://x >/dev/null 2>&1; then
   echo "compiledCache rendered with two signing keys" >&2; exit 1
 fi

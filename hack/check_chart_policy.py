@@ -200,6 +200,19 @@ for d in docs:
             errors.append("Deployment: uses host namespaces")
         if any(v.get("hostPath") for v in pod.get("volumes", []) or []):
             errors.append("Deployment: mounts a hostPath volume")
+        # Only the cache signer holds credentials: the signing key and the
+        # registry credential that pushes signatures.
+        if component(d) != "cache-signer":
+            for v in pod.get("volumes", []) or []:
+                if v.get("secret") or any(s.get("secret") for s in (v.get("projected") or {}).get("sources", []) or []):
+                    errors.append(f"Deployment/{name}: mounts Secret volume {v.get('name')}; only the cache signer may")
+            for c in pod["containers"] + (pod.get("initContainers") or []):
+                for e in c.get("env", []) or []:
+                    if (e.get("valueFrom") or {}).get("secretKeyRef"):
+                        errors.append(f"Deployment/{name}: container {c['name']} reads Secret into {e.get('name')}; only the cache signer may")
+                for ef in c.get("envFrom", []) or []:
+                    if ef.get("secretRef"):
+                        errors.append(f"Deployment/{name}: container {c['name']} loads a Secret with envFrom; only the cache signer may")
     if kind == "SpinAppExecutor":
         if d["spec"].get("createDeployment") is not False:
             errors.append(f"SpinAppExecutor/{name}: createDeployment is not false")

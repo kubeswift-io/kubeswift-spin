@@ -106,6 +106,7 @@ jobs:
   signer-image:
     name: Cache signer image
     if: github.repository == 'kubeswift-io/kubeswift-spin'
+    needs: osv-scan
     runs-on: ubuntu-24.04
     environment: release
     permissions:
