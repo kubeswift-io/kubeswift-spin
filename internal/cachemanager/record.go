@@ -21,6 +21,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -99,6 +100,10 @@ func (r *RecordReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
 				return o.GetLabels()[compiledcache.LabelComponent] == compiledcache.ComponentCompiler
 			}))).
+		// A compile that ends frees a compiler slot: wake the records of
+		// its namespace that wait for one.
+		Watches(&cachev1alpha1.SpinCompiledCache{}, handler.EnqueueRequestsFromMapFunc(r.recordsOfNamespace),
+			builder.WithPredicates(compileEnded)).
 		Watches(&sandboxv1alpha1.SwiftArtifactPlacement{}, handler.EnqueueRequestsFromMapFunc(r.recordsForPlacement),
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
 				return o.GetLabels()[compiledcache.LabelComponent] == compiledcache.ComponentPlacement
@@ -121,6 +126,42 @@ func (r *RecordReconciler) recordsForCompiler(ctx context.Context, o client.Obje
 		}
 	}
 	return out
+}
+
+// recordsOfNamespace enqueues the other records of a record's consumer
+// namespace.
+func (r *RecordReconciler) recordsOfNamespace(ctx context.Context, o client.Object) []reconcile.Request {
+	var out []reconcile.Request
+	var list cachev1alpha1.SpinCompiledCacheList
+	if err := r.Client.List(ctx, &list, client.InNamespace(r.Settings.Namespace),
+		client.MatchingLabels{compiledcache.LabelNamespace: o.GetLabels()[compiledcache.LabelNamespace]}); err == nil {
+		for i := range list.Items {
+			if list.Items[i].Name != o.GetName() {
+				out = append(out, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
+			}
+		}
+	}
+	return out
+}
+
+// compileEnded passes a record update whose compile attempt ended (it got a
+// finish time) or was cleared.
+var compileEnded = predicate.Funcs{
+	CreateFunc:  func(event.CreateEvent) bool { return false },
+	GenericFunc: func(event.GenericEvent) bool { return false },
+	DeleteFunc:  func(event.DeleteEvent) bool { return true },
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		o, ok1 := e.ObjectOld.(*cachev1alpha1.SpinCompiledCache)
+		n, ok2 := e.ObjectNew.(*cachev1alpha1.SpinCompiledCache)
+		if !ok1 || !ok2 {
+			return false
+		}
+		running := func(r *cachev1alpha1.SpinCompiledCache) bool {
+			c := r.Status.Compile
+			return c != nil && c.Sandbox != nil && c.FinishedAt == nil
+		}
+		return running(o) && !running(n)
+	},
 }
 
 func randomToken() string {
@@ -280,6 +321,8 @@ func (r *RecordReconciler) compile(ctx context.Context, rec *cachev1alpha1.SpinC
 		return 0, err
 	}
 	if busy, err := r.atCapacity(ctx, rec); err != nil || busy {
+		// The end of another compile wakes this record (compileEnded);
+		// the requeue is a safety net.
 		return 30 * time.Second, err
 	}
 	c.Attempt++
