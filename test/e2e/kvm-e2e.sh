@@ -281,7 +281,10 @@ log "preflight"
 for crd in spinapps.core.spinkube.dev spinappexecutors.core.spinkube.dev swiftsandboxes.sandbox.kubeswift.io swiftkernels.kernel.kubeswift.io; do
   kubectl get crd "$crd" >/dev/null 2>&1 || die "CRD $crd is not installed"
 done
-kubectl get --raw /openapi/v3/apis/sandbox.kubeswift.io/v1alpha1 | grep -q '"podMetadata"' \
+# Read completely first: with pipefail, "| grep -q" on a large document can
+# fail on SIGPIPE when grep stops at an early match.
+sandbox_schema="$(kubectl get --raw /openapi/v3/apis/sandbox.kubeswift.io/v1alpha1)"
+grep -q '"podMetadata"' <<<"$sandbox_schema" \
   || die "the installed KubeSwift has no sandbox port exposure; this test needs KubeSwift v0.16.0 or later"
 ok "KubeSwift sandbox exposure available"
 kubectl get nodes -l kubeswift.io/kernel-node=true -o name | grep -q . || die "no node labelled kubeswift.io/kernel-node=true"

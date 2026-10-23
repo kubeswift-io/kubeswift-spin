@@ -338,10 +338,12 @@ if [[ -f "$TMP/out-hello/metadata.json" ]]; then
   expect=(-e "KUBESWIFT_SPIN_CACHE_SOURCE=$src" -e "KUBESWIFT_SPIN_CACHE_RUNTIME=$RT_REF" -e "KUBESWIFT_SPIN_CACHE_ARCHITECTURE=$ARCH")
   cached_up kss-test-cache-hit 3211 -v "$TMP/out-hello:/opt/kubeswift-spin-cache:ro" "${expect[@]}" \
     -e RUST_LOG=wasmtime_internal_cache=trace
-  docker logs kss-test-cache-hit 2>&1 | grep -q "compiled cache used" && ok "a verified read-only cache mount is used" || fail "the cache was not used"
+  # Logs are read completely first: with pipefail, "docker logs | grep -q"
+  # can fail on SIGPIPE when grep stops at an early match.
+  hit_log="$(docker logs kss-test-cache-hit 2>&1)"
+  grep -q "compiled cache used" <<<"$hit_log" && ok "a verified read-only cache mount is used" || fail "the cache was not used"
   # Wasmtime traces every lookup (get_data) and, after a miss, the write
   # of the newly compiled entry (update_data). A hit has only lookups.
-  hit_log="$(docker logs kss-test-cache-hit 2>&1)"
   if grep -q "get_data() for path: /opt/kubeswift-spin-cache/cache/modules/" <<<"$hit_log" && ! grep -q "update_data()" <<<"$hit_log"; then
     ok "Wasmtime loaded every component from the compiled cache"
   else
@@ -349,10 +351,10 @@ if [[ -f "$TMP/out-hello/metadata.json" ]]; then
     fail "Wasmtime did not hit the compiled cache"
   fi
   cached_up kss-test-cache-rw 3212 -v "$TMP/out-hello:/opt/kubeswift-spin-cache" "${expect[@]}"
-  docker logs kss-test-cache-rw 2>&1 | grep -q "not used: the cache mount is writable" && ok "a writable cache mount is not used" || fail "a writable mount was used"
+  grep -q "not used: the cache mount is writable" <<<"$(docker logs kss-test-cache-rw 2>&1)" && ok "a writable cache mount is not used" || fail "a writable mount was used"
   cached_up kss-test-cache-other 3213 -v "$TMP/out-hello:/opt/kubeswift-spin-cache:ro" -e "KUBESWIFT_SPIN_CACHE_SOURCE=$src" \
     -e "KUBESWIFT_SPIN_CACHE_RUNTIME=${RT_REF%0}1" -e "KUBESWIFT_SPIN_CACHE_ARCHITECTURE=$ARCH"
-  docker logs kss-test-cache-other 2>&1 | grep -q "not used: the cache was built by another runtime image" && ok "a cache of another runtime image is not used" || fail "a mismatched cache was used"
+  grep -q "not used: the cache was built by another runtime image" <<<"$(docker logs kss-test-cache-other 2>&1)" && ok "a cache of another runtime image is not used" || fail "a mismatched cache was used"
   cached_up kss-test-cache-none 3214 "${expect[@]}" -e WASMTIME_CACHE_FILE=/nonexistent.toml
   logs="$(docker logs kss-test-cache-none 2>&1)"
   grep -q "not used: no cache is mounted" <<<"$logs" && grep -q "ignoring WASMTIME_CACHE_FILE" <<<"$logs" \
