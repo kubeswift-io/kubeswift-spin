@@ -46,17 +46,11 @@ spec:
             {{- else }}
             - --metrics-bind-address=0
             {{- end }}
-            - --runtime-image={{ include "kubeswift-spin.imageRef" (list .Values.runtimeImage (required "runtimeImage.tag or runtimeImage.digest is required" (.Values.runtimeImage.tag | default .Values.runtimeImage.digest))) }}
-            - --default-cpu={{ .Values.controller.defaultCPU }}
-            - --default-memory={{ .Values.controller.defaultMemory }}
-            - --min-memory={{ .Values.controller.minMemory }}
-            - --max-memory={{ .Values.controller.maxMemory }}
-            - --max-vcpus={{ .Values.controller.maxVCPUs }}
-            - --max-replicas={{ .Values.controller.maxReplicas }}
-            {{- with .Values.controller.watchNamespaces }}
-            - --watch-namespaces={{ join "," . }}
-            {{- end }}
+            {{- include "kubeswift-spin.profileArgs" . | nindent 12 }}
             - --zap-log-level={{ .Values.controller.logLevel }}
+            {{- if .Values.compiledCache.enabled }}
+            {{- include "kubeswift-spin.compiledCacheArgs" . | nindent 12 }}
+            {{- end }}
             {{- range .Values.controller.extraArgs }}
             - {{ . }}
             {{- end }}

@@ -56,7 +56,11 @@ metadata:
 rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
-    verbs: ["get", "create", "update"]
+    verbs: ["create"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["kubeswift-spin.spin.kubeswift.io"]
+    verbs: ["get", "update"]
   # controller-runtime records the LeaderElection Event ("became leader")
   # through the core/v1 Events API, in this namespace only.
   - apiGroups: [""]
@@ -121,4 +125,63 @@ metadata:
 rules:
   - nonResourceURLs: ["/metrics"]
     verbs: ["get"]
+{{- end }}
+{{- if .Values.compiledCache.enabled }}
+---
+# Compiled caches: the controller only reads SpinCompiledCache records, in
+# this namespace. Only the cache manager and the cache signer write them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-compiled-cache-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["spin.kubeswift.io"]
+    resources: ["spincompiledcaches"]
+    verbs: ["get", "list", "watch"]
+---
+# Namespaces opt in to compiled caches with an administrator-set label.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-compiled-cache-namespaces
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-compiled-cache-namespaces
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubeswift-spin.fullname" . }}-compiled-cache-namespaces
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeswift-spin.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-compiled-cache-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kubeswift-spin.fullname" . }}-compiled-cache-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeswift-spin.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
 {{- end }}

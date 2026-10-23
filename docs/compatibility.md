@@ -299,13 +299,14 @@ Service selects would exceed the 63-character limit of a label name.
 
 ## SpinApp annotations
 
-kubeswift-spin reads one annotation on a SpinApp. An invalid value stops
+kubeswift-spin reads two annotations on a SpinApp. An invalid value stops
 reconciliation like an unsupported field (`UnsupportedConfiguration`). Any
 other annotation under `spin.kubeswift.io/` is reported in a Warning Event
 and otherwise ignored, so SpinApps that reconciled before keep doing so.
 
 | Annotation | Effect |
 |---|---|
+| `spin.kubeswift.io/compiled-cache` | `disabled` opts the SpinApp out of the compiled Wasmtime cache its executor enables. `enabled` changes nothing: a SpinApp can only opt out, and on an executor that does not enable compiled caches it gives a Warning Event. See [compiled-cache.md](compiled-cache.md). |
 | `spin.kubeswift.io/drain-period` | The replicas' `spec.termination.drainPeriod`, overriding the executor's annotation of the same name; a duration with units from `0s` to the executor's `spin.kubeswift.io/max-drain-period` (default `10m`). Needs KubeSwift v0.16.3 or later. See [executor-contract.md](executor-contract.md#drain-period). |
 
 ## SpinAppExecutor field support

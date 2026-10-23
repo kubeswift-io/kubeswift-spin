@@ -28,6 +28,14 @@ var Required = []schema.GroupVersionResource{
 // Pools is the optional warm-pool API.
 var Pools = schema.GroupVersionResource{Group: "sandbox.kubeswift.io", Version: "v1alpha1", Resource: "swiftsandboxpools"}
 
+// Placements is the SwiftArtifactPlacement API (KubeSwift v0.17.0), which
+// prepares artifacts on the nodes of a warm pool.
+var Placements = schema.GroupVersionResource{Group: "sandbox.kubeswift.io", Version: "v1alpha1", Resource: "swiftartifactplacements"}
+
+// CompiledCaches is kubeswift-spin's own SpinCompiledCache API, installed by
+// the chart only when compiled caches are enabled.
+var CompiledCaches = schema.GroupVersionResource{Group: "spin.kubeswift.io", Version: "v1alpha1", Resource: "spincompiledcaches"}
+
 func installHint(group string) string {
 	switch group {
 	case "core.spinkube.dev":
@@ -112,7 +120,20 @@ type Sandbox struct {
 	// kubeswift-spin does not set the field; it only reports whether the
 	// installed KubeSwift has this behavior.
 	Termination bool
+	// TrustedArtifacts is true when spec.artifacts[] has optional, claims
+	// and requirePlatformVerification (KubeSwift v0.18.0): an artifact can
+	// be skipped instead of failing the sandbox, and must carry a signature
+	// a platform SwiftArtifactVerificationPolicy accepts with given claims.
+	TrustedArtifacts bool
+	// Outputs is true when spec.outputs exists (KubeSwift v0.19.0): a
+	// sandbox can export a directory as an OCI artifact without registry
+	// credentials in the guest.
+	Outputs bool
 }
+
+// CompiledCache reports whether the installed KubeSwift has every sandbox
+// feature the trusted compiled cache needs (ADR 0014).
+func (s Sandbox) CompiledCache() bool { return s.TrustedArtifacts && s.Outputs }
 
 // Exposure reports whether every feature needed to put sandboxes behind a
 // Service with readiness is present.
@@ -189,6 +210,17 @@ func (d *OpenAPIDetector) fetch() (Sandbox, error) {
 
 type schemaNode struct {
 	Properties map[string]schemaNode `json:"properties"`
+	Items      *schemaNode           `json:"items"`
+}
+
+// has reports whether the node has every named property.
+func (n schemaNode) has(names ...string) bool {
+	for _, name := range names {
+		if _, ok := n.Properties[name]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseSandboxSchema extracts Sandbox features from an OpenAPI v3 document.
@@ -214,8 +246,16 @@ func ParseSandboxSchema(raw []byte) (Sandbox, error) {
 	_, secretFiles := spec.Properties["secretFiles"]
 	_, startup := spec.Properties["readinessStartup"]
 	_, termination := spec.Properties["termination"]
+	trusted := false
+	if a := spec.Properties["artifacts"].Items; a != nil {
+		trusted = a.has("optional", "fetchTimeout", "claims", "requirePlatformVerification")
+	}
+	outputs := false
+	if o := spec.Properties["outputs"].Items; o != nil {
+		outputs = o.has("name", "path", "repository", "maxSize", "artifactType")
+	}
 	return Sandbox{Ports: ports, ReadinessProbe: probe, PodMetadata: podMeta, SecretFiles: secretFiles, Egress: egress,
-		ReadinessStartup: startup, Termination: termination}, nil
+		ReadinessStartup: startup, Termination: termination, TrustedArtifacts: trusted, Outputs: outputs}, nil
 }
 
 // Static is a SandboxDetector returning fixed features, for tests and for

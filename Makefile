@@ -62,20 +62,22 @@ help: ## Show this help.
 ##@ Development
 
 .PHONY: generate
-generate: $(CONTROLLER_GEN) ## Regenerate deepcopy code for internal/sandboxapi.
-	$(CONTROLLER_GEN) object paths=./internal/sandboxapi/...
+generate: $(CONTROLLER_GEN) ## Regenerate deepcopy code (internal/sandboxapi, api/) and the SpinCompiledCache CRD.
+	$(CONTROLLER_GEN) object paths=./internal/sandboxapi/... paths=./api/...
+	$(CONTROLLER_GEN) crd paths=./api/... output:crd:dir=charts/kubeswift-spin/files/crds
 
 .PHONY: verify-generated
 verify-generated: generate ## Fail if generated code is out of date.
-	@git diff --exit-code -- internal/sandboxapi || { echo "run make generate and commit the result"; exit 1; }
+	@git diff --exit-code -- internal/sandboxapi api charts/kubeswift-spin/files/crds || { echo "run make generate and commit the result"; exit 1; }
+	@if [[ -n "$$(git ls-files --others --exclude-standard -- api charts/kubeswift-spin/files/crds)" ]]; then echo "untracked generated files; run make generate and commit the result"; exit 1; fi
 
 .PHONY: fmt
 fmt: ## Format Go code.
-	gofmt -s -w cmd internal examples/tools test
+	gofmt -s -w api cmd internal examples/tools test
 
 .PHONY: fmt-check
 fmt-check: ## Fail if Go code is not formatted.
-	@out="$$(gofmt -s -l cmd internal examples/tools test)"; if [[ -n "$$out" ]]; then echo "not gofmt-ed:"; echo "$$out"; exit 1; fi
+	@out="$$(gofmt -s -l api cmd internal examples/tools test)"; if [[ -n "$$out" ]]; then echo "not gofmt-ed:"; echo "$$out"; exit 1; fi
 
 .PHONY: vet
 vet: ## Run go vet.

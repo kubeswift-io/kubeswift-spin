@@ -1,4 +1,6 @@
-// Command manager runs the kubeswift-spin controller.
+// Command manager runs the kubeswift-spin controller, or, with
+// --mode=cache-manager, the compiled-cache manager (ADR 0014). Both run from
+// the same image as separate Deployments with separate service accounts.
 package main
 
 import (
@@ -22,8 +24,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/cachemanager"
 	"github.com/kubeswift-io/kubeswift-spin/internal/capabilities"
 	"github.com/kubeswift-io/kubeswift-spin/internal/compatibility"
+	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
 	"github.com/kubeswift-io/kubeswift-spin/internal/controller"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/scheme"
@@ -54,7 +58,21 @@ type options struct {
 	watchNamespaces string
 	capabilityTTL   time.Duration
 	cacheSyncTO     time.Duration
+
+	mode              string
+	cacheRepository   string
+	cacheNamespace    string
+	cacheArchitecture string
+	cacheRetention    time.Duration
+	cacheRuntimes     string
+	cacheMaxRecords   int
 }
+
+// Modes of the manager binary.
+const (
+	modeController   = "controller"
+	modeCacheManager = "cache-manager"
+)
 
 func main() {
 	var o options
@@ -73,13 +91,20 @@ func main() {
 	flag.StringVar(&o.watchNamespaces, "watch-namespaces", "", "Comma-separated namespaces to watch. Empty watches all namespaces.")
 	flag.DurationVar(&o.capabilityTTL, "capability-refresh", 5*time.Minute, "How often to re-read the SwiftSandbox OpenAPI schema for optional features.")
 	flag.DurationVar(&o.cacheSyncTO, "cache-sync-timeout", 2*time.Minute, "Fail startup if informers do not sync within this time (for example when RBAC forbids a watch).")
+	flag.StringVar(&o.mode, "mode", modeController, "What to run: controller (the SpinApp controller) or cache-manager (the compiled-cache manager).")
+	flag.StringVar(&o.cacheRepository, "compiled-cache-repository", "", "Base repository of compiled Wasmtime caches (registry host and path). Empty disables compiled caches.")
+	flag.StringVar(&o.cacheNamespace, "compiled-cache-namespace", os.Getenv("POD_NAMESPACE"), "Namespace of the SpinCompiledCache records. Defaults to the pod namespace.")
+	flag.StringVar(&o.cacheArchitecture, "compiled-cache-architecture", "amd64", "Architecture of compiled caches for executors whose node selector does not name kubernetes.io/arch: amd64 or arm64.")
+	flag.StringVar(&o.cacheRuntimes, "compiled-cache-runtimes", "", "Comma-separated runtime images, repository@sha256:<digest>, that compiled caches are built and signed for. Executors with another runtime image get no cache.")
+	flag.IntVar(&o.cacheMaxRecords, "compiled-cache-max-records-per-namespace", 32, "Most SpinCompiledCache records the cache manager keeps for one namespace.")
+	flag.DurationVar(&o.cacheRetention, "compiled-cache-retention", 24*time.Hour, "How long the cache manager keeps a SpinCompiledCache that no SpinApp uses (the most recently replaced one of each SpinApp is always kept).")
 	zapOpts := zap.Options{}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
 	setupLog := ctrl.Log.WithName("setup")
-	setupLog.Info("starting kubeswift-spin", "version", version.Version, "commit", version.Commit)
+	setupLog.Info("starting kubeswift-spin", "version", version.Version, "commit", version.Commit, "mode", o.mode)
 
 	if err := run(o); err != nil {
 		setupLog.Error(err, "kubeswift-spin cannot start")
@@ -110,11 +135,37 @@ func run(o options) error {
 	if err != nil {
 		return fmt.Errorf("discover %s: %w", capabilities.Pools.String(), err)
 	}
-	namespaces := splitList(o.watchNamespaces)
-	if err := checkPermissions(context.Background(), cs, namespaces, poolsServed); err != nil {
-		return err
+	settings := compiledcache.Settings{Namespace: o.cacheNamespace, Repository: o.cacheRepository, Architecture: o.cacheArchitecture,
+		Runtimes: splitList(o.cacheRuntimes)}
+	if err := settings.Validate(); err != nil {
+		return fmt.Errorf("--compiled-cache-repository, --compiled-cache-architecture, --compiled-cache-runtimes: %w", err)
 	}
-	setupLog.Info("required APIs and permissions verified", "warmPools", poolsServed)
+	cachesServed := false
+	if settings.Configured() {
+		if cachesServed, err = capabilities.Served(cs.Discovery(), capabilities.CompiledCaches); err != nil {
+			return fmt.Errorf("discover %s: %w", capabilities.CompiledCaches.String(), err)
+		}
+		if !cachesServed {
+			return fmt.Errorf("--compiled-cache-repository is set, but the SpinCompiledCache API (%s) is not installed; install the chart with compiledCache.enabled=true", capabilities.CompiledCaches.String())
+		}
+	}
+	namespaces := splitList(o.watchNamespaces)
+	switch o.mode {
+	case modeController:
+		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, controllerBase(), controllerChecks(settings)); err != nil {
+			return err
+		}
+	case modeCacheManager:
+		if !settings.Configured() {
+			return fmt.Errorf("--mode=%s needs --compiled-cache-repository and --compiled-cache-namespace", modeCacheManager)
+		}
+		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, cacheManagerBase(), cacheManagerChecks(settings)); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("--mode must be %s or %s, got %q", modeController, modeCacheManager, o.mode)
+	}
+	setupLog.Info("required APIs and permissions verified", "warmPools", poolsServed, "compiledCaches", settings.Configured())
 
 	// Sandbox features shape every sandbox spec, so the controller does not
 	// reconcile before it knows them.
@@ -124,12 +175,19 @@ func run(o options) error {
 		return fmt.Errorf("detect SwiftSandbox features from the OpenAPI v3 schema of sandbox.kubeswift.io/v1alpha1: %w", err)
 	}
 	setupLog.Info("SwiftSandbox features detected", "exposure", features.Exposure(), "secrets", features.Secrets(), "egress", features.Egress,
-		"readinessStartup", features.ReadinessStartup, "termination", features.Termination)
+		"readinessStartup", features.ReadinessStartup, "termination", features.Termination, "compiledCache", features.CompiledCache())
+	if settings.Configured() && !features.CompiledCache() {
+		setupLog.Info("compiled caches are configured, but the installed KubeSwift has no platform-verified optional artifacts or sandbox outputs (KubeSwift v0.19.1 or later); SpinApps run without them")
+	}
 	if features.Exposure() && !features.Termination {
 		setupLog.Info("KubeSwift is older than v0.16.3 (no spec.termination): a deleted replica is not drained and loses its NetworkPolicy while it can still serve; upgrade KubeSwift to v0.16.3 or later")
 	}
 
-	cacheOpts := controller.CacheOptions(namespaces)
+	recordNS := ""
+	if settings.Configured() {
+		recordNS = settings.Namespace
+	}
+	cacheOpts := controller.CacheOptions(namespaces, recordNS)
 
 	metricsOpts := metricsserver.Options{BindAddress: o.metricsAddr, SecureServing: o.metricsSecure}
 	if o.metricsSecure {
@@ -142,7 +200,7 @@ func run(o options) error {
 		Metrics:                       metricsOpts,
 		HealthProbeBindAddress:        o.probeAddr,
 		LeaderElection:                o.leaderElect,
-		LeaderElectionID:              "kubeswift-spin.spin.kubeswift.io",
+		LeaderElectionID:              leaderElectionID(o.mode),
 		LeaderElectionNamespace:       o.leaderElectNS,
 		LeaderElectionReleaseOnCancel: true,
 		Controller:                    config.Controller{CacheSyncTimeout: o.cacheSyncTO},
@@ -152,17 +210,41 @@ func run(o options) error {
 	}
 
 	ctx := ctrl.SetupSignalHandler()
-	r := &controller.SpinAppReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Recorder:    mgr.GetEventRecorder("kubeswift-spin"),
-		Defaults:    defaults,
-		Options:     compatibility.Options{MaxReplicas: int32(o.maxReplicas), Resources: policy}, //nolint:gosec // bounded in policy()
-		Detector:    detector,
-		PoolsServed: poolsServed,
-	}
-	if err := r.SetupWithManager(ctx, mgr); err != nil {
-		return err
+	if o.mode == modeCacheManager {
+		if o.cacheMaxRecords < 1 || o.cacheMaxRecords > 1000 {
+			return fmt.Errorf("--compiled-cache-max-records-per-namespace must be between 1 and 1000")
+		}
+		ns := &cachemanager.NamespaceReconciler{
+			Client:     mgr.GetClient(),
+			Defaults:   defaults,
+			Options:    compatibility.Options{MaxReplicas: int32(o.maxReplicas), Resources: policy}, //nolint:gosec // bounded in policy()
+			Settings:   settings,
+			Detector:   detector,
+			Retention:  o.cacheRetention,
+			MaxRecords: o.cacheMaxRecords,
+		}
+		if err := ns.SetupWithManager(mgr); err != nil {
+			return err
+		}
+		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: settings}
+		if err := rec.SetupWithManager(mgr); err != nil {
+			return err
+		}
+	} else {
+		r := &controller.SpinAppReconciler{
+			Client:               mgr.GetClient(),
+			Scheme:               mgr.GetScheme(),
+			Recorder:             mgr.GetEventRecorder("kubeswift-spin"),
+			Defaults:             defaults,
+			Options:              compatibility.Options{MaxReplicas: int32(o.maxReplicas), Resources: policy}, //nolint:gosec // bounded in policy()
+			Detector:             detector,
+			PoolsServed:          poolsServed,
+			CompiledCache:        settings,
+			CompiledCachesServed: cachesServed,
+		}
+		if err := r.SetupWithManager(ctx, mgr); err != nil {
+			return err
+		}
 	}
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return err
@@ -224,22 +306,7 @@ type check struct {
 
 // checkPermissions fails fast with an actionable message instead of letting
 // a forbidden informer leave a healthy-looking process that does nothing.
-func checkPermissions(ctx context.Context, cs kubernetes.Interface, namespaces []string, pools bool) error {
-	checks := []check{
-		{"core.spinkube.dev", "spinapps", "", "list"},
-		{"core.spinkube.dev", "spinapps", "", "watch"},
-		{"core.spinkube.dev", "spinapps", "status", "patch"},
-		// blockOwnerDeletion on sandbox owner references needs this when
-		// the OwnerReferencesPermissionEnforcement admission plugin is on.
-		{"core.spinkube.dev", "spinapps", "finalizers", "update"},
-		{"events.k8s.io", "events", "", "create"},
-		{"core.spinkube.dev", "spinappexecutors", "", "list"},
-		{"core.spinkube.dev", "spinappexecutors", "", "watch"},
-		{"sandbox.kubeswift.io", "swiftsandboxes", "", "list"},
-		{"sandbox.kubeswift.io", "swiftsandboxes", "", "watch"},
-		{"sandbox.kubeswift.io", "swiftsandboxes", "", "create"},
-		{"sandbox.kubeswift.io", "swiftsandboxes", "", "delete"},
-	}
+func checkPermissions(ctx context.Context, cs kubernetes.Interface, namespaces []string, pools bool, checks []check, extra []namespacedCheck) error {
 	if pools {
 		checks = append(checks,
 			check{"sandbox.kubeswift.io", "swiftsandboxpools", "", "list"},
@@ -249,9 +316,29 @@ func checkPermissions(ctx context.Context, cs kubernetes.Interface, namespaces [
 	if len(scopes) == 0 {
 		scopes = []string{""}
 	}
-	var denied []string
+	type scoped struct {
+		ns string
+		c  check
+	}
+	var all []scoped
 	for _, ns := range scopes {
 		for _, c := range checks {
+			all = append(all, scoped{ns, c})
+		}
+	}
+	for _, e := range extra {
+		if e.namespace != "" {
+			all = append(all, scoped{e.namespace, e.check})
+			continue
+		}
+		for _, ns := range scopes {
+			all = append(all, scoped{ns, e.check})
+		}
+	}
+	var denied []string
+	{
+		for _, sc := range all {
+			ns, c := sc.ns, sc.c
 			ssar := &authorizationv1.SelfSubjectAccessReview{Spec: authorizationv1.SelfSubjectAccessReviewSpec{
 				ResourceAttributes: &authorizationv1.ResourceAttributes{
 					Namespace: ns, Group: c.group, Resource: c.resource, Subresource: c.subresource, Verb: c.verb,
@@ -275,9 +362,81 @@ func checkPermissions(ctx context.Context, cs kubernetes.Interface, namespaces [
 		}
 	}
 	if len(denied) > 0 {
-		return fmt.Errorf("the controller service account is missing permissions: %s (install the RBAC from charts/kubeswift-spin)", strings.Join(denied, ", "))
+		return fmt.Errorf("the service account is missing permissions: %s (install the RBAC from charts/kubeswift-spin)", strings.Join(denied, ", "))
 	}
 	return nil
+}
+
+// namespacedCheck is an extra permission check, in one namespace or, with
+// an empty namespace, in every watched scope.
+type namespacedCheck struct {
+	namespace string
+	check     check
+}
+
+// controllerBase are the SpinApp controller's permissions in every watched
+// scope.
+func controllerBase() []check {
+	return []check{
+		{"core.spinkube.dev", "spinapps", "", "list"},
+		{"core.spinkube.dev", "spinapps", "", "watch"},
+		{"core.spinkube.dev", "spinapps", "status", "patch"},
+		// blockOwnerDeletion on sandbox owner references needs this when
+		// the OwnerReferencesPermissionEnforcement admission plugin is on.
+		{"core.spinkube.dev", "spinapps", "finalizers", "update"},
+		{"events.k8s.io", "events", "", "create"},
+		{"core.spinkube.dev", "spinappexecutors", "", "list"},
+		{"core.spinkube.dev", "spinappexecutors", "", "watch"},
+		{"sandbox.kubeswift.io", "swiftsandboxes", "", "list"},
+		{"sandbox.kubeswift.io", "swiftsandboxes", "", "watch"},
+		{"sandbox.kubeswift.io", "swiftsandboxes", "", "create"},
+		{"sandbox.kubeswift.io", "swiftsandboxes", "", "delete"},
+	}
+}
+
+// cacheManagerBase are the cache manager's permissions in every watched
+// scope: it reads SpinApps and executors and never writes them.
+func cacheManagerBase() []check {
+	return []check{
+		{"core.spinkube.dev", "spinapps", "", "list"},
+		{"core.spinkube.dev", "spinapps", "", "watch"},
+		{"core.spinkube.dev", "spinappexecutors", "", "list"},
+		{"core.spinkube.dev", "spinappexecutors", "", "watch"},
+		{"events.k8s.io", "events", "", "create"},
+	}
+}
+
+// controllerChecks are the controller's compiled-cache permissions: it only
+// reads records.
+func controllerChecks(s compiledcache.Settings) []namespacedCheck {
+	if !s.Configured() {
+		return nil
+	}
+	return []namespacedCheck{
+		{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "", "list"}},
+		{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "", "watch"}},
+		{"", check{"", "namespaces", "", "list"}},
+		{"", check{"", "namespaces", "", "watch"}},
+	}
+}
+
+// cacheManagerChecks are the cache manager's permissions.
+func cacheManagerChecks(s compiledcache.Settings) []namespacedCheck {
+	out := []namespacedCheck{}
+	for _, verb := range []string{"list", "watch", "create", "delete"} {
+		out = append(out, namespacedCheck{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "", verb}})
+	}
+	out = append(out, namespacedCheck{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "status", "patch"}},
+		namespacedCheck{"", check{"", "namespaces", "", "list"}},
+		namespacedCheck{"", check{"", "namespaces", "", "watch"}})
+	return out
+}
+
+func leaderElectionID(mode string) string {
+	if mode == modeCacheManager {
+		return "kubeswift-spin-cache-manager.spin.kubeswift.io"
+	}
+	return "kubeswift-spin.spin.kubeswift.io"
 }
 
 func splitList(v string) []string {

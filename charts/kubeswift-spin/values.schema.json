@@ -331,6 +331,70 @@
           "type": "object"
         }
       }
+    },
+    "compiledCache": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9]([-a-z0-9.]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+$"
+        },
+        "architecture": {
+          "type": "string",
+          "enum": [
+            "amd64",
+            "arm64"
+          ]
+        },
+        "retention": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$"
+        },
+        "manager": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "replicaCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "logLevel": {
+              "type": "string",
+              "enum": [
+                "debug",
+                "info",
+                "error"
+              ]
+            },
+            "extraArgs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
+        },
+        "extraRuntimes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@sha256:[a-f0-9]{64}$"
+          }
+        },
+        "maxRecordsPerNamespace": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      }
     }
   }
 }

@@ -1,0 +1,408 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: spincompiledcaches.spin.kubeswift.io
+spec:
+  group: spin.kubeswift.io
+  names:
+    kind: SpinCompiledCache
+    listKind: SpinCompiledCacheList
+    plural: spincompiledcaches
+    shortNames:
+    - spincc
+    singular: spincompiledcache
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.namespace
+      name: For
+      type: string
+    - jsonPath: .spec.architecture
+      name: Arch
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].reason
+      name: Reason
+      type: string
+    - jsonPath: .spec.source
+      name: Source
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SpinCompiledCache records a compiled Wasmtime cache for one Spin
+          application, runtime image, architecture and namespace. See ADR 0014.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SpinCompiledCacheSpec is the identity of one compiled cache: the Wasmtime
+              cache entries of one Spin application, compiled by one runtime image for
+              one architecture, for SpinApps of one namespace. The cache manager writes
+              it when it creates the record; it never changes.
+            properties:
+              architecture:
+                description: Architecture is the CPU architecture the cache is compiled
+                  for.
+                enum:
+                - amd64
+                - arm64
+                type: string
+              namespace:
+                description: |-
+                  Namespace is the namespace whose SpinApps use the cache. The compiler
+                  runs there, and the signed claims bind the artifact to it.
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              repository:
+                description: |-
+                  Repository receives the compiled artifact: registry host and path, no
+                  tag or digest. A SwiftArtifactExportPolicy must allow it for Namespace.
+                maxLength: 255
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*)+$
+                type: string
+              runtime:
+                description: |-
+                  Runtime is the kubeswift-spin runtime image that compiles and later runs
+                  the application, pinned by digest. Its Spin and Wasmtime versions and
+                  engine configuration decide whether a cache entry can be used.
+                maxLength: 256
+                pattern: ^[^@\s]+@sha256:[a-f0-9]{64}$
+                type: string
+              source:
+                description: |-
+                  Source is the Spin application, pinned by digest (repository@sha256:...).
+                  It is a signed claim value, so at most 256 characters.
+                maxLength: 256
+                pattern: ^[^@\s]+@sha256:[a-f0-9]{64}$
+                type: string
+            required:
+            - architecture
+            - namespace
+            - repository
+            - runtime
+            - source
+            type: object
+            x-kubernetes-validations:
+            - message: spec is immutable
+              rule: self == oldSelf
+          status:
+            description: |-
+              SpinCompiledCacheStatus is written by the cache manager, except Signature,
+              which only the cache signer writes. Each writer owns whole fields
+              (consumers, pools and lastReferencedAt; compile, placements, conditions and
+              observedGeneration; signature) and replaces them with a JSON merge patch
+              that carries the resourceVersion it read and sends cleared fields of an
+              object as null, so writers never overwrite each other and a reset field
+              really is reset.
+            properties:
+              compile:
+                description: Compile is the state of compilation.
+                properties:
+                  artifact:
+                    description: Artifact is the exported, unsigned artifact (repository@sha256:...).
+                    type: string
+                  attempt:
+                    description: Attempt counts compiler sandboxes created for this
+                      record.
+                    format: int32
+                    type: integer
+                  failures:
+                    description: |-
+                      Failures counts failed attempts since the last success; the next
+                      attempt waits out a backoff that doubles with each.
+                    format: int32
+                    type: integer
+                  finishedAt:
+                    description: FinishedAt is when it completed or failed.
+                    format: date-time
+                    type: string
+                  lastFailureTime:
+                    description: LastFailureTime is when an attempt last failed.
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message says what failed. It names objects and fields,
+                      never values.
+                    type: string
+                  reason:
+                    description: Reason is a CamelCase word for the last failure.
+                    type: string
+                  retryAfter:
+                    description: RetryAfter is the earliest time of the next attempt.
+                    format: date-time
+                    type: string
+                  sandbox:
+                    description: |-
+                      Sandbox is the compiler sandbox of the current attempt, recorded from
+                      the create response. The signer signs only that sandbox's output.
+                    properties:
+                      name:
+                        type: string
+                      uid:
+                        description: |-
+                          UID is a type that holds unique ID values, including UUIDs.  Because we
+                          don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                          intent and helps make sure that UIDs and names do not get conflated.
+                        type: string
+                    required:
+                    - name
+                    - uid
+                    type: object
+                  size:
+                    description: Size is the artifact's compressed size in bytes.
+                    format: int64
+                    type: integer
+                  specHash:
+                    description: |-
+                      SpecHash is the SHA-256 of the compiler sandbox spec the cache manager
+                      created, recorded with its UID; the signer compares the sandbox's spec
+                      with it before signing.
+                    type: string
+                  startedAt:
+                    description: StartedAt is when the current attempt's sandbox was
+                      created.
+                    format: date-time
+                    type: string
+                  token:
+                    description: |-
+                      Token identifies the current attempt. It is passed to the compiler
+                      sandbox, so a sandbox the cache manager created but did not record
+                      (for example because it restarted) is recognized and removed rather
+                      than trusted.
+                    type: string
+                type: object
+              conditions:
+                description: 'Conditions: Compiled, Trusted, Placed and Ready.'
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              consumers:
+                description: Consumers are the SpinApps that use the cache.
+                items:
+                  description: |-
+                    Consumer is a SpinApp in spec.namespace that uses, or recently used, the
+                    cache.
+                  properties:
+                    current:
+                      description: |-
+                        Current is true while the SpinApp's image and runtime match this
+                        record.
+                      type: boolean
+                    name:
+                      description: Name is the SpinApp.
+                      type: string
+                    pool:
+                      description: |-
+                        Pool is the SwiftSandboxPool the SpinApp's executor checks out from,
+                        if any.
+                      type: string
+                    replacedAt:
+                      description: |-
+                        ReplacedAt is when the SpinApp moved to another image or runtime. The
+                        most recently replaced record of a SpinApp is kept, so a rollback finds
+                        its cache.
+                      format: date-time
+                      type: string
+                  required:
+                  - current
+                  - name
+                  type: object
+                maxItems: 64
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              lastReferencedAt:
+                description: |-
+                  LastReferencedAt is when a SpinApp last used the cache as its current
+                  image; records nobody references are deleted after a retention period.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the generation the conditions describe.
+                format: int64
+                type: integer
+              placements:
+                description: Placements prepare the signed artifact on warm-pool nodes.
+                items:
+                  description: |-
+                    PlacementStatus is one SwiftArtifactPlacement that prepares the artifact
+                    on the nodes of a SwiftSandboxPool in spec.namespace.
+                  properties:
+                    message:
+                      description: Message is the placement's Prepared condition message.
+                      type: string
+                    name:
+                      description: Name is the SwiftArtifactPlacement.
+                      type: string
+                    pool:
+                      description: Pool is the SwiftSandboxPool.
+                      type: string
+                    prepared:
+                      description: Prepared is true when every node of the pool holds
+                        the artifact.
+                      type: boolean
+                    preparedNodes:
+                      description: PreparedNodes and TargetNodes are copied from the
+                        placement.
+                      format: int32
+                      type: integer
+                    reason:
+                      description: Reason is the placement's Prepared condition reason.
+                      type: string
+                    targetNodes:
+                      format: int32
+                      type: integer
+                  required:
+                  - name
+                  - pool
+                  - prepared
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - pool
+                x-kubernetes-list-type: map
+              pools:
+                description: |-
+                  Pools are the SwiftSandboxPools, in spec.namespace, that the current
+                  consumers check out from; each gets a placement.
+                items:
+                  type: string
+                maxItems: 16
+                type: array
+                x-kubernetes-list-type: set
+              signature:
+                description: Signature is the state of signing.
+                properties:
+                  artifact:
+                    description: |-
+                      Artifact is the artifact the signer checked and signed
+                      (repository@sha256:...). It equals compile.artifact once signed.
+                    type: string
+                  failures:
+                    description: Failures counts failed signing attempts of Artifact.
+                    format: int32
+                    type: integer
+                  keyID:
+                    description: |-
+                      KeyID identifies the signing key: the SHA-256 of its
+                      SubjectPublicKeyInfo, as SwiftArtifactVerificationPolicy reports it.
+                    type: string
+                  lastFailureTime:
+                    description: LastFailureTime is when signing last failed.
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message says what failed.
+                    type: string
+                  reason:
+                    description: Reason is a CamelCase word for the last failure or
+                      rejection.
+                    type: string
+                  rejected:
+                    description: |-
+                      Rejected is true when the signer refused the artifact: it did not
+                      pass the signer's checks and is never signed. The cache manager
+                      compiles again after a backoff.
+                    type: boolean
+                  signedAt:
+                    description: SignedAt is when the artifact was signed.
+                    format: date-time
+                    type: string
+                  signer:
+                    description: Signer is the signer's identity and version.
+                    type: string
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

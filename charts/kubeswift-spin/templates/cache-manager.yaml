@@ -1,0 +1,220 @@
+{{- if .Values.compiledCache.enabled }}
+{{- $name := include "kubeswift-spin.cacheManagerName" . }}
+# The compiled-cache manager (ADR 0014): its own ServiceAccount and RBAC. It
+# reads SpinApps and executors and writes SpinCompiledCache records; it has no
+# access to Secrets, ConfigMaps or Pods.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["core.spinkube.dev"]
+    resources: ["spinapps", "spinappexecutors"]
+    verbs: ["get", "list", "watch"]
+  # Warm pools whose nodes receive placements (from a later release stage).
+  - apiGroups: ["sandbox.kubeswift.io"]
+    resources: ["swiftsandboxpools"]
+    verbs: ["get", "list", "watch"]
+  # Namespaces opt in with the label spin.kubeswift.io/compiled-cache.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# Records and the cache manager's leader election Lease, in this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["spin.kubeswift.io"]
+    resources: ["spincompiledcaches"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["spin.kubeswift.io"]
+    resources: ["spincompiledcaches/status"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["kubeswift-spin-cache-manager.spin.kubeswift.io"]
+    verbs: ["get", "update"]
+  # Events about records, which live in this namespace.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache-manager
+spec:
+  replicas: {{ .Values.compiledCache.manager.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kubeswift-spin.cacheManagerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubeswift-spin.cacheManagerSelectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: cache-manager
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: cache-manager
+          image: {{ include "kubeswift-spin.imageRef" (list .Values.image .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --mode=cache-manager
+            - --leader-elect
+            - --leader-election-namespace={{ .Release.Namespace }}
+            - --health-probe-bind-address=:8081
+            {{- if .Values.metrics.enabled }}
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --metrics-secure={{ .Values.metrics.secure }}
+            {{- else }}
+            - --metrics-bind-address=0
+            {{- end }}
+            {{- include "kubeswift-spin.profileArgs" . | nindent 12 }}
+            {{- include "kubeswift-spin.compiledCacheArgs" . | nindent 12 }}
+            - --compiled-cache-retention={{ .Values.compiledCache.retention }}
+            - --compiled-cache-max-records-per-namespace={{ .Values.compiledCache.maxRecordsPerNamespace }}
+            - --zap-log-level={{ .Values.compiledCache.manager.logLevel }}
+            {{- range .Values.compiledCache.manager.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          ports:
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+            - name: probes
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probes
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.compiledCache.manager.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if .Values.metrics.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache-manager
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kubeswift-spin.cacheManagerSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- if .Values.metrics.secure }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-metrics-auth
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubeswift-spin.fullname" . }}-metrics-auth
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}

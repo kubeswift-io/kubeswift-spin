@@ -69,6 +69,36 @@ const v0163Schema = `{"components":{"schemas":{"io.kubeswift.sandbox.v1alpha1.Sw
   "network":{"properties":{"mode":{"type":"string"},"ports":{"type":"array"},"egress":{"type":"object"}}},
   "readinessProbe":{"type":"object"},"readinessStartup":{"type":"object"},"termination":{"type":"object"},"podMetadata":{"type":"object"},"secretFiles":{"type":"array"}}}}}}}}`
 
+// v0191Schema has the trusted artifact (v0.18) and output (v0.19) fields.
+const v0191Schema = `{"components":{"schemas":{"io.kubeswift.sandbox.v1alpha1.SwiftSandbox":{"properties":{"spec":{"properties":{
+  "network":{"properties":{"mode":{"type":"string"},"ports":{"type":"array"},"egress":{"type":"object"}}},
+  "readinessProbe":{"type":"object"},"readinessStartup":{"type":"object"},"termination":{"type":"object"},"podMetadata":{"type":"object"},"secretFiles":{"type":"array"},
+  "artifacts":{"type":"array","items":{"properties":{"name":{},"ref":{},"mountPath":{},"layout":{},"optional":{},"fetchTimeout":{},"claims":{},"requirePlatformVerification":{}}}},
+  "outputs":{"type":"array","items":{"properties":{"name":{},"path":{},"repository":{},"maxSize":{},"maxEntries":{},"artifactType":{},"annotations":{}}}}}}}}}}}`
+
+// v0164Schema has artifacts without the trusted fields and no outputs.
+const v0164Schema = `{"components":{"schemas":{"io.kubeswift.sandbox.v1alpha1.SwiftSandbox":{"properties":{"spec":{"properties":{
+  "artifacts":{"type":"array","items":{"properties":{"name":{},"ref":{},"mountPath":{},"layout":{},"pullSecretRef":{},"verifyKeySecretRef":{}}}}}}}}}}}`
+
+func TestParseSandboxSchemaCompiledCache(t *testing.T) {
+	s, err := ParseSandboxSchema([]byte(v0191Schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.TrustedArtifacts || !s.Outputs || !s.CompiledCache() {
+		t.Fatalf("v0.19.1 schema not detected: %+v", s)
+	}
+	for name, doc := range map[string]string{"v0.16.3": v0163Schema, "v0.16.4": v0164Schema} {
+		s, err := ParseSandboxSchema([]byte(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.TrustedArtifacts || s.Outputs || s.CompiledCache() {
+			t.Fatalf("%s schema reported compiled-cache features: %+v", name, s)
+		}
+	}
+}
+
 func TestParseSandboxSchema(t *testing.T) {
 	s, err := ParseSandboxSchema([]byte(v0151Schema))
 	if err != nil {

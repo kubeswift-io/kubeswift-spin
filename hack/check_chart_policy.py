@@ -46,11 +46,50 @@ EXPECTED = {
     "metrics-reader": norm([
         {"nonResourceURLs": ["/metrics"], "verbs": ["get"]},
     ]),
+    # Compiled caches (ADR 0014). The controller only reads records.
+    "compiled-cache-reader": norm([
+        {"apiGroups": ["spin.kubeswift.io"], "resources": ["spincompiledcaches"], "verbs": ["get", "list", "watch"]},
+    ]),
+    # The cache manager reads SpinApps, executors and pools; it never writes
+    # them and has no Secret, ConfigMap or Pod access.
+    "compiled-cache-namespaces": norm([
+        {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "watch"]},
+    ]),
+    "cache-manager": norm([
+        {"apiGroups": ["core.spinkube.dev"], "resources": ["spinapps", "spinappexecutors"], "verbs": ["get", "list", "watch"]},
+        {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftsandboxpools"], "verbs": ["get", "list", "watch"]},
+        {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "watch"]},
+    ]),
+    # The cache manager's records, Lease and Events, in the release namespace
+    # only.
+    "cache-manager-records": norm([
+        {"apiGroups": ["spin.kubeswift.io"], "resources": ["spincompiledcaches"], "verbs": ["get", "list", "watch", "create", "delete"]},
+        {"apiGroups": ["spin.kubeswift.io"], "resources": ["spincompiledcaches/status"], "verbs": ["get", "patch"]},
+        {"apiGroups": ["coordination.k8s.io"], "resources": ["leases"], "verbs": ["get", "create", "update"]},
+        {"apiGroups": [""], "resources": ["events"], "verbs": ["create", "patch"]},
+        {"apiGroups": ["events.k8s.io"], "resources": ["events"], "verbs": ["create", "patch"]},
+    ]),
+}
+
+# Which component's ServiceAccount may be bound to each rule set: the
+# controller only reads compiled-cache records, and only the cache manager
+# writes them.
+ALLOWED_COMPONENTS = {
+    "controller": {"controller"},
+    "leader-election": {"controller"},
+    "metrics-auth": {"controller", "cache-manager"},
+    "metrics-reader": set(),
+    "compiled-cache-reader": {"controller"},
+    "compiled-cache-namespaces": {"controller"},
+    "cache-manager": {"cache-manager"},
+    "cache-manager-records": {"cache-manager"},
 }
 
 # The kind each approved rule set must have: leader election is confined to
 # the release namespace; everything else is cluster-wide by design.
-EXPECTED_KIND = {"controller": "ClusterRole", "leader-election": "Role", "metrics-auth": "ClusterRole", "metrics-reader": "ClusterRole"}
+EXPECTED_KIND = {"controller": "ClusterRole", "leader-election": "Role", "metrics-auth": "ClusterRole", "metrics-reader": "ClusterRole",
+                 "compiled-cache-reader": "Role", "compiled-cache-namespaces": "ClusterRole",
+                 "cache-manager": "ClusterRole", "cache-manager-records": "Role"}
 
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
 errors = []
@@ -59,6 +98,26 @@ errors = []
 roles = {(d["kind"], d["metadata"]["name"]) for d in docs if d.get("kind") in ("ClusterRole", "Role")}
 accounts = {(d["metadata"]["name"], d["metadata"].get("namespace")) for d in docs if d.get("kind") == "ServiceAccount"}
 pod_accounts = {d["spec"]["template"]["spec"].get("serviceAccountName") for d in docs if d.get("kind") == "Deployment"}
+
+
+def component(dep):
+    """The component a Deployment runs: its manager --mode."""
+    for c in dep["spec"]["template"]["spec"]["containers"]:
+        for a in c.get("args", []):
+            if a.startswith("--mode="):
+                return a.split("=", 1)[1]
+    return "controller"
+
+
+account_component = {d["spec"]["template"]["spec"].get("serviceAccountName"): component(d)
+                     for d in docs if d.get("kind") == "Deployment"}
+role_sets = {}
+for d in docs:
+    if d.get("kind") in ("ClusterRole", "Role"):
+        rules = norm(d.get("rules", []))
+        for k, v in EXPECTED.items():
+            if v == rules:
+                role_sets[(d["kind"], d["metadata"]["name"])] = k
 for d in docs:
     kind, name = d.get("kind"), d.get("metadata", {}).get("name")
     if kind in ("ClusterRole", "Role"):
@@ -88,6 +147,11 @@ for d in docs:
                 errors.append(f"{kind}/{name}: subject {sub.get('kind')}/{sub.get('name')} is not the controller ServiceAccount")
         if not d.get("subjects"):
             errors.append(f"{kind}/{name}: has no subjects")
+        role_set = role_sets.get(ref)
+        for sub in d.get("subjects") or []:
+            comp = account_component.get(sub.get("name"))
+            if role_set is not None and comp not in ALLOWED_COMPONENTS[role_set]:
+                errors.append(f"{kind}/{name}: grants the {role_set} rules to the {comp} ServiceAccount {sub.get('name')}")
     if kind == "Deployment":
         pod = d["spec"]["template"]["spec"]
         psc = pod.get("securityContext", {})
