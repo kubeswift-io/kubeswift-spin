@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	cachev1alpha1 "github.com/kubeswift-io/kubeswift-spin/api/v1alpha1"
@@ -144,5 +145,36 @@ func TestOnlyCompilersAreDeleted(t *testing.T) {
 	var sb sandboxv1alpha1.SwiftSandbox
 	if err := c.Get(context.Background(), client.ObjectKeyFromObject(replica), &sb); err != nil {
 		t.Fatalf("a sandbox that is not compiler-shaped was deleted: %v", err)
+	}
+}
+
+// A compile that ends wakes the records waiting for a compiler slot.
+func TestCompileEndedWakesWaitingRecords(t *testing.T) {
+	running := exportedRecord("u1")
+	running.Status.Compile.FinishedAt = nil
+	finished := running.DeepCopy()
+	finished.Status.Compile.FinishedAt = &metav1.Time{Time: time.Now()}
+	cleared := running.DeepCopy()
+	cleared.Status.Compile.Sandbox = nil
+	if !compileEnded.Update(event.UpdateEvent{ObjectOld: running, ObjectNew: finished}) {
+		t.Fatal("a finished compile did not pass")
+	}
+	if !compileEnded.Update(event.UpdateEvent{ObjectOld: running, ObjectNew: cleared}) {
+		t.Fatal("a cleared compile did not pass")
+	}
+	if compileEnded.Update(event.UpdateEvent{ObjectOld: finished, ObjectNew: finished}) {
+		t.Fatal("an unchanged finished compile passed")
+	}
+	if compileEnded.Update(event.UpdateEvent{ObjectOld: running, ObjectNew: running}) {
+		t.Fatal("a running compile passed")
+	}
+
+	other := exportedRecord("u2")
+	other.Name, other.Labels = "spincc-2", map[string]string{compiledcache.LabelNamespace: "team-a"}
+	running.Labels = map[string]string{compiledcache.LabelNamespace: "team-a"}
+	r, _ := newRecordReconciler(t, time.Now(), running, other)
+	reqs := r.recordsOfNamespace(context.Background(), running)
+	if len(reqs) != 1 || reqs[0].Name != "spincc-2" {
+		t.Fatalf("requests %v", reqs)
 	}
 }
