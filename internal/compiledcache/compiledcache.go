@@ -296,6 +296,7 @@ const (
 	ReasonPlacing             = "Placing"
 	ReasonPlacementFailed     = "PlacementFailed"
 	ReasonDeliveryFailed      = "DeliveryFailed"
+	ReasonNoWarmPool          = "NoWarmPool"
 	ReasonReady               = "Ready"
 )
 

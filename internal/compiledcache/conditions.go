@@ -198,9 +198,10 @@ func AppCondition(skip *Skip, rec *cachev1alpha1.SpinCompiledCache) metav1.Condi
 				reason = ReasonPlacementFailed
 			}
 			return condition(TypeCompiledCache, true, reason,
-				fmt.Sprintf("new replicas mount the signed cache %s; %s", rec.Name, c.Message))
+				fmt.Sprintf("the signed cache %s is trusted; new warm-pool replicas mount it once their pool is prepared: %s", rec.Name, c.Message))
 		}
-		return condition(TypeCompiledCache, true, ReasonReady, fmt.Sprintf("new replicas mount the signed cache %s", rec.Name))
+		return condition(TypeCompiledCache, true, ReasonReady,
+			fmt.Sprintf("new replicas mount the signed cache %s (warm-pool replicas from prepared pools, and replicas that boot cold when the platform allows it)", rec.Name))
 	}
 	for _, t := range []string{cachev1alpha1.ConditionCompiled, cachev1alpha1.ConditionTrusted} {
 		c := apimeta.FindStatusCondition(rec.Status.Conditions, t)

@@ -24,15 +24,11 @@ var (
 		Name: "kubeswift_spin_compiled_cache_attachments_total",
 		Help: "Replicas that carried a compiled cache, by what KubeSwift did with it (mounted, skipped) and reason.",
 	}, []string{"result", "reason"})
-	CompiledCacheRecords = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "kubeswift_spin_compiled_cache_records",
-		Help: "SpinCompiledCache records by Ready reason.",
-	}, []string{"reason"})
 )
 
 func init() {
 	crmetrics.Registry.MustRegister(CompiledCacheCompilations, CompiledCacheSignatures, CompiledCacheLookups,
-		CompiledCacheAttachments, CompiledCacheRecords)
+		CompiledCacheAttachments)
 }
 
 // knownReasons are the reasons counted under their own name: KubeSwift's

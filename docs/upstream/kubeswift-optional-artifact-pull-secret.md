@@ -1,6 +1,6 @@
 # KubeSwift requirement: an optional artifact never fails its sandbox
 
-Status: proposal, not filed. Found while implementing the compiled Wasmtime
+Status: filed as [kubeswift-io/kubeswift#844](https://github.com/kubeswift-io/kubeswift/issues/844). Found while implementing the compiled Wasmtime
 cache ([ADR 0014](../adr/0014-compiled-wasmtime-cache.md)) on KubeSwift
 v0.19.1.
 

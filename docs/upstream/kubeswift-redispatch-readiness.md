@@ -1,6 +1,6 @@
 # KubeSwift requirement: a re-dispatched warm workload can become ready
 
-Status: proposal, not filed. Found on the KVM lab with KubeSwift v0.19.1
+Status: filed as [kubeswift-io/kubeswift#843](https://github.com/kubeswift-io/kubeswift/issues/843). Found on the KVM lab with KubeSwift v0.19.1
 while measuring compiled caches ([ADR 0014](../adr/0014-compiled-wasmtime-cache.md)).
 
 ## User problem

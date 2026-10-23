@@ -169,12 +169,31 @@ func TestCompileEndedWakesWaitingRecords(t *testing.T) {
 		t.Fatal("a running compile passed")
 	}
 
-	other := exportedRecord("u2")
-	other.Name, other.Labels = "spincc-2", map[string]string{compiledcache.LabelNamespace: "team-a"}
-	running.Labels = map[string]string{compiledcache.LabelNamespace: "team-a"}
-	r, _ := newRecordReconciler(t, time.Now(), running, other)
-	reqs := r.recordsOfNamespace(context.Background(), running)
-	if len(reqs) != 1 || reqs[0].Name != "spincc-2" {
-		t.Fatalf("requests %v", reqs)
+	if compileEnded.Delete(event.DeleteEvent{Object: finished}) {
+		t.Fatal("deleting a record that was not compiling passed")
+	}
+	if !compileEnded.Delete(event.DeleteEvent{Object: running}) {
+		t.Fatal("deleting a compiling record did not pass")
+	}
+
+	// Waiting records in any namespace are woken; compiling and trusted
+	// ones are not.
+	waiting := exportedRecord("u2")
+	waiting.Name, waiting.Status.Compile = "spincc-2", nil
+	elsewhere := waiting.DeepCopy()
+	elsewhere.Name, elsewhere.Spec.Namespace = "spincc-3", "team-b"
+	busy := running.DeepCopy()
+	busy.Name = "spincc-4"
+	trusted := exportedRecord("u5")
+	trusted.Name = "spincc-5"
+	trusted.Status.Signature = &cachev1alpha1.SignatureStatus{Artifact: trusted.Status.Compile.Artifact, SignedAt: &metav1.Time{Time: time.Now()}}
+	r, _ := newRecordReconciler(t, time.Now(), running, waiting, elsewhere, busy, trusted)
+	var names []string
+	for _, q := range r.recordsWaiting(context.Background(), running) {
+		names = append(names, q.Name)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"spincc-2", "spincc-3"}) {
+		t.Fatalf("woken %v", names)
 	}
 }

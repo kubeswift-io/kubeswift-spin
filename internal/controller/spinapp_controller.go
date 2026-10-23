@@ -123,10 +123,12 @@ type SpinAppReconciler struct {
 
 	// attached remembers which replicas' compiled-cache outcome was
 	// counted, so each replica is counted once.
-	attachMu  sync.Mutex
-	attached  map[types.UID]string
-	holds     map[string]cacheHold
-	startedAt time.Time
+	attachMu sync.Mutex
+	attached map[types.UID]string
+	holds    map[string]cacheHold
+	// stuckDeleted are the stuck replicas this process deleted.
+	stuckDeleted map[types.UID]string
+	startedAt    time.Time
 }
 
 // SetupWithManager registers the controller, its watches and the field index.
@@ -234,7 +236,16 @@ func (r *SpinAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return res, err
 }
 
-func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
+	// Compiled-cache rechecks (a replica that may be stuck, the end of a
+	// hold) produce no events of their own: every path, blocked ones
+	// included, looks again at the earliest of them.
+	var cacheRecheck time.Duration
+	defer func() {
+		if err == nil && cacheRecheck > 0 && (res.RequeueAfter == 0 || cacheRecheck < res.RequeueAfter) {
+			res.RequeueAfter = cacheRecheck
+		}
+	}()
 	key := req.String()
 
 	var app spinv1alpha1.SpinApp
@@ -257,18 +268,12 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	stuckWait := cacheStuckRecheck(owned, r.Now())
-	for _, sb := range r.countAttachments(key, owned) {
-		// The cache cannot keep a replica from becoming ready: replace it
-		// (the replacement gets no cache while the hold lasts).
-		if err := r.deleteSandbox(ctx, sb, "CompiledCacheNotReady"); err != nil {
-			return ctrl.Result{}, err
-		}
-		now := metav1.NewTime(r.Now())
-		sb.DeletionTimestamp = &now
-		r.event(&app, corev1.EventTypeWarning, EventCompiledCacheFailed, "Delete",
-			"replaced sandbox %s: KubeSwift skipped its compiled cache after the warm checkout and the replica did not become ready", sb.Name)
-	}
+	// Stuck replicas set a hold now, so this reconcile already gives new
+	// replicas no cache; they are replaced only once nothing blocks the
+	// SpinApp (below, before the rollout plan).
+	stuckWindow := cacheStuckWindow(&app)
+	cacheRecheck = cacheStuckRecheck(owned, r.Now(), stuckWindow)
+	stuck := r.countAttachments(key, owned, stuckWindow)
 
 	var exec spinv1alpha1.SpinAppExecutor
 	var execErr error = apierrors.NewNotFound(spinv1alpha1.GroupVersion.WithResource("spinappexecutors").GroupResource(), app.Spec.Executor)
@@ -350,6 +355,11 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	cache := r.compiledCache(ctx, &app, profile, features)
+	if cache.holdUntil != nil {
+		if d := cache.holdUntil.Sub(r.Now()) + time.Second; cacheRecheck == 0 || d < cacheRecheck {
+			cacheRecheck = d
+		}
+	}
 
 	tmpl, err := translate.BuildTemplate(&app, profile, r.Options.Resources, features)
 	if err != nil {
@@ -362,6 +372,24 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		} else if blocker != nil {
 			return ctrl.Result{}, r.finish(ctx, &app, owned, tmpl.Revision, blocker, exposure, cache, EventWarmPool)
+		}
+	}
+
+	if len(stuck) > 0 {
+		// The cache cannot keep a replica from becoming ready: replace one
+		// replica per reconcile (the replacement gets no cache while the
+		// hold lasts), and look again soon for the others.
+		sb := stuck[0]
+		if err := r.deleteSandbox(ctx, sb, "compiled_cache_not_ready"); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.noteStuckDeleted(key, sb.UID)
+		deleted := metav1.NewTime(r.Now())
+		sb.DeletionTimestamp = &deleted
+		r.event(&app, corev1.EventTypeWarning, EventCompiledCacheFailed, "Delete",
+			"replaced sandbox %s: KubeSwift skipped its compiled cache after the warm checkout and the replica did not become ready", sb.Name)
+		if len(stuck) > 1 && (cacheRecheck == 0 || cacheRecheck > time.Second) {
+			cacheRecheck = time.Second
 		}
 	}
 
@@ -508,14 +536,6 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Watches normally trigger the next step (owned sandbox events);
 		// this is a bounded safety net for conflicts and in-flight work.
 		return ctrl.Result{RequeueAfter: r.WaitingRequeue}, nil
-	}
-	if stuckWait > 0 {
-		// A replica whose skipped cache may keep it from becoming ready.
-		return ctrl.Result{RequeueAfter: stuckWait}, nil
-	}
-	if cache.holdUntil != nil {
-		// Report the end of a compiled-cache hold when it ends.
-		return ctrl.Result{RequeueAfter: cache.holdUntil.Sub(r.Now()) + time.Second}, nil
 	}
 	return ctrl.Result{}, nil
 }

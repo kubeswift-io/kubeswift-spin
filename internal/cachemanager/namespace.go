@@ -52,6 +52,8 @@ type NamespaceReconciler struct {
 	// controller refuses to run gets no compiled cache either.
 	Options  compatibility.Options
 	Settings compiledcache.Settings
+	// Delivery decides which SpinApps can get a cache at all (Serves).
+	Delivery compiledcache.Delivery
 	Detector capabilities.SandboxDetector
 	// Retention is how long a record nobody uses as its current cache is
 	// kept, from the moment it stopped being used. The most recently
@@ -368,7 +370,7 @@ func (r *NamespaceReconciler) view(ctx context.Context, ns string) (view, error)
 			continue
 		}
 		id, skip := compiledcache.Derive(app, e.p, r.Settings)
-		if skip != nil {
+		if skip != nil || !r.Delivery.Serves(e.p) {
 			continue
 		}
 		v.wants[app.Name] = want{id: *id, pool: e.p.SandboxPool}

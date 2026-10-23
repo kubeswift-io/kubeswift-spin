@@ -19,6 +19,9 @@
 #   4 teardown     placements go with their records' consumers
 #
 # Environment:
+#   E2E_CONTEXT    the kubectl context to run in; must equal the current
+#                  context, so the script never runs against another
+#                  cluster by accident (required)
 #   E2E_NAMESPACE  enabled namespace (label spin.kubeswift.io/compiled-cache=
 #                  enabled) with a Ready SwiftKernel "sandbox" whose kernel
 #                  supports outputs and warm mounts (default kubeswift-spin-e2e)
@@ -29,7 +32,10 @@
 #                  repository) for phase 2 (required)
 #   CC_WRONG_KEY_JOB  phase 2 also signs an export with a key no policy
 #                  names, in a Job in this namespace that can push to the
-#                  cache repository with this docker-registry Secret (optional)
+#                  cache repository with this docker-registry Secret
+#                  (optional). It is a push credential for the cache
+#                  repository in the tenant test namespace: create it for the
+#                  run only and delete it afterwards.
 #   E2E_PHASES     phases to run (default "1 2 3 4")
 #   TIMEOUT        seconds to wait for each step (default 600)
 #   KEEP=1         keep the test objects afterwards
@@ -83,6 +89,8 @@ image_of() { awk -v n="$1" '$1 == n {print $2}' "$CC_IMAGES"; }
 # is named after its pool).
 pod_ip() { jp "pod/$(jp "swiftsandbox/$1" '{.status.podRef}')" '{.status.podIP}'; }
 
+[[ -n "${E2E_CONTEXT:-}" ]] || die "set E2E_CONTEXT to the kubectl context of the test cluster"
+[[ "$(kubectl config current-context)" == "$E2E_CONTEXT" ]] || die "the current kubectl context is not E2E_CONTEXT ($E2E_CONTEXT)"
 [[ -n "${CC_IMAGES:-}" && -f "$CC_IMAGES" ]] || die "set CC_IMAGES to a file of example image references"
 CTL_NS="$(kubectl get deploy -A -l app.kubernetes.io/name=kubeswift-spin -o jsonpath='{.items[0].metadata.namespace}')"
 [[ -n "$CTL_NS" ]] || die "kubeswift-spin is not installed"
@@ -102,9 +110,17 @@ pool_prepared() { [[ "$(rec "$1" "{.status.placements[?(@.pool==\"$POOL\")].prep
 record_of() { reason_msg="$(jp "spinapp/$1" '{.status.conditions[?(@.type=="CompiledCache")].message}')"; grep -o 'spincc-[0-9a-f]\{32\}' <<<"$reason_msg" | head -1; }
 rec() { kubectl -n "$CTL_NS" get spincompiledcache "$1" -o jsonpath="$2" 2>/dev/null; }
 
+SIGNER_REPLICAS="$(kubectl -n "$CTL_NS" get "$SIGNER" -o jsonpath='{.spec.replicas}')"
+sec_record=""
+
+# Even with KEEP=1, the platform is left as found: the signer runs again and
+# a record whose status was forged is removed.
 cleanup() {
+  kubectl -n "$CTL_NS" scale "$SIGNER" --replicas="${SIGNER_REPLICAS:-1}" >/dev/null 2>&1 || true
+  if [[ -n "$sec_record" ]]; then
+    kubectl -n "$CTL_NS" delete spincompiledcache "$sec_record" --ignore-not-found >/dev/null 2>&1 || true
+  fi
   [[ "${KEEP:-}" == "1" ]] && return 0
-  kubectl -n "$CTL_NS" scale "$SIGNER" --replicas=1 >/dev/null 2>&1 || true
   $K delete spinapp -l app.kubernetes.io/created-by=kss-cc-e2e --ignore-not-found --wait=true >/dev/null 2>&1 || true
   $K delete pod e2e-client upstream --ignore-not-found --wait=false >/dev/null 2>&1 || true
   $K delete svc upstream --ignore-not-found >/dev/null 2>&1 || true
@@ -418,6 +434,9 @@ app cc-sec-ref hello-http 1 </dev/null
 until_true "reference record Ready" has_reason cc-sec-ref CompiledCache Ready
 ref_record="$(record_of cc-sec-ref)"
 ref_artifact="$(rec "$ref_record" '{.status.compile.artifact}')"
+# Values read from records are checked before they reach a Job's arguments.
+pinned_ref() { [[ "$1" =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; }
+pinned_ref "$ref_artifact" || die "reference artifact is not a pinned reference"
 
 # With the signer stopped, request-info-b's export stays unsigned.
 kubectl -n "$CTL_NS" scale "$SIGNER" --replicas=0 >/dev/null
@@ -427,6 +446,7 @@ until_true "cc-sec: compiled and exported, not signed" has_reason cc-sec Compile
 sec_record="$(record_of cc-sec)"
 [[ -z "$sec_record" ]] && sec_record="$(kubectl -n "$CTL_NS" get spincompiledcache -o jsonpath="{range .items[?(@.spec.source==\"$(image_of request-info-b)\")]}{.metadata.name}{end}")"
 unsigned="$(rec "$sec_record" '{.status.compile.artifact}')"
+pinned_ref "$unsigned" || die "the exported artifact is not a pinned reference"
 [[ -n "$unsigned" ]] || fail "no exported artifact for cc-sec"
 
 # Spec inspection: no key or push credential in a compiler or a replica.
@@ -467,6 +487,7 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
       securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: sign
@@ -501,12 +522,13 @@ YAML
   fi
 fi
 
-kubectl -n "$CTL_NS" scale "$SIGNER" --replicas=1 >/dev/null
+kubectl -n "$CTL_NS" scale "$SIGNER" --replicas="${SIGNER_REPLICAS:-1}" >/dev/null
 kubectl -n "$CTL_NS" rollout status "$SIGNER" --timeout=180s >/dev/null
 $K delete spinapp cc-sec cc-sec-ref --wait=true >/dev/null
 # The forged record is reset by deleting it; the cache manager recreates it
 # for a new consumer.
 kubectl -n "$CTL_NS" delete spincompiledcache "$sec_record" --wait=true >/dev/null
+sec_record=""
 fi
 
 if want 3; then

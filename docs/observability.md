@@ -14,9 +14,21 @@ the standard `controller_runtime_*`, `workqueue_*` and Go runtime metrics.
 | `kubeswift_spin_ready_replicas` | gauge | none | sum of `readyReplicas` |
 | `kubeswift_spin_desired_replicas` | gauge | none | sum of desired replicas |
 | `kubeswift_spin_sandbox_creations_total` | counter | none | SwiftSandboxes created |
-| `kubeswift_spin_sandbox_deletions_total` | counter | `reason` (`scale_down`, `rollout`, `failed`, `stale`, `executor_change`) | SwiftSandboxes deleted |
+| `kubeswift_spin_sandbox_deletions_total` | counter | `reason` (`scale_down`, `rollout`, `failed`, `stale`, `executor_change`, `compiled_cache_not_ready`) | SwiftSandboxes deleted |
 | `kubeswift_spin_sandbox_failures_total` | counter | none | sandboxes observed `Completed` or `Failed` |
 | `kubeswift_spin_unsupported_configuration_total` | counter | `field` (a SpinApp spec field name) | SpinApp generations found to use unsupported configuration |
+
+With compiled caches enabled ([compiled-cache.md](compiled-cache.md#metrics)):
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `kubeswift_spin_compiled_cache_lookups_total` | counter | `result` (`hit`, `miss`, `unplaced`, `cold`, `skipped`) | replicas created for SpinApps that asked for a cache (controller) |
+| `kubeswift_spin_compiled_cache_attachments_total` | counter | `result` (`mounted`, `skipped`), `reason` | what KubeSwift did with a replica's cache (controller) |
+| `kubeswift_spin_compiled_cache_compilations_total` | counter | `result`, `reason` | compiler sandboxes (cache manager) |
+| `kubeswift_spin_compiled_cache_signatures_total` | counter | `result` | signing attempts (cache signer) |
+
+`reason` values are a fixed set of KubeSwift and kubeswift-spin reasons;
+anything else is counted as `Other`.
 
 Labels are limited to the fixed sets above. Namespaces, application names,
 UIDs, images and error strings are never label values; per-app detail is in
