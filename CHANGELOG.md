@@ -55,7 +55,11 @@ running replicas on upgrade) say so under "Upgrade notes".
   v0.19.1 fails a replica whose optional cache names a pull Secret it
   cannot read; the controller then starts that SpinApp's new replicas
   without the cache for 30 minutes and reports `CompiledCache=False`
-  (`DeliveryFailed`).
+  (`DeliveryFailed`). KubeSwift v0.19.1 also never accepts the readiness of
+  a warm replica whose optional artifact it skipped after the checkout:
+  warm replicas get the cache only once their pool's placement is
+  prepared on every node, and a warm replica that is not ready a minute
+  after such a skip is replaced and the cache held back for 30 minutes.
 
 ### Upgrade notes
 

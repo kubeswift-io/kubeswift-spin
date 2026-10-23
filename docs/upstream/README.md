@@ -23,6 +23,7 @@ Later requirements:
 | [kubeswift-sandbox-termination-drain.md](kubeswift-sandbox-termination-drain.md) | implemented in v0.16.3 ([#774](https://github.com/kubeswift-io/kubeswift/pull/774)) | removing an old replica during a rollout without relying on the guest ignoring the ACPI power button |
 | [kubeswift-artifact-cache-tenant-isolation.md](kubeswift-artifact-cache-tenant-isolation.md) | proposal, not filed | compiled caches in namespaces whose tenants can exec into pods ([ADR 0014](../adr/0014-compiled-wasmtime-cache.md)) |
 | [kubeswift-optional-artifact-pull-secret.md](kubeswift-optional-artifact-pull-secret.md) | proposal, not filed | a missing cache pull Secret not failing replicas ([ADR 0014](../adr/0014-compiled-wasmtime-cache.md)) |
+| [kubeswift-redispatch-readiness.md](kubeswift-redispatch-readiness.md) | proposal, not filed | a warm replica whose cache was skipped at checkout becoming ready ([ADR 0014](../adr/0014-compiled-wasmtime-cache.md)) |
 
 kubeswift-spin uses these features only when the installed KubeSwift
 serves them ([ADR 0012](../adr/0012-feature-detection.md)). On v0.15.1 it

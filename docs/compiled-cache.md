@@ -336,8 +336,15 @@ Replicas created while the record is trusted get one more entry in
 
 They also get `KUBESWIFT_SPIN_CACHE_SOURCE`, `KUBESWIFT_SPIN_CACHE_RUNTIME`
 and `KUBESWIFT_SPIN_CACHE_ARCHITECTURE`, the identity the cache must have.
-A replica from a warm pool uses the cache only if its node already holds
-it, and never waits; a cold replica waits at most `fetchTimeout`. The
+A replica from a warm pool gets the cache only once the pool's placement
+reports every node prepared (lookup result `unplaced` until then), uses it
+only if its node holds it, and never waits; a cold replica waits at most
+`fetchTimeout`. KubeSwift v0.19.1 does not accept the readiness of a warm
+replica whose optional artifact it skipped after the checkout
+([upstream proposal](upstream/kubeswift-redispatch-readiness.md)); a
+warm replica that carried the cache, had it skipped and is not ready a
+minute after the checkout is replaced, and the SpinApp's new replicas
+start without the cache for 30 minutes (`DeliveryFailed`). The
 artifact and the variables are not part of the replica's revision: a cache
 that becomes available, or goes away, never replaces running replicas.
 
@@ -370,6 +377,8 @@ The cache never stops a replica:
 | No record, compiling, failed, signing, rejected | No artifact; Spin compiles |
 | The node does not hold the cache in time; the registry refuses; verification or claims fail | KubeSwift skips the optional artifact (`status.artifacts` says why); Spin compiles |
 | Mount missing, writable, or with other metadata | The entrypoint starts Spin without it |
+| The pool's placement is not prepared on every node | Warm replicas get no cache (lookup `unplaced`) |
+| A warm checkout skipped the cache and the replica is not ready a minute later (KubeSwift v0.19.1) | The replica is replaced; new replicas start without the cache for 30 minutes (`DeliveryFailed`) |
 | The cache pull Secret is missing or not a `kubernetes.io/dockerconfigjson` Secret | KubeSwift v0.19.1 fails the replica (`ArtifactResolveFailed`) although the artifact is optional. The controller then starts the SpinApp's new replicas without the cache for 30 minutes and reports `DeliveryFailed`; one replica start is lost each time ([upstream proposal](upstream/kubeswift-optional-artifact-pull-secret.md)) |
 | CPU features or Wasmtime version not in the cache | Wasmtime misses and compiles |
 
