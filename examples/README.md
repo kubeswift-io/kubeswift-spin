@@ -80,15 +80,15 @@ Service Spin Operator creates (`http://<app>.<namespace>.svc`), and becomes `Ava
 when its replicas pass the readiness check. The KVM e2e test
 ([test/e2e](../test/e2e/README.md)) ran on a lab cluster:
 
-| Example | In a KubeSwift v0.16.3 sandbox |
+| Example | In a KubeSwift sandbox (v0.16.3 unless noted) |
 |---|---|
 | hello-http | tested: readiness, Service, scaling, rolling update without failed requests, warm-pool checkout, private registry with `imagePullSecrets`, `ingress-from` |
 | request-info | tested: two replicas behind the Service, literal and Secret-backed variables |
 | serverless-ai | tested against an in-cluster mock: egress allowlist, Secret-backed token, `loadFromSecret` |
 | outbound-http | tested in the liveness phase: a restricted sandbox with an `egress-allow` entry fetched from an in-cluster Service, and the replica was replaced while its `/fetch` liveness check failed; `spinapp.yaml` and `spinapp-open.yaml` themselves were not run |
-| key-value | not run in a sandbox |
-| experimental/mcp | not run in a sandbox |
-| multi-component | not run in a sandbox |
+| key-value | tested with a compiled cache on a warm pool (compiled-cache e2e, KubeSwift v0.19.1) |
+| experimental/mcp | tested with a compiled cache on a warm pool (compiled-cache e2e, KubeSwift v0.19.1) |
+| multi-component | tested with a compiled cache on a warm pool (compiled-cache e2e, KubeSwift v0.19.1) |
 
 The HTTP behavior of every example is tested locally with `spin up`
 (`make example-test`) and, for hello-http, key-value and serverless-ai, in

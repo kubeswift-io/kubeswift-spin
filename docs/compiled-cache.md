@@ -22,7 +22,13 @@ current revision does.
 | SpinApp `CompiledCache` condition and Events | implemented |
 | Compilation in a SwiftSandbox and KubeSwift output export | implemented |
 | Signing and verification policy | implemented |
-| Placement on warm-pool nodes and mounting in replicas | implemented; KVM lab validation pending |
+| Placement on warm-pool nodes and mounting in replicas | implemented |
+
+Validated on the amd64 KVM lab with KubeSwift v0.19.1
+([test/e2e](../test/e2e/README.md#compiled-caches),
+[performance](performance.md#compiled-wasmtime-cache-kubeswift-v0191-2026-10-23)).
+arm64 follows the same path but has not been run on arm64 hardware: do
+not rely on compiled caches there until it has.
 
 ## Requirements
 
