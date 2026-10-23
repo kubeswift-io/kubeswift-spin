@@ -39,6 +39,15 @@ Any of these closes the gap; they are listed from least to most change:
 3. Separate the cache per namespace (or per policy binding), so content
    written from one namespace is never mounted in another.
 
+A related gap: a launcher runs the command, arguments and environment of
+the sandbox's `-runtime-intent` ConfigMap. KubeSwift creates it immutable,
+but a principal that can delete and recreate ConfigMaps in the namespace
+can replace it before the launcher starts, with an owner reference that
+passes the controller's check. A client that trusts a sandbox's output
+because of its spec (as the compiled-cache signer does) needs the launcher
+to refuse an intent whose hash does not match the one the controller
+recorded for that spec, for example in an annotation on the launcher pod.
+
 ## Why this belongs in KubeSwift
 
 The cache, its records and the pods that write it are KubeSwift's; no
@@ -49,5 +58,6 @@ artifact, not only compiled code.
 
 kubeswift-spin enables compiled caches only in namespaces an administrator
 labels, and documents that such namespaces must not grant non-platform
-principals exec, attach, ephemeral containers or pod writes
+principals exec, attach, ephemeral containers, pod writes, or ConfigMap
+and SwiftKernel writes
 ([compiled-cache.md](../compiled-cache.md#prerequisites)).

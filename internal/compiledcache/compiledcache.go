@@ -74,8 +74,14 @@ var (
 	// repositoryPattern is a registry host with an optional port and an OCI
 	// distribution repository path; spec.repository uses the same pattern.
 	repositoryPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*)+$`)
-	// claimValue is KubeSwift's claim value character set.
+	// claimValue is KubeSwift's claim value character set. It has no comma
+	// or equals sign, which cosign's -a flag would split on.
 	claimValue = regexp.MustCompile(`^[A-Za-z0-9._:/@+-]+$`)
+	// pinnedPattern is a canonical repository@sha256 reference in the OCI
+	// grammar; the record's source and runtime use the same pattern.
+	pinnedPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$`)
+	// namespacePattern is a Kubernetes namespace name.
+	namespacePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 )
 
 // NamespaceLabel is the label an administrator sets on a Namespace, with
@@ -218,6 +224,61 @@ func (i Identity) ArtifactClaims() map[string]string {
 	}
 }
 
+// IdentityOf is the identity a record was created for.
+func IdentityOf(rec *cachev1alpha1.SpinCompiledCache) Identity {
+	return Identity{
+		Namespace:    rec.Spec.Namespace,
+		Source:       rec.Spec.Source,
+		Runtime:      rec.Spec.Runtime,
+		Architecture: rec.Spec.Architecture,
+		Repository:   rec.Spec.Repository,
+	}
+}
+
+// CheckRecord checks that rec is a record the cache manager could have
+// made under these settings: its name is the hash of its identity, its
+// repository is its namespace's cache repository, its runtime is allowed,
+// and every identity field is a valid claim value. The signer runs it
+// before it signs, so a record written by anyone else cannot make it sign
+// for another namespace, repository or runtime.
+func (s Settings) CheckRecord(rec *cachev1alpha1.SpinCompiledCache) error {
+	id := IdentityOf(rec)
+	switch {
+	case len(id.Namespace) > maxNamespace || !namespacePattern.MatchString(id.Namespace):
+		return fmt.Errorf("spec.namespace %q is not a namespace name", bounded(id.Namespace))
+	case rec.Name != id.RecordName():
+		return fmt.Errorf("record name %s is not the name of its identity (%s)", rec.Name, id.RecordName())
+	case id.Repository != s.NamespaceRepository(id.Namespace):
+		return fmt.Errorf("spec.repository %q is not namespace %s's cache repository %s", bounded(id.Repository), id.Namespace, s.NamespaceRepository(id.Namespace))
+	case !slices.Contains(s.Runtimes, id.Runtime):
+		return fmt.Errorf("spec.runtime %q is not an allowed runtime image", bounded(id.Runtime))
+	}
+	switch id.Architecture {
+	case cachev1alpha1.ArchitectureAMD64, cachev1alpha1.ArchitectureARM64:
+	default:
+		return fmt.Errorf("spec.architecture %q is not amd64 or arm64", bounded(id.Architecture))
+	}
+	for what, ref := range map[string]string{"spec.source": id.Source, "spec.runtime": id.Runtime} {
+		if c, err := PinnedReference(ref); err != nil || c != ref || !pinnedPattern.MatchString(ref) {
+			return fmt.Errorf("%s %q is not a canonical repository@sha256 reference", what, bounded(ref))
+		}
+	}
+	return ValidClaims(id.Claims("x"))
+}
+
+// ValidClaims checks every claim value against KubeSwift's claim value
+// character set and length. Claims are passed to cosign as -a key=value,
+// which splits on commas: a value outside the set could add or override
+// claims.
+func ValidClaims(claims map[string]string) error {
+	for k, v := range claims {
+		if v == "" || len(v) > maxClaimValue || !claimValue.MatchString(v) {
+			return fmt.Errorf("claim %s has a value outside [A-Za-z0-9._:/@+-] or longer than %d characters", k, maxClaimValue)
+		}
+	}
+	return nil
+}
+
 // Reasons a SpinApp gets no compiled cache, and the SpinApp CompiledCache
 // condition reasons. They are API: do not rename them.
 const (
@@ -294,7 +355,7 @@ func Derive(app *spinv1alpha1.SpinApp, p *executor.Profile, s Settings) (*Identi
 			Message: fmt.Sprintf("executor %q selects nodes with %s=%s; compiled caches are built for amd64 and arm64 only", p.ExecutorName, ArchitectureLabel, arch)}
 	}
 	for what, ref := range map[string]string{"spec.image": source, "the runtime image": runtime} {
-		if len(ref) > maxClaimValue || !claimValue.MatchString(ref) {
+		if len(ref) > maxClaimValue || !claimValue.MatchString(ref) || !pinnedPattern.MatchString(ref) {
 			return nil, &Skip{Reason: ReasonUnsupported,
 				Message: fmt.Sprintf("%s is %d characters; compiled caches need image references of at most %d", what, len(ref), maxClaimValue)}
 		}

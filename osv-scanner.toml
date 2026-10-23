@@ -1,0 +1,22 @@
+# OSV-Scanner exceptions. Each names one vulnerability, why it does not
+# apply, and a date to review it again (hack/check-osv-inputs.sh enforces
+# this form). Remove an entry as soon as a fixed version exists.
+
+# signer/cosign: cosign v3.1.3 links the Azure Container Registry credential
+# helper, which can send Azure credentials from AZURE_* environment variables
+# to non-ACR hosts. The chart refuses azurekms:// keys and AZURE_* variables
+# for the signer, so the helper has no credentials to send, and cosign only
+# contacts the record's cache repository, which the signer checks is the
+# platform's. No fixed version exists.
+[[IgnoredVulns]]
+id = "GO-2026-6225"
+ignoreUntil = 2027-01-31
+reason = "cache signer cosign: Azure ACR credential helper; the chart refuses AZURE_* variables and azurekms keys for the signer; no fix released"
+
+# signer/cosign: golang.org/x/crypto/openpgp is deprecated and unmaintained.
+# The cache signer signs with a cosign key or KMS key and never reads or
+# verifies OpenPGP data. No fixed version exists.
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2027-01-31
+reason = "cache signer cosign: unmaintained openpgp package advisory; the signer never handles OpenPGP data; no fix released"

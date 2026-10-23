@@ -35,6 +35,14 @@ running replicas on upgrade) say so under "Upgrade notes".
   time and concurrency, failures back off from 1 minute to 6 hours, and an
   unrecorded compiler is never adopted.
 
+- The cache signer (`kubeswift-spin-cache-signer` image, its own
+  Deployment and ServiceAccount, the only holder of the signing key): it
+  checks each exported cache's compiler sandbox, spec and export tag and the
+  artifact itself, then signs its digest with cosign (v3.1.3, built from
+  source) and the claims kind, namespace, source, runtime, architecture and
+  compiler. docs/compiled-cache.md describes the key, the registry
+  credential and the SwiftArtifactVerificationPolicy to create.
+
 ### Upgrade notes
 
 - The runtime image is `spin-4.2.1-r3` (compile mode). Upgrading replaces

@@ -28,14 +28,14 @@ type SpinCompiledCacheSpec struct {
 	// Source is the Spin application, pinned by digest (repository@sha256:...).
 	// It is a signed claim value, so at most 256 characters.
 	// +kubebuilder:validation:MaxLength=256
-	// +kubebuilder:validation:Pattern=`^[^@\s]+@sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$`
 	Source string `json:"source"`
 
 	// Runtime is the kubeswift-spin runtime image that compiles and later runs
 	// the application, pinned by digest. Its Spin and Wasmtime versions and
 	// engine configuration decide whether a cache entry can be used.
 	// +kubebuilder:validation:MaxLength=256
-	// +kubebuilder:validation:Pattern=`^[^@\s]+@sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$`
 	Runtime string `json:"runtime"`
 
 	// Architecture is the CPU architecture the cache is compiled for.

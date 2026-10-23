@@ -158,6 +158,38 @@ compiledCache:
     # Compilers running at once, cluster-wide and per namespace.
     maxConcurrent: 4
     maxConcurrentPerNamespace: 1
+  # The cache signer: the only holder of the signing key. It checks each
+  # exported cache and signs it with the record's claims.
+  signer:
+    image:
+      repository: ghcr.io/kubeswift-io/kubeswift-spin-cache-signer
+      tag: ""      # defaults to the chart appVersion
+      digest: ""
+      pullPolicy: IfNotPresent
+    key:
+      # A Secret in the release namespace with cosign.key (a cosign private
+      # key) and cosign.password. Mounted into the signer only.
+      secretName: ""
+      # Or a key reference cosign understands (awskms://, gcpkms://,
+      # hashivault://); preferred where a KMS is available. azurekms:// is
+      # refused until cosign fixes GO-2026-6225.
+      kmsRef: ""
+    # A kubernetes.io/dockerconfigjson Secret in the release namespace that
+    # can read the exported caches and push their signatures (the same
+    # repositories as the export policy).
+    registryCredentialsSecret: ""
+    # Extra environment, for example KMS credentials.
+    extraEnv: []
+    serviceAccountAnnotations: {}
+    logLevel: info
+    extraArgs: []
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
   manager:
     replicaCount: 1
     logLevel: info

@@ -6,11 +6,15 @@ updates:
     groups:
       kubernetes:
         patterns: ["k8s.io/*", "sigs.k8s.io/*"]
+  # cosign, built from source for the cache signer image.
+  - package-ecosystem: gomod
+    directory: /signer/cosign
+    schedule: {interval: weekly}
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: weekly}
   - package-ecosystem: docker
-    directories: ["/", "/runtime"]
+    directories: ["/", "/runtime", "/signer"]
     schedule: {interval: weekly}
   - package-ecosystem: cargo
     directory: /examples

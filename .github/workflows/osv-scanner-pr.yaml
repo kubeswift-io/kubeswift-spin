@@ -25,7 +25,9 @@ jobs:
       runs-on: ubuntu-24.04
       # Explicit lockfiles: a recursive scan follows .gitignore, even for
       # tracked files. hack/check-osv-inputs.sh (make verify) keeps this list
-      # equal to the tracked dependency manifests.
+      # equal to the tracked dependency manifests, except a lockfile that is
+      # not on main yet (PR_SCAN_PENDING there): this scan also runs on the
+      # base branch, where it would fail.
       scan-args: |-
         --lockfile=go.mod
         --lockfile=examples/Cargo.lock

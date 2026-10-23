@@ -47,6 +47,7 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 | Executor authors | trusted like SwiftSandbox creators | Whoever can create or update a SpinAppExecutor in a namespace decides, through the controller, the runtime image, node selector, kernel profile, network mode (`open` removes the cloud metadata block), egress allowlist and warm pool of every sandbox for that namespace. That is the power of creating SwiftSandboxes there. kubeswift-spin has no administrator policy that limits executor profiles; grant executor write access only to platform operators. |
 | SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to, and can make any Secret in that namespace available to their application (see [Secrets](#secrets)). Their `spec.podLabels` become launcher pod labels, so they can match pod-label based NetworkPolicy peers and Services in their namespace (see [Network isolation](#network-isolation)). |
 | Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest. |
+| kubeswift-spin cache signer | trusted, holds the signing key | Only with compiled caches enabled. Its own ServiceAccount and image: gets compiler SwiftSandboxes, reads and patches the status of records in the release namespace. The signing key (or KMS access) and a registry credential that writes signatures are volumes of its pod; it has no Secret RBAC and never runs tenant code. It parses exported artifacts with size and entry limits. Prefer a KMS key, so a compromise of the pod does not reveal key material. |
 | kubeswift-spin cache manager | trusted control plane component | Only with compiled caches enabled. Its own ServiceAccount: reads SpinApps, executors, pools and Namespaces, and writes `SpinCompiledCache` records in the release namespace. From the compilation stage on it also creates compiler SwiftSandboxes with SpinApps' pull Secrets, so, like the controller, treat its credentials like a cluster-wide Secret reader. See [compiled-cache.md](compiled-cache.md). |
 
 ## Threat actors
@@ -264,7 +265,7 @@ Three scanners run, each for a different question; none replaces another:
 
 | Scanner | Question it answers | Where |
 |---|---|---|
-| `govulncheck` | Does kubeswift-spin's Go code call a vulnerable function? Call-graph analysis of every package in the Go module (`./...`), including the controller and the runtime entrypoint. | CI Go job (Kubernetes 1.37 leg), `make vulncheck` |
+| `govulncheck` | Does kubeswift-spin's Go code call a vulnerable function? Call-graph analysis of every package in the Go module (`./...`), including the controller and the runtime entrypoint. It does not cover the nested `signer/cosign` module, which only OSV-Scanner and Grype scan. | CI Go job (Kubernetes 1.37 leg), `make vulncheck` |
 | OSV-Scanner | Which dependencies in `go.mod` and `examples/Cargo.lock` have known vulnerabilities, today? Inventory against the OSV database, with Go call analysis to mark uncalled findings. | `.github/workflows/osv-scanner-pr.yaml`, `osv-scanner.yaml`, the release workflow, `make osv-scan` |
 | Grype | What do the built images contain? Packages that Syft catalogs in the controller and runtime images: the base image packages and the Go modules of the controller and entrypoint binaries. Fails on fixable high or critical findings. | CI image jobs |
 
@@ -323,8 +324,8 @@ without a reason or review date, and package-wide ignores. Exceptions
 still need careful review: the `main` ruleset requires no approving review,
 and a pull request's own scan reads its own configuration. Dependency
 presence alone is not treated as exploitability, and neither is its absence
-from a call graph treated as a reason to stop tracking it. There are no
-exceptions today.
+from a call graph treated as a reason to stop tracking it. The exceptions
+are the two cosign advisories of the cache signer listed below.
 
 The release gate covers the source dependency manifests. The images are
 scanned by Grype in CI on every change to `main`, not again at release
@@ -341,6 +342,8 @@ Current findings:
 | ID | Package | Classification | Reason |
 |---|---|---|---|
 | GO-2026-6094 | `github.com/google/cel-go` v0.29.2 (fixed in v0.30.0 according to the Go vulnerability database; the GitHub advisory GHSA-gcjh-h69q-9w9g lists v0.29.0, so Grype does not report it), indirect through `k8s.io/apiserver` and controller-runtime's metrics authorization | unreachable | The vulnerable symbols (`ext.NativeTypes`, `ext.ParseStructTag`) are not called: `govulncheck` reports no affected code, and OSV-Scanner's Go call analysis classifies it as uncalled, which does not fail the scan. cel-go stays at the version Kubernetes pins; it is upgraded with the Kubernetes dependencies. |
+| GO-2026-6225 | cosign v3.1.3 (`signer/cosign`), its Azure Container Registry credential helper | exception, review by 2027-01-31 | The helper can send Azure credentials from `AZURE_*` variables to registries that are not Azure. The chart refuses `azurekms://` keys and `AZURE_*` variables for the signer, so there are none to send. No fixed cosign release exists. |
+| GO-2026-5932 | `golang.org/x/crypto/openpgp`, through cosign (`signer/cosign`) | exception, review by 2027-01-31 | Deprecated and unmaintained. The signer signs with a cosign or KMS key and never reads or verifies OpenPGP data. No fixed version exists. |
 
 ## Application artifacts
 
@@ -637,6 +640,11 @@ the `SpinCompiledCache` record. With the feature enabled the chart adds:
 | cache manager | `spincompiledcaches/status` | get, patch | release namespace |
 | cache manager | `leases` | create; get, update on its own Lease | release namespace |
 | cache manager | core and `events.k8s.io` `events` | create, patch | release namespace |
+| cache signer | `swiftsandboxes` | get | cluster |
+| cache signer | `spincompiledcaches` | get, list, watch | release namespace |
+| cache signer | `spincompiledcaches/status` | get, patch | release namespace |
+| cache signer | `leases` | create; get, update on its own Lease | release namespace |
+| cache signer | core `events` | create, patch | release namespace |
 
 `hack/check_chart_policy.py` ties each rule set to the ServiceAccount
 allowed to hold it, so the controller cannot be granted the cache manager's

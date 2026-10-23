@@ -313,3 +313,58 @@ func TestAppCondition(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckRecord(t *testing.T) {
+	s := Settings{Namespace: "kubeswift-spin-system", Repository: "registry.example.com/cache", Architecture: "amd64",
+		Runtimes: []string{"registry.example.com/runtime@sha256:" + strings.Repeat("2", 64)}}
+	good := func() *cachev1alpha1.SpinCompiledCache {
+		rec := &cachev1alpha1.SpinCompiledCache{Spec: cachev1alpha1.SpinCompiledCacheSpec{
+			Namespace: "team-a", Source: "registry.example.com/app@sha256:" + strings.Repeat("1", 64),
+			Runtime: s.Runtimes[0], Architecture: "amd64", Repository: s.NamespaceRepository("team-a")}}
+		rec.Name = IdentityOf(rec).RecordName()
+		return rec
+	}
+	if err := s.CheckRecord(good()); err != nil {
+		t.Fatalf("good record refused: %v", err)
+	}
+	cases := map[string]func(*cachev1alpha1.SpinCompiledCache){
+		"other name":       func(r *cachev1alpha1.SpinCompiledCache) { r.Name = "spincc-1" },
+		"other repository": func(r *cachev1alpha1.SpinCompiledCache) { r.Spec.Repository = s.NamespaceRepository("team-b") },
+		"runtime not allowed": func(r *cachev1alpha1.SpinCompiledCache) {
+			r.Spec.Runtime = "registry.example.com/other@sha256:" + strings.Repeat("3", 64)
+		},
+		"architecture": func(r *cachev1alpha1.SpinCompiledCache) { r.Spec.Architecture = "riscv64" },
+		// cosign splits -a values on commas: this source would override the
+		// namespace and source claims.
+		"claim injection": func(r *cachev1alpha1.SpinCompiledCache) {
+			r.Spec.Source = "reg.example/app,spin.kubeswift.io/namespace=victim@sha256:" + strings.Repeat("1", 64)
+		},
+		"tagged source": func(r *cachev1alpha1.SpinCompiledCache) {
+			r.Spec.Source = "registry.example.com/app:v1@sha256:" + strings.Repeat("1", 64)
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := good()
+			mutate(rec)
+			if name != "other name" {
+				rec.Name = IdentityOf(rec).RecordName()
+			}
+			if err := s.CheckRecord(rec); err == nil {
+				t.Fatal("record accepted")
+			}
+		})
+	}
+}
+
+func TestValidClaims(t *testing.T) {
+	if err := ValidClaims(map[string]string{ClaimSource: "a,b=c"}); err == nil {
+		t.Fatal("a claim value with a comma accepted")
+	}
+	if err := ValidClaims(map[string]string{ClaimSource: strings.Repeat("a", 257)}); err == nil {
+		t.Fatal("a long claim value accepted")
+	}
+	if err := ValidClaims(map[string]string{ClaimCompiler: "kubeswift-spin-cache-signer/v0.2.0-rc.1+abc"}); err != nil {
+		t.Fatal(err)
+	}
+}

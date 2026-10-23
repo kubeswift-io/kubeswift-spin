@@ -34,6 +34,8 @@ func TestParseCompileArgs(t *testing.T) {
 		"positional":        append(append([]string(nil), ok...), "up"),
 		"space separated":   {"--source", testSource, ok[1], ok[2]},
 		"source whitespace": {"--source=ghcr.io/org/app @sha256:1111111111111111111111111111111111111111111111111111111111111111", ok[1], ok[2]},
+		"source with comma": {"--source=ghcr.io/org/app,spin.kubeswift.io/namespace=x@sha256:1111111111111111111111111111111111111111111111111111111111111111", ok[1], ok[2]},
+		"uppercase source":  {"--source=ghcr.io/Org/app@sha256:1111111111111111111111111111111111111111111111111111111111111111", ok[1], ok[2]},
 	} {
 		if _, err := parseCompileArgs(args); err == nil {
 			t.Errorf("%s: accepted %q", name, args)

@@ -327,6 +327,10 @@ Setting the namespace label asserts, for that namespace:
   and replace verified cache entries of any namespace on that node with
   native code.
 - No principal other than the platform can write `swiftsandboxes/status`.
+- No principal other than the platform can create, update, patch or delete
+  ConfigMaps or SwiftKernels. The launcher runs what the sandbox's intent
+  ConfigMap and kernel say, not what its spec says, and the signer checks
+  only the spec.
 - Cache artifacts are readable only with that namespace's own pull
   credential, scoped to `<repository>/<namespace>/**`, and the registry
   denies anonymous reads. Compiled code reveals as much as the application.

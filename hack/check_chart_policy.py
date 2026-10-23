@@ -70,6 +70,17 @@ EXPECTED = {
         {"apiGroups": [""], "resources": ["events"], "verbs": ["create", "patch"]},
         {"apiGroups": ["events.k8s.io"], "resources": ["events"], "verbs": ["create", "patch"]},
     ]),
+    # The cache signer reads compiler sandboxes one at a time.
+    "cache-signer": norm([
+        {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftsandboxes"], "verbs": ["get"]},
+    ]),
+    # The signer's records, Lease and Events, in the release namespace.
+    "cache-signer-records": norm([
+        {"apiGroups": ["spin.kubeswift.io"], "resources": ["spincompiledcaches"], "verbs": ["get", "list", "watch"]},
+        {"apiGroups": ["spin.kubeswift.io"], "resources": ["spincompiledcaches/status"], "verbs": ["get", "patch"]},
+        {"apiGroups": ["coordination.k8s.io"], "resources": ["leases"], "verbs": ["get", "create", "update"]},
+        {"apiGroups": [""], "resources": ["events"], "verbs": ["create", "patch"]},
+    ]),
 }
 
 # Which component's ServiceAccount may be bound to each rule set: the
@@ -78,19 +89,22 @@ EXPECTED = {
 ALLOWED_COMPONENTS = {
     "controller": {"controller"},
     "leader-election": {"controller"},
-    "metrics-auth": {"controller", "cache-manager"},
+    "metrics-auth": {"controller", "cache-manager", "cache-signer"},
     "metrics-reader": set(),
     "compiled-cache-reader": {"controller"},
     "compiled-cache-namespaces": {"controller"},
     "cache-manager": {"cache-manager"},
     "cache-manager-records": {"cache-manager"},
+    "cache-signer": {"cache-signer"},
+    "cache-signer-records": {"cache-signer"},
 }
 
 # The kind each approved rule set must have: leader election is confined to
 # the release namespace; everything else is cluster-wide by design.
 EXPECTED_KIND = {"controller": "ClusterRole", "leader-election": "Role", "metrics-auth": "ClusterRole", "metrics-reader": "ClusterRole",
                  "compiled-cache-reader": "Role", "compiled-cache-namespaces": "ClusterRole",
-                 "cache-manager": "ClusterRole", "cache-manager-records": "Role"}
+                 "cache-manager": "ClusterRole", "cache-manager-records": "Role",
+                 "cache-signer": "ClusterRole", "cache-signer-records": "Role"}
 
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
 errors = []
@@ -102,7 +116,11 @@ pod_accounts = {d["spec"]["template"]["spec"].get("serviceAccountName") for d in
 
 
 def component(dep):
-    """The component a Deployment runs: its manager --mode."""
+    """The component a Deployment runs: its component label, else its
+    manager --mode."""
+    label = dep["metadata"].get("labels", {}).get("app.kubernetes.io/component")
+    if label == "cache-signer":
+        return label
     for c in dep["spec"]["template"]["spec"]["containers"]:
         for a in c.get("args", []):
             if a.startswith("--mode="):
@@ -182,6 +200,19 @@ for d in docs:
             errors.append("Deployment: uses host namespaces")
         if any(v.get("hostPath") for v in pod.get("volumes", []) or []):
             errors.append("Deployment: mounts a hostPath volume")
+        # Only the cache signer holds credentials: the signing key and the
+        # registry credential that pushes signatures.
+        if component(d) != "cache-signer":
+            for v in pod.get("volumes", []) or []:
+                if v.get("secret") or any(s.get("secret") for s in (v.get("projected") or {}).get("sources", []) or []):
+                    errors.append(f"Deployment/{name}: mounts Secret volume {v.get('name')}; only the cache signer may")
+            for c in pod["containers"] + (pod.get("initContainers") or []):
+                for e in c.get("env", []) or []:
+                    if (e.get("valueFrom") or {}).get("secretKeyRef"):
+                        errors.append(f"Deployment/{name}: container {c['name']} reads Secret into {e.get('name')}; only the cache signer may")
+                for ef in c.get("envFrom", []) or []:
+                    if ef.get("secretRef"):
+                        errors.append(f"Deployment/{name}: container {c['name']} loads a Secret with envFrom; only the cache signer may")
     if kind == "SpinAppExecutor":
         if d["spec"].get("createDeployment") is not False:
             errors.append(f"SpinAppExecutor/{name}: createDeployment is not false")

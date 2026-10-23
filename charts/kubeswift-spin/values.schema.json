@@ -429,6 +429,81 @@
               "maximum": 64
             }
           }
+        },
+        "signer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^$|^sha256:[a-f0-9]{64}$"
+                },
+                "pullPolicy": {
+                  "type": "string",
+                  "enum": [
+                    "Always",
+                    "IfNotPresent",
+                    "Never"
+                  ]
+                }
+              }
+            },
+            "key": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "secretName": {
+                  "type": "string"
+                },
+                "kmsRef": {
+                  "type": "string",
+                  "pattern": "^$|^(awskms|gcpkms|azurekms|hashivault)://.+$"
+                }
+              }
+            },
+            "registryCredentialsSecret": {
+              "type": "string"
+            },
+            "extraEnv": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "serviceAccountAnnotations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "logLevel": {
+              "type": "string",
+              "enum": [
+                "debug",
+                "info",
+                "error"
+              ]
+            },
+            "extraArgs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
         }
       }
     }

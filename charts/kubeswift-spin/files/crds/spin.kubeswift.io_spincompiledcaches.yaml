@@ -96,14 +96,14 @@ spec:
                   the application, pinned by digest. Its Spin and Wasmtime versions and
                   engine configuration decide whether a cache entry can be used.
                 maxLength: 256
-                pattern: ^[^@\s]+@sha256:[a-f0-9]{64}$
+                pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$
                 type: string
               source:
                 description: |-
                   Source is the Spin application, pinned by digest (repository@sha256:...).
                   It is a signed claim value, so at most 256 characters.
                 maxLength: 256
-                pattern: ^[^@\s]+@sha256:[a-f0-9]{64}$
+                pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$
                 type: string
             required:
             - architecture

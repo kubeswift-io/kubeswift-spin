@@ -1,0 +1,278 @@
+{{- if .Values.compiledCache.enabled }}
+{{- $name := printf "%s-cache-signer" (include "kubeswift-spin.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- $s := .Values.compiledCache.signer }}
+{{- if and (not $s.key.secretName) (not $s.key.kmsRef) }}
+{{- fail "compiledCache.signer.key.secretName or compiledCache.signer.key.kmsRef is required" }}
+{{- end }}
+{{- if and $s.key.secretName $s.key.kmsRef }}
+{{- fail "set only one of compiledCache.signer.key.secretName and compiledCache.signer.key.kmsRef" }}
+{{- end }}
+{{- /* cosign v3.1.3's Azure registry credential helper can send AZURE_*
+credentials to registries that are not Azure (GO-2026-6225, no fixed
+release), so the signer is never given them. */}}
+{{- if hasPrefix "azurekms://" $s.key.kmsRef }}
+{{- fail "compiledCache.signer.key.kmsRef: azurekms:// is not supported until cosign fixes GO-2026-6225; use a key Secret or another KMS" }}
+{{- end }}
+{{- range $s.extraEnv }}
+{{- if hasPrefix "AZURE_" .name }}
+{{- fail "compiledCache.signer.extraEnv: AZURE_* variables are not supported until cosign fixes GO-2026-6225" }}
+{{- end }}
+{{- end }}
+# The compiled-cache signer (ADR 0014): the only holder of the signing key.
+# It reads records and compiler sandboxes and writes only status.signature.
+# The key and registry credentials are mounted volumes; it has no Secret RBAC.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+  {{- with $s.serviceAccountAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  # Compiler sandboxes, read one at a time by name.
+  - apiGroups: ["sandbox.kubeswift.io"]
+    resources: ["swiftsandboxes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["spin.kubeswift.io"]
+    resources: ["spincompiledcaches"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["spin.kubeswift.io"]
+    resources: ["spincompiledcaches/status"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["kubeswift-spin-cache-signer.spin.kubeswift.io"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache-signer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "kubeswift-spin.name" . }}-cache-signer
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "kubeswift-spin.name" . }}-cache-signer
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: cache-signer
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: cache-signer
+          image: {{ include "kubeswift-spin.imageRef" (list $s.image .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ $s.image.pullPolicy }}
+          args:
+            - --leader-elect
+            - --leader-election-namespace={{ .Release.Namespace }}
+            - --health-probe-bind-address=:8081
+            {{- if .Values.metrics.enabled }}
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --metrics-secure={{ .Values.metrics.secure }}
+            {{- else }}
+            - --metrics-bind-address=0
+            {{- end }}
+            {{- include "kubeswift-spin.compiledCacheArgs" . | nindent 12 }}
+            - --compiled-cache-max-size={{ .Values.compiledCache.compiler.maxSize }}
+            - --compiled-cache-max-entries={{ .Values.compiledCache.compiler.maxEntries }}
+            {{- if $s.key.kmsRef }}
+            - --key={{ $s.key.kmsRef }}
+            {{- else }}
+            - --key=/var/run/kubeswift-spin-signer/key/cosign.key
+            {{- end }}
+            - --zap-log-level={{ $s.logLevel }}
+            {{- range $s.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          env:
+            - name: HOME
+              value: /tmp
+            - name: DOCKER_CONFIG
+              value: /var/run/kubeswift-spin-signer/docker
+            {{- if $s.key.secretName }}
+            - name: COSIGN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s.key.secretName }}
+                  key: cosign.password
+            {{- end }}
+            {{- with $s.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+            - name: probes
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probes
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml $s.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: registry
+              mountPath: /var/run/kubeswift-spin-signer/docker
+              readOnly: true
+            {{- if $s.key.secretName }}
+            - name: key
+              mountPath: /var/run/kubeswift-spin-signer/key
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: registry
+          secret:
+            secretName: {{ required "compiledCache.signer.registryCredentialsSecret is required" $s.registryCredentialsSecret }}
+            defaultMode: 0440
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+        {{- if $s.key.secretName }}
+        - name: key
+          secret:
+            secretName: {{ $s.key.secretName }}
+            defaultMode: 0440
+            items:
+              - key: cosign.key
+                path: cosign.key
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if .Values.metrics.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache-signer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "kubeswift-spin.name" . }}-cache-signer
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- if .Values.metrics.secure }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-metrics-auth
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubeswift-spin.fullname" . }}-metrics-auth
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}
