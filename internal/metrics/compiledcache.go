@@ -18,7 +18,7 @@ var (
 	}, []string{"result"})
 	CompiledCacheLookups = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "kubeswift_spin_compiled_cache_lookups_total",
-		Help: "Replicas created for SpinApps that asked for a compiled cache, by result (hit: a signed cache was attached; miss: none yet; unplaced: a warm replica whose pool's nodes do not all hold the cache yet; skipped: the SpinApp cannot have one).",
+		Help: "Replicas created for SpinApps that asked for a compiled cache, by result (hit: a signed cache was attached; miss: none yet; unplaced: a warm replica whose pool's nodes do not all hold the cache yet; cold: a cold replica, which gets the cache only with a cold fetch timeout; skipped: the SpinApp cannot have one).",
 	}, []string{"result"})
 	CompiledCacheAttachments = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "kubeswift_spin_compiled_cache_attachments_total",

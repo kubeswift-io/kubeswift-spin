@@ -277,6 +277,11 @@
             "type": "string",
             "pattern": "^([0-9]+(\\.[0-9]+)?(ms|s|m))+$",
             "description": "spin.kubeswift.io/max-drain-period: the longest drain period the executor's SpinApps may set, 0s to 10m (checked by the controller). Unset allows KubeSwift's 10m."
+          },
+          "compiledCache": {
+            "type": "string",
+            "enum": ["enabled", "disabled"],
+            "description": "spin.kubeswift.io/compiled-cache: enabled gives the executor's SpinApps signed compiled Wasmtime caches when the platform enables them (compiledCache.enabled)."
           }
         }
       }

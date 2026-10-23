@@ -256,8 +256,11 @@ another namespace, application, runtime or architecture.
   claims above and `requirePlatformVerification`. `fetchTimeout` is `0s`
   for replicas checked out of a warm pool (the placement prepares the
   nodes, so a replica uses the cache only if its node already holds it and
-  never waits) and a small bound (a few seconds, configurable) for cold
-  replicas, so a slow registry never costs more than the cache saves.
+  never waits). Cold replicas get the cache only when the platform sets a
+  cold fetch timeout (default none): KubeSwift verifies the signature with
+  the registry on every cold start and fetches the cache on a new node
+  within that timeout, which on the lab took longer than 3 seconds and,
+  for small applications, costs more than the compilation it saves.
   The controller also sets the runtime contract variables that name the
   expected source, runtime and architecture.
 - The decoration is applied per replica outside the revision fingerprint:

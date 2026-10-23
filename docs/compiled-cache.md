@@ -22,7 +22,13 @@ current revision does.
 | SpinApp `CompiledCache` condition and Events | implemented |
 | Compilation in a SwiftSandbox and KubeSwift output export | implemented |
 | Signing and verification policy | implemented |
-| Placement on warm-pool nodes and mounting in replicas | implemented; KVM lab validation pending |
+| Placement on warm-pool nodes and mounting in replicas | implemented |
+
+Validated on the amd64 KVM lab with KubeSwift v0.19.1
+([test/e2e](../test/e2e/README.md#compiled-caches),
+[performance](performance.md#compiled-wasmtime-cache-kubeswift-v0191-2026-10-23)).
+arm64 follows the same path but has not been run on arm64 hardware: do
+not rely on compiled caches there until it has.
 
 ## Requirements
 
@@ -89,7 +95,7 @@ compiledCache:
   retention: 24h
   maxRecordsPerNamespace: 32
   pullSecretName: cache-read  # in every enabled namespace; reads only its cache repository
-  fetchTimeout: 3s            # most a cold replica waits for its cache
+  fetchTimeout: 0s            # cold replicas get no cache (the default); see Replicas
 ```
 
 This installs the `SpinCompiledCache` CRD and the cache manager, a second
@@ -323,7 +329,7 @@ Replicas created while the record is trusted get one more entry in
   mountPath: /opt/kubeswift-spin-cache
   layout: unpacked
   optional: true
-  fetchTimeout: 0s            # 3s (compiledCache.fetchTimeout) for a cold replica
+  fetchTimeout: 0s            # compiledCache.fetchTimeout for a cold replica, if set
   pullSecretRef: {name: cache-read}
   requirePlatformVerification: true
   claims:
@@ -338,15 +344,26 @@ They also get `KUBESWIFT_SPIN_CACHE_SOURCE`, `KUBESWIFT_SPIN_CACHE_RUNTIME`
 and `KUBESWIFT_SPIN_CACHE_ARCHITECTURE`, the identity the cache must have.
 A replica from a warm pool gets the cache only once the pool's placement
 reports every node prepared (lookup result `unplaced` until then), uses it
-only if its node holds it, and never waits; a cold replica waits at most
-`fetchTimeout`. KubeSwift v0.19.1 does not accept the readiness of a warm
-replica whose optional artifact it skipped after the checkout
+only if its node holds it, and never waits. KubeSwift v0.19.1 does not
+accept the readiness of a warm replica whose optional artifact it skipped
+after the checkout
 ([upstream proposal](upstream/kubeswift-redispatch-readiness.md)); a
 warm replica that carried the cache, had it skipped and is not ready a
 minute after the checkout is replaced, and the SpinApp's new replicas
-start without the cache for 30 minutes (`DeliveryFailed`). The
-artifact and the variables are not part of the replica's revision: a cache
-that becomes available, or goes away, never replaces running replicas.
+start without the cache for 30 minutes (`DeliveryFailed`).
+
+A replica that does not come from a warm pool gets the cache only when
+`compiledCache.fetchTimeout` is above `0s` (the default is `0s`), and then
+waits at most that long. KubeSwift verifies the signature with the
+registry on every cold start and, on a node without the entry, fetches
+it, all within `fetchTimeout` counted from the sandbox's creation. On the
+KVM lab a first fetch did not finish within 3 seconds, and with 20
+seconds the cache was mounted; for small applications the verification
+costs more than the compilation it saves.
+
+The artifact and the variables are not part of the replica's revision: a
+cache that becomes available, or goes away, never replaces running
+replicas.
 
 ### Runtime mount contract
 

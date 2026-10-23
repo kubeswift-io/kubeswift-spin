@@ -25,6 +25,9 @@ type Result struct {
 	Metrics    map[string]float64 `json:"metrics"`
 	// LauncherLines counts launcher log lines per pattern (-launcher-logs).
 	LauncherLines map[string]int `json:"launcherLines,omitempty"`
+	// Artifacts is the last state and reason KubeSwift reported for each of
+	// the sandbox's artifacts, such as "wasmtime-cache": "Mounted/Cached".
+	Artifacts map[string]string `json:"artifacts,omitempty"`
 }
 
 // Mark names. Every mark is the first time the benchmark observed the
@@ -39,6 +42,9 @@ const (
 	markPodReady       = "pod.Ready"
 	markEndpointsReady = "endpointslice.ready"
 	markDispatch       = "launcher.dispatch"
+	// markArtifactDecided is the first time every artifact of the sandbox
+	// has a state past resolution: Dispatched, Mounted, Skipped or Failed.
+	markArtifactDecided = "sandbox.artifactsDecided"
 )
 
 // metric is the time from one mark to another; an empty From means Start.
@@ -58,6 +64,8 @@ var metrics = []metric{
 	{"slot_claim", markSandboxAdded, markCheckedOut, "SwiftSandbox created -> warm slot checked out (warm only)"},
 	{"create_to_claim", "", markCheckedOut, "SpinApp create -> warm slot checked out (warm only)"},
 	{"claim_to_dispatch", markCheckedOut, markDispatch, "warm slot checked out -> workload handed to the guest agent (warm, -launcher-logs)"},
+	{"claim_to_artifact_decision", markCheckedOut, markArtifactDecided, "warm slot checked out -> KubeSwift decided every artifact (dispatched, mounted or skipped; warm runs with artifacts)"},
+	{"create_to_artifact_decision", "", markArtifactDecided, "SpinApp create -> KubeSwift decided every artifact (runs with artifacts)"},
 	{"claim_to_direct_http", markCheckedOut, markDirectOK, "warm slot checked out -> first direct response (warm only)"},
 	{"dispatch_to_direct_http", markDispatch, markDirectOK, "workload handed to the guest agent -> first direct response (warm, -launcher-logs)"},
 	{"sandbox_workload_ready", markSandboxAdded, markWorkloadReady, "SwiftSandbox created -> SwiftSandbox WorkloadReady=True"},

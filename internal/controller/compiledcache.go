@@ -204,6 +204,8 @@ func (r *SpinAppReconciler) decorateCache(sb *sandboxv1alpha1.SwiftSandbox, cv c
 		return "skipped"
 	case cv.artifact == "":
 		return "miss"
+	case !r.CacheDelivery.Delivers(sb):
+		return "cold"
 	case sb.Spec.PoolRef != nil && !cv.preparedPools[sb.Spec.PoolRef.Name]:
 		// KubeSwift v0.19.1 re-dispatches a warm checkout whose optional
 		// artifact is not on the node under a new workload id, and then

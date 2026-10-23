@@ -1,0 +1,27 @@
+apiVersion: core.spinkube.dev/v1alpha1
+kind: SpinApp
+metadata:
+  name: multi-component
+spec:
+  # Pin the image by digest to get a compiled cache (docs/compiled-cache.md).
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/multi-component:v0.2.0
+  executor: kubeswift
+  replicas: 1
+  variables:
+    - name: app_version
+      value: "2.0.0"
+  runtimeConfig:
+    keyValueStores:
+      # Per replica, in guest memory, as in the key-value example.
+      - name: default
+        type: spin
+        options:
+          - name: path
+            value: /var/lib/kubeswift-spin/state/kv.db
+  checks:
+    readiness:
+      httpGet:
+        path: /healthz
+        httpHeaders: []
+      initialDelaySeconds: 1
+      periodSeconds: 2

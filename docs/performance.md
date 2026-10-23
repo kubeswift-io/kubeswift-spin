@@ -82,9 +82,12 @@ v0.16.3 also changed the cold start path (the NetworkPolicy is created
 before the launcher pod, and a node's runtime image cache is authorized per
 repository, which made the first cold start per node read the image's
 layers once); after that first start, these runs show no change in startup.
-The Wasmtime cache diagnostic below, repeated with 10 warm runs, gave p50
-values of 0.385 seconds to the first direct response, 0.487 to `Available`
-and 1.444 to the first Service response, close to its 30-run result.
+A Wasmtime cache diagnostic (a runtime image prepared outside this
+project with a cache entry for hello-http, readiness startup `always`),
+repeated with 10 warm runs, gave p50 values of 0.385 seconds to the first
+direct response, 0.487 to `Available` and 1.444 to the first Service
+response, close to its earlier 30-run result. The supported mechanism is
+the compiled cache below.
 
 ### KubeSwift v0.16.2 (2026-10-11)
 
@@ -341,25 +344,51 @@ With `never`, a fast replica was ready 0.46 seconds after it first
 answered, at its periodic probe. No replica received Service traffic
 before its endpoint was ready.
 
-## Wasmtime compilation cache (diagnostic, not provided)
+## Compiled Wasmtime cache (KubeSwift v0.19.1, 2026-10-23)
 
 Spin compiles the application's WebAssembly with Wasmtime at every start
-unless Wasmtime's compilation cache already holds the result. In a fresh
-sandbox the cache is empty, and compiling hello-http took about 410 ms of
-the warm path. A runtime image prepared outside this project, holding a
-normally generated cache entry for hello-http, was measured as a
-diagnostic: with readiness startup (`always`), a local registry and that
-image, 30 warm runs gave a first direct response of 0.378 / 0.454 seconds
-(p50 / p95), `Available` of 0.462 / 0.566 seconds and a first Service
-response of 1.448 / 1.869 seconds, against 1.47, 1.54 and 2.20 seconds
-(p50) for the published runtime image pulling from `ghcr.io`.
+unless Wasmtime's cache holds the result. kubeswift-spin can deliver a
+signed, precompiled cache to warm-pool replicas
+([compiled-cache.md](compiled-cache.md)). Measured on the KVM lab with a
+v0.2.0 development build: hello-http from the lab registry, 30 warm starts
+per case on one node with `make perf-startup` (`PERF_LAUNCHER_LOGS=1`,
+`PERF_COMPILED_CACHE=1` for B and C), readiness check with
+`initialDelaySeconds: 1` and `periodSeconds: 2`:
 
-This is not a supported mechanism and kubeswift-spin does not provide one.
-A cache entry is executable code that Wasmtime maps without checking it
-against the WebAssembly it was compiled from, so a shared cache has to be
-produced by a trusted compiler, protected against modification, keyed by
-the application digest and the runtime and CPU, and delivered read-only.
-Cross-node reuse was not tested.
+- A: no cache;
+- B: the cache is trusted but its placement is not prepared (blocked by a
+  ResourceQuota), so warm replicas get no cache;
+- C: the placement is prepared and every replica mounted the cache
+  (`Mounted/Cached`, 30 of 30).
+
+| Milliseconds, p50 / p95 | A | B | C |
+|---|---:|---:|---:|
+| SpinApp create to slot claim | 73 / 109 | 77 / 109 | 85 / 125 |
+| claim to artifact decision | | | 19 / 30 |
+| dispatch to first direct response | 775 / 1296 | 870 / 1447 | 471 / 1069 |
+| create to first direct response | 848 / 1360 | 940 / 1505 | 538 / 1149 |
+| create to `Available` | 1144 / 3146 | 1154 / 3157 | 1146 / 2259 |
+| create to first Service response | 2213 / 3326 | 2550 / 3315 | 2555 / 2977 |
+
+The cache removes about 300 ms (39%) of the time from dispatch to the
+first response. `Available` does not change: the readiness check's first
+probe after one second and its two-second period decide it. B takes the
+same path as A; the difference is within the run-to-run variation of the
+lab (the p90 of A's dispatch to first response was 1152 ms). The Service
+response follows the EndpointSlice and kube-proxy, which vary by about a
+second here.
+
+With KubeSwift v0.19.1, a warm replica that carries the cache onto a node
+without it does not become ready (10 of 10 runs before kubeswift-spin
+gated delivery on the placement; see
+[upstream proposal](upstream/kubeswift-redispatch-readiness.md)).
+
+Compiling happens off the startup path. For six examples, from the start
+of compilation, in seconds (one-second resolution): the compiler guest
+ran after 4 to 7, packaged its output 3 to 5 later, KubeSwift exported it
+6 to 8 later, and the signer signed it 7 to 8 later: 21 to 27 in all. The
+record was Ready (the placement prepared on both pool nodes) 7 to 26
+seconds after signing; placements took 5 to 24 seconds from creation.
 
 ## Where the time goes
 

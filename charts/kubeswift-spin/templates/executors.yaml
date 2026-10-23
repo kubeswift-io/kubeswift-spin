@@ -14,6 +14,7 @@
 {{- with $e.readinessStartup }}{{ $_ := set $ann "spin.kubeswift.io/readiness-startup" . }}{{ end }}
 {{- with $e.drainPeriod }}{{ $_ := set $ann "spin.kubeswift.io/drain-period" . }}{{ end }}
 {{- with $e.maxDrainPeriod }}{{ $_ := set $ann "spin.kubeswift.io/max-drain-period" . }}{{ end }}
+{{- with $e.compiledCache }}{{ $_ := set $ann "spin.kubeswift.io/compiled-cache" . }}{{ end }}
 {{- with $e.nodeSelector }}
 {{- $pairs := list }}
 {{- range $k, $v := . }}{{ $pairs = append $pairs (printf "%s=%s" $k $v) }}{{ end }}

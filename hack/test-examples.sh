@@ -138,6 +138,17 @@ test_key_value() {
   expect_eq "key-value get deleted" "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3106/kv/greeting)" "404"
 }
 
+test_multi_component() {
+  start_app "$EX/multi-component/spin.toml" 3109 SPIN_VARIABLE_APP_VERSION=2.0.0 -- --state-dir "$TMP/multi-state"
+  expect_eq "multi-component hello" "$(curl -fsS http://127.0.0.1:3109/hello)" "Hello from Spin on KubeSwift"
+  local body
+  body="$(curl -fsS 'http://127.0.0.1:3109/info/x?y=1')"
+  expect_contains "multi-component info route" "$body" '"path":"/info/x"'
+  expect_contains "multi-component info variable" "$body" '"app_version":"2.0.0"'
+  expect_eq "multi-component kv put" "$(curl -s -o /dev/null -w '%{http_code}' -X PUT --data-binary 'v1' http://127.0.0.1:3109/kv/a)" "204"
+  expect_eq "multi-component kv get" "$(curl -fsS http://127.0.0.1:3109/kv/a)" "v1"
+}
+
 test_serverless_ai() {
   sed "s#http://127.0.0.1:8090#$UPSTREAM#" "$EX/serverless-ai/runtime-config.toml" >"$TMP/llm-runtime-config.toml"
   start_app "$EX/serverless-ai/spin.toml" 3107 -- --runtime-config-file "$TMP/llm-runtime-config.toml"
@@ -174,7 +185,7 @@ main() {
   (cd "$ROOT" && go build -o "$TMP/upstream" ./examples/tools/upstream)
   start_upstream
 
-  local all=(hello_http request_info outbound_http key_value serverless_ai mcp)
+  local all=(hello_http request_info outbound_http key_value serverless_ai mcp multi_component)
   local selected=("$@")
   [[ ${#selected[@]} -eq 0 ]] && selected=("${all[@]}")
   for t in "${selected[@]}"; do

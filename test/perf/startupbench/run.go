@@ -246,10 +246,23 @@ func (b *bench) sandboxName() string { return b.name() + "-0" }
 
 // recorder keeps the first time each mark was observed.
 type recorder struct {
-	mu      sync.Mutex
-	t0      time.Time
-	started bool
-	marks   map[string]float64
+	mu        sync.Mutex
+	t0        time.Time
+	started   bool
+	marks     map[string]float64
+	artifacts map[string]string
+}
+
+func (r *recorder) setArtifact(name, v string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.started {
+		return
+	}
+	if r.artifacts == nil {
+		r.artifacts = map[string]string{}
+	}
+	r.artifacts[name] = v
 }
 
 func (r *recorder) start() {
@@ -366,11 +379,12 @@ func (b *bench) once(parent context.Context, run string) (*Result, error) {
 	for k, v := range rec.marks {
 		marks[k] = v
 	}
+	arts := rec.artifacts
 	rec.mu.Unlock()
 	_, checkedOut := marks[markCheckedOut]
 	return &Result{
 		Run: run, Mode: b.c.mode, SpinApp: b.name(), Start: t0.UTC(), TimedOut: timedOut,
-		CheckedOut: checkedOut, Marks: marks, Metrics: computeMetrics(marks), LauncherLines: lines,
+		CheckedOut: checkedOut, Marks: marks, Metrics: computeMetrics(marks), LauncherLines: lines, Artifacts: arts,
 	}, nil
 }
 
@@ -520,6 +534,7 @@ func (b *bench) startWatches(ctx context.Context, rec *recorder, tg *target) err
 					rec.mark("sandbox.phase=" + p)
 				}
 				conditions("sandbox", u)
+				artifacts(rec, u)
 			}),
 		watchFrom(ctx,
 			func(ctx context.Context) (string, error) { return rvOf(pods.List(ctx, metav1.ListOptions{})) },
@@ -728,5 +743,34 @@ func (b *bench) waitWarmSlot(parent context.Context) error {
 			return fmt.Errorf("no warm slot in pool %s older than %s: %w", b.c.warmPool, b.c.minSlotAge, ctx.Err())
 		case <-time.After(time.Second):
 		}
+	}
+}
+
+// artifacts marks each artifact state KubeSwift reports, records the last
+// one in the result, and marks when every artifact is decided.
+func artifacts(rec *recorder, u *unstructured.Unstructured) {
+	list, _, _ := unstructured.NestedSlice(u.Object, "status", "artifacts")
+	if len(list) == 0 {
+		return
+	}
+	decided := true
+	for _, item := range list {
+		a, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := a["name"].(string)
+		state, _ := a["state"].(string)
+		reason, _ := a["reason"].(string)
+		rec.mark(fmt.Sprintf("sandbox.artifact.%s=%s", name, state))
+		rec.setArtifact(name, state+"/"+reason)
+		switch state {
+		case "Dispatched", "Mounted", "Skipped", "Failed":
+		default:
+			decided = false
+		}
+	}
+	if decided {
+		rec.mark(markArtifactDecided)
 	}
 }

@@ -46,7 +46,7 @@ ACTIONLINT := $(BIN)/actionlint
 CONTROLLER_GEN := $(BIN)/controller-gen
 SPIN := $(BIN)/spin
 
-EXAMPLE_DIRS := hello-http request-info outbound-http key-value serverless-ai experimental/mcp
+EXAMPLE_DIRS := hello-http request-info outbound-http key-value serverless-ai experimental/mcp multi-component
 EXAMPLE ?= hello-http
 EXAMPLE_REGISTRY ?= $(REGISTRY)/kubeswift-spin-examples
 EXAMPLE_TAG ?= $(VERSION)

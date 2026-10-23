@@ -46,8 +46,9 @@ running replicas on upgrade) say so under "Upgrade notes".
   `SwiftArtifactPlacement` per warm pool of a signed cache's consumers;
   records are `Ready` once every pool is prepared. New replicas get the
   signed cache as an optional, platform-verified artifact at
-  `/opt/kubeswift-spin-cache` (`fetchTimeout` 0s from a warm pool,
-  `compiledCache.fetchTimeout` when cold), read with
+  `/opt/kubeswift-spin-cache` (`fetchTimeout` 0s from a warm pool; cold
+  replicas only when `compiledCache.fetchTimeout` is set, default `0s`),
+  read with
   `compiledCache.pullSecretName`, outside the revision. The runtime
   entrypoint uses the mount only when it is read-only and its metadata
   matches, and drops `WASMTIME_CACHE_FILE` and `DISABLE_WASMTIME_CACHE`
