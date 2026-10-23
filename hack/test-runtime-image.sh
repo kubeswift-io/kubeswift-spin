@@ -304,7 +304,7 @@ if compile hello "localhost:$TLS_REG_PORT/hello-http@$hello_digest"; then
   wait_http http://127.0.0.1:3210/hello || fail "hello-http from the TLS registry"
   docker cp kss-test-tls-hello:/var/lib/kubeswift-spin/home/.cache/wasmtime "$TMP/runtime-cache" >/dev/null
   want="$(ls "$TMP/out-hello/cache/modules/"*/ | sort)"
-  got="$(ls "$TMP/runtime-cache/modules/"*/ | grep -E '^[A-Za-z0-9_-]{43}$' | sort)"
+  got="$(find "$TMP/runtime-cache/modules" -mindepth 2 -maxdepth 2 -type f -printf '%f\n' | grep -E '^[A-Za-z0-9_-]{43}$' | sort)"
   [[ -n "$want" && "$want" == "$got" ]] && ok "compile mode writes the key a normal start uses" || fail "compiled [$want], runtime [$got]"
 else
   cat "$TMP/compile-hello.log" >&2
