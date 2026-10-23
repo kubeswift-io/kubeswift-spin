@@ -7,20 +7,22 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## v0.2.0-rc1 (2026-10-23)
+## v0.2.0 (2026-10-23)
 
-First release candidate of v0.2.0, for evaluation of trusted compiled
-Wasmtime caches. With compiled caches disabled (the default) it behaves as
-v0.1.1, apart from the runtime image upgrade below.
+Adds trusted compiled Wasmtime caches (ADR 0014). With compiled caches
+disabled (the default) it behaves as v0.1.1, apart from the runtime image
+upgrade below.
 
 Compiled caches need KubeSwift v0.19.1 or later and the
 `kernels/sandbox:6.6.17` SwiftKernel or later in the namespaces that use
-them. They were validated on the KVM lab with KubeSwift v0.19.1, Spin
-Operator v0.6.1 and Spin v4.2.1 on linux/amd64
-(test/e2e/compiled-cache-e2e.sh, docs/performance.md), and have not run on
-arm64. The general KVM end-to-end test (test/e2e/kvm-e2e.sh) last ran on
-KubeSwift v0.16.3, for v0.1.0; this candidate is the build to run it on
-v0.19.1.
+them, and have run on linux/amd64 only. The v0.2.0-rc1 release artifacts,
+which v0.2.0 matches except for documentation and version strings, were
+validated on the KVM lab with KubeSwift v0.19.1, Spin Operator v0.6.1 and
+Spin v4.2.1 (docs/compatibility.md): the upgrade from v0.1.1, the KVM
+end-to-end test (every phase except the private registry phase), the
+compiled-cache end-to-end test, and the release-time startup benchmark
+against v0.1.1 on the same cluster, which showed no regression
+(docs/performance.md).
 
 ### Added
 

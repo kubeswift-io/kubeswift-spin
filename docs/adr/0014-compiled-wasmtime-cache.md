@@ -1,6 +1,6 @@
 # 0014: Trusted compiled Wasmtime cache delivered as a KubeSwift artifact
 
-Status: accepted; implemented in kubeswift-spin v0.2.0-rc1. See
+Status: accepted; implemented in kubeswift-spin v0.2.0. See
 [compiled-cache.md](../compiled-cache.md) for the operator documentation.
 
 ## Context

@@ -1,0 +1,31 @@
+mode cold: 10 runs
+metric (ms)                      n      min      p50      p90      p95      max     mean   stdev
+sandbox_created                 10       17       25       43       45       47       28      10
+direct_http                     10     6959     7761     8243     8603     8964     7784     555
+service_http                    10     9203     9995    11385    11699    12013    10291     827
+available                       10     8460     9425     9707    10159    10612     9386     586
+pod_ready                       10     8743     9639     9875    10364    10852     9610     571
+endpointslice_ready             10     8753     9652     9886    10377    10867     9622     571
+sandbox_workload_ready          10     8422     9391     9647    10112    10576     9346     585
+direct_to_available             10     1444     1645     1674     1684     1694     1602      85
+available_to_pod_ready          10      155      203      328      356      384      224      75
+pod_ready_to_endpointslice      10        4       12       15       15       15       12       3
+endpointslice_to_service_http   10      232      449     1004     1680     2356      670     633
+
+mode warm: 10 runs
+metric (ms)                      n      min      p50      p90      p95      max     mean   stdev
+sandbox_created                 10       18       24       32       45       57       27      11
+direct_http                     10     1452     1555     1763     1764     1766     1579     106
+service_http                    10     3302     3309     3313     3313     3314     3309       4
+available                       10     3104     3135     3150     3164     3179     3135      21
+pod_ready                       10     3120     3139     3173     3178     3183     3143      20
+endpointslice_ready             10     3128     3148     3176     3181     3186     3150      19
+slot_claim                      10       34       42       52       54       56       43       8
+create_to_claim                 10       53       66       82       98      114       71      17
+claim_to_direct_http            10     1384     1485     1686     1695     1704     1508     104
+sandbox_workload_ready          10     3070     3101     3113     3114     3115     3098      13
+direct_to_available             10     1338     1584     1639     1661     1682     1557     110
+available_to_pod_ready          10       -7        5       17       21       25        8       8
+pod_ready_to_endpointslice      10        2        8       11       12       13        7       4
+endpointslice_to_service_http   10      117      160      181      182      184      158      20
+

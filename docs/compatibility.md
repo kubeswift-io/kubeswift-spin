@@ -7,7 +7,7 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)) |
+| kubeswift-spin | v0.2.0, v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); v0.2.0 differs from v0.2.0-rc1 only in documentation and version strings |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
@@ -192,8 +192,14 @@ the tag v0.2.0-rc1.
   the SpinApp was `Available` again 26.7 seconds after its health check
   target recovered, including the replacement backoff. Phase 6
   (private registry) was not run: it pushes a test runtime image from the
-  machine running the script to a scratch registry, and none was used for
-  this run.
+  machine running the script to a scratch registry, and the lab registry
+  accepts pushes only from inside the cluster (public registries such as
+  `ttl.sh` were deliberately not used). The private registry path
+  last ran on KVM for v0.1.0. Since then its translation moved unchanged
+  into a function (`translate.RegistryAuth`), the entrypoint's handling of
+  the credentials did not change, and the unit test of the rendered secret
+  files (`TestImagePullSecretsBecomeSecretFiles`) is the same as in v0.1.0
+  and passes.
 - `test/e2e/compiled-cache-e2e.sh` with the release's chart, images and
   example artifacts (and request-info copied to the lab registry as
   `request-info-b`) passed every check (98) of all four phases: the seven
@@ -202,6 +208,9 @@ the tag v0.2.0-rc1.
   development run below, including the signature with another key
   (`VerificationFailed`). The controller logged no error and replaced no
   replica for `compiled_cache_not_ready`.
+- Release-time startup benchmark: v0.1.1 and then v0.2.0-rc1 on the same
+  node, 10 cold and 10 warm runs each, with no regression flagged (see
+  [performance.md](performance.md#release-time-benchmark-of-v020-kubeswift-v0191-2026-10-23)).
 
 ### Compiled caches on KubeSwift v0.19.1
 

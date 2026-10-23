@@ -62,6 +62,32 @@ Spin's own tracing; that build is not part of the repository.
 
 ## Current results
 
+### Release-time benchmark of v0.2.0 (KubeSwift v0.19.1, 2026-10-23)
+
+The lab cluster with KubeSwift v0.19.1 and Spin Operator v0.6.1, one KVM
+node, the shipped hello-http manifest with its published v0.2.0-rc1
+artifact (pinned by digest, from ghcr.io), 10 cold and 10 warm runs each:
+the released v0.1.1 chart (runtime `spin-4.2.1-r2`) as the baseline, then
+the released v0.2.0-rc1 chart (runtime `spin-4.2.1-r3`, compiled caches
+off) on the same node, one after the other. v0.2.0 differs from
+v0.2.0-rc1 only in documentation and version strings.
+
+| Milliseconds from SpinApp creation | v0.1.1 p50 | v0.2.0-rc1 p50 | v0.1.1 p95 | v0.2.0-rc1 p95 |
+|---|---:|---:|---:|---:|
+| warm: first direct response | 1555 | 1588 | 1764 | 1702 |
+| warm: `Available` | 3135 | 3143 | 3164 | 3171 |
+| warm: first Service response | 3309 | 3310 | 3313 | 3320 |
+| warm: slot claim (from SwiftSandbox creation) | 42 | 42 | 54 | 63 |
+| cold: first direct response | 7761 | 7832 | 8603 | 9044 |
+| cold: `Available` | 9425 | 9451 | 10159 | 10631 |
+| cold: first Service response | 9995 | 10866 | 11699 | 11163 |
+
+`startupbench summarize -baseline` flagged no regression (none grew by
+more than 25% and 100 ms). The largest change, the cold first Service
+response at p50, is within the spread of the cold runs (standard deviation
+about 0.8 seconds in both). Results:
+[performance-results/2026-10-23-kubeswift-v0.19.1](performance-results/2026-10-23-kubeswift-v0.19.1/).
+
 ### KubeSwift v0.16.3 (2026-10-11)
 
 The cluster and configurations of the v0.16.2 results below, upgraded to
@@ -497,6 +523,9 @@ make perf-startup PERF_NODE=<node> PERF_REGISTRY=<registry> PERF_BASELINE=docs/p
   pass one of them as `PERF_BASELINE`, for example
   `docs/performance-results/2026-10-11-kubeswift-v0.16.2/shipped`.
 
+The v0.2.0 release-time results (v0.1.1 and v0.2.0-rc1 on KubeSwift
+v0.19.1) are in
+[performance-results/2026-10-23-kubeswift-v0.19.1](performance-results/2026-10-23-kubeswift-v0.19.1/).
 The KubeSwift v0.16.2 results (three readiness configurations) are in
 [performance-results/2026-10-11-kubeswift-v0.16.2](performance-results/2026-10-11-kubeswift-v0.16.2/).
 The KubeSwift v0.16.1 results are in
