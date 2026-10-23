@@ -24,9 +24,20 @@ if [[ "$want" != "$tracked" ]]; then
   fail=1
 fi
 
+# The pull request scan runs the same arguments on the base branch to compare
+# results, and fails on a lockfile the base branch does not have yet. A
+# lockfile a branch adds is therefore left out of that scan until it is on
+# main; the full scan and the release gate scan it from the start. Remove an
+# entry once its lockfile is on main and add it to osv-scanner-pr.yaml.
+PR_SCAN_PENDING="signer/cosign/go.mod"
+
 for wf in .github/workflows/osv-scanner-pr.yaml .github/workflows/osv-scanner.yaml .github/workflows/release.yaml; do
   got="$(grep -o -- '--lockfile=[^[:space:]]*' "$wf" | sed 's/^--lockfile=//' | sort)"
-  if [[ "$got" != "$want" ]]; then
+  expect="$want"
+  if [[ "$wf" == *osv-scanner-pr.yaml ]]; then
+    expect="$(grep -vxF -f <(printf '%s\n' $PR_SCAN_PENDING) <<<"$want" || true)"
+  fi
+  if [[ "$got" != "$expect" ]]; then
     echo "$wf: --lockfile arguments do not match OSV_LOCKFILES" >&2
     fail=1
   fi
