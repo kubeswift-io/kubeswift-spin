@@ -29,6 +29,7 @@ jobs:
       # tracked files. hack/check-osv-inputs.sh (make verify) keeps this list
       # equal to the tracked dependency manifests.
       scan-args: |-
+        --config=osv-scanner.toml
         --lockfile=go.mod
         --lockfile=examples/Cargo.lock
         --lockfile=signer/cosign/go.mod

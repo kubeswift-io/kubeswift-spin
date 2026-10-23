@@ -29,6 +29,7 @@ jobs:
       # not on main yet (PR_SCAN_PENDING there): this scan also runs on the
       # base branch, where it would fail.
       scan-args: |-
+        --config=osv-scanner.toml
         --lockfile=go.mod
         --lockfile=examples/Cargo.lock
         --lockfile=signer/cosign/go.mod
