@@ -386,7 +386,7 @@ jobs:
           mkdir -p dist
           # Absolute path: experimental/mcp is one directory deeper.
           spin="$PWD/bin/spin"
-          for e in hello-http request-info outbound-http key-value serverless-ai experimental/mcp; do
+          for e in hello-http request-info outbound-http key-value serverless-ai experimental/mcp multi-component; do
             app="$(awk -F'"' '/^name = /{print $2; exit}' "examples/$e/spin.toml")"
             ref="${REGISTRY}/kubeswift-spin-examples/${app}"
             out="$(cd "examples/$e" && "$spin" registry push "${ref}:${TAG}" 2>&1)"

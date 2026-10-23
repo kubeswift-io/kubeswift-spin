@@ -1,0 +1,51 @@
+spin_manifest_version = 2
+
+[application]
+name = "multi-component"
+version = "0.1.0"
+description = "Three components behind one application; the compiled-cache test case"
+
+[variables]
+app_version = { default = "dev" }
+greeting = { default = "hello" }
+
+[[trigger.http]]
+route = "/..."
+component = "hello"
+
+[[trigger.http]]
+route = "/info/..."
+component = "info"
+
+[[trigger.http]]
+route = "/kv/..."
+component = "kv"
+
+[component.hello]
+source = "../target/wasm32-wasip2/release/hello_http.wasm"
+allowed_outbound_hosts = []
+
+[component.hello.build]
+command = "cargo build --locked --target wasm32-wasip2 --release -p hello-http"
+watch = ["../hello-http/src/**/*.rs", "../hello-http/Cargo.toml"]
+
+[component.info]
+source = "../target/wasm32-wasip2/release/request_info.wasm"
+allowed_outbound_hosts = []
+
+[component.info.variables]
+app_version = "{{ app_version }}"
+greeting = "{{ greeting }}"
+
+[component.info.build]
+command = "cargo build --locked --target wasm32-wasip2 --release -p request-info"
+watch = ["../request-info/src/**/*.rs", "../request-info/Cargo.toml"]
+
+[component.kv]
+source = "../target/wasm32-wasip2/release/key_value.wasm"
+allowed_outbound_hosts = []
+key_value_stores = ["default"]
+
+[component.kv.build]
+command = "cargo build --locked --target wasm32-wasip2 --release -p key-value"
+watch = ["../key-value/src/**/*.rs", "../key-value/Cargo.toml"]
