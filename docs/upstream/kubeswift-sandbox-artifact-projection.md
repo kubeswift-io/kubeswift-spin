@@ -1,6 +1,6 @@
 # KubeSwift requirement: read-only OCI artifact projection into SwiftSandbox
 
-Status: implemented in KubeSwift v0.16.0 (`spec.artifacts`, OCI artifacts mounted read-only), tracked in [kubeswift-io/kubeswift#731](https://github.com/kubeswift-io/kubeswift/issues/731). kubeswift-spin does not use it: Spin 4.2.1 runs an application only from a manifest, a `.wasm` file or a registry reference, not from a local OCI layout, so Spin still pulls the application inside the guest and private registries use `imagePullSecrets` delivered as secret files. Sandboxes with artifacts also always boot cold. The text below is the original proposal; the shipped API may differ in detail.
+Status: implemented in KubeSwift v0.16.0 (`spec.artifacts`, OCI artifacts mounted read-only), tracked in [kubeswift-io/kubeswift#731](https://github.com/kubeswift-io/kubeswift/issues/731). kubeswift-spin uses it only to mount signed compiled Wasmtime caches (ADR 0014): Spin 4.2.1 runs an application only from a manifest, a `.wasm` file or a registry reference, not from a local OCI layout, so Spin still pulls the application inside the guest and private registries use `imagePullSecrets` delivered as secret files. Since v0.16.2, warm-pool checkouts mount artifacts without a cold boot. The text below is the original proposal; the shipped API may differ in detail.
 
 ## User problem
 

@@ -59,6 +59,7 @@ EXPECTED = {
         {"apiGroups": ["core.spinkube.dev"], "resources": ["spinapps", "spinappexecutors"], "verbs": ["get", "list", "watch"]},
         {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftsandboxes"], "verbs": ["get", "list", "watch", "create", "delete"]},
         {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftsandboxpools"], "verbs": ["get", "list", "watch"]},
+        {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftartifactplacements"], "verbs": ["get", "list", "watch", "create", "update", "delete"]},
         {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "watch"]},
     ]),
     # The cache manager's records, Lease and Events, in the release namespace

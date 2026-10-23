@@ -59,10 +59,21 @@ unprivileged:
    at most 64 KiB each, each a Docker config with an `auths` section),
    merge the `auths` (a later file wins for the same registry), and write
    `/var/lib/kubeswift-spin/home/.docker/config.json` with mode 0600.
-5. When running as root: chown those paths to 65532, clear supplementary
+5. Compiled cache (ADR 0014): when `KUBESWIFT_SPIN_CACHE_SOURCE`,
+   `KUBESWIFT_SPIN_CACHE_RUNTIME` and `KUBESWIFT_SPIN_CACHE_ARCHITECTURE`
+   are all set (`up` only), use the cache at `/opt/kubeswift-spin-cache`
+   if it is a read-only mount point whose `metadata.json` names that
+   identity, this binary's architecture and this image's Wasmtime cache
+   version (`runtimecontract.WasmtimeCacheVersion`). Then write
+   `/var/lib/kubeswift-spin/wasmtime-cache.toml` and set
+   `WASMTIME_CACHE_FILE` for Spin. Otherwise log why and continue.
+   `WASMTIME_CACHE_FILE` and `DISABLE_WASMTIME_CACHE` from the environment
+   are always dropped. See
+   [compiled-cache.md](compiled-cache.md#runtime-mount-contract).
+6. When running as root: chown those paths to 65532, clear supplementary
    groups, `setgid(65532)`, `setuid(65532)`, and verify the result.
-6. Set `PR_SET_NO_NEW_PRIVS`.
-7. Set `HOME`, `TMPDIR`, `XDG_*` under `/var/lib/kubeswift-spin` and
+7. Set `PR_SET_NO_NEW_PRIVS`.
+8. Set `HOME`, `TMPDIR`, `XDG_*` under `/var/lib/kubeswift-spin` and
    `PATH=/usr/local/bin`, remove every `KUBESWIFT_SPIN_*` contract variable
    (including the Secret values), and `exec` `/usr/local/bin/spin` with the
    given arguments.

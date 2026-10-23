@@ -323,6 +323,11 @@ func collectEntries(cacheDir string) (string, []string, error) {
 	if version == "" {
 		return "", nil, errors.New("the Wasmtime cache has no version directory")
 	}
+	if version != runtimecontract.WasmtimeCacheVersion {
+		// Replicas of this image look only in WasmtimeCacheVersion; a cache
+		// under another version would never be used.
+		return "", nil, fmt.Errorf("spin wrote Wasmtime cache version %s, but this runtime image declares %s; update runtimecontract.WasmtimeCacheVersion with Spin", version, runtimecontract.WasmtimeCacheVersion)
+	}
 	files, err := os.ReadDir(filepath.Join(modules, version))
 	if err != nil {
 		return "", nil, err
@@ -457,8 +462,8 @@ func runCompile(args, environ []string) error {
 		env[k] = v
 	}
 	// Spin must use exactly the cache this mode collects.
-	delete(env, "DISABLE_WASMTIME_CACHE")
-	env["WASMTIME_CACHE_FILE"] = cacheConfig
+	delete(env, runtimecontract.DisableWasmtimeCacheEnv)
+	env[runtimecontract.WasmtimeCacheFileEnv] = cacheConfig
 
 	spinVer := spinVersion(env)
 	fmt.Fprintf(os.Stderr, "kubeswift-spin-entrypoint: compile: pulling %s\n", o.source)

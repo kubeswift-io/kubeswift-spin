@@ -125,6 +125,7 @@ type harnessOpts struct {
 	// cache manager's reconcilers in the same manager.
 	compiledCache compiledcache.Settings
 	cacheManager  bool
+	delivery      compiledcache.Delivery
 }
 
 func startManager(t *testing.T, o harnessOpts) *harness {
@@ -170,6 +171,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 
 		CompiledCache:        o.compiledCache,
 		CompiledCachesServed: o.compiledCache.Configured(),
+		CacheDelivery:        o.delivery,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := r.SetupWithManager(ctx, mgr); err != nil {
@@ -179,7 +181,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 	if o.cacheManager {
 		ns := &cachemanager.NamespaceReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Options: r.Options, Settings: o.compiledCache,
 			Detector: o.detector, Retention: time.Hour}
-		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: o.compiledCache, Defaults: r.Defaults,
+		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: o.compiledCache, Delivery: o.delivery, Defaults: r.Defaults,
 			Recorder: mgr.GetEventRecorder("kubeswift-spin-cache-manager"), MaxCompilers: 4, MaxCompilersPerNamespace: 1}
 		if err := ns.SetupWithManager(mgr); err != nil {
 			cancel()

@@ -321,6 +321,46 @@ else
 fi
 compile hello "localhost:$TLS_REG_PORT/hello-http@$hello_digest" && fail "compile wrote into a non-empty output" || ok "compile mode refuses a non-empty output"
 
+# 12. A delivered compiled cache: the compiled output mounted read-only at
+# the contract path, as KubeSwift mounts a signed artifact. The entrypoint
+# uses it only when every check passes; otherwise Spin compiles as usual.
+if [[ -f "$TMP/out-hello/metadata.json" ]]; then
+  src="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source"])' "$TMP/out-hello/metadata.json")"
+  cached_up() {
+    local name="$1" port="$2"
+    shift 2
+    docker run -d --name "$name" --network host --user 0 -v "$TMP/tls/bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro" "$@" \
+      --entrypoint /usr/local/bin/kubeswift-spin-entrypoint "$IMAGE" \
+      up "--from=localhost:$TLS_REG_PORT/hello-http@$hello_digest" "--listen=127.0.0.1:$port" >/dev/null
+    CONTAINERS+=("$name")
+    wait_http "http://127.0.0.1:$port/hello" || { docker logs "$name" >&2; fail "$name did not serve"; }
+  }
+  expect=(-e "KUBESWIFT_SPIN_CACHE_SOURCE=$src" -e "KUBESWIFT_SPIN_CACHE_RUNTIME=$RT_REF" -e "KUBESWIFT_SPIN_CACHE_ARCHITECTURE=$ARCH")
+  cached_up kss-test-cache-hit 3211 -v "$TMP/out-hello:/opt/kubeswift-spin-cache:ro" "${expect[@]}" \
+    -e RUST_LOG=wasmtime_internal_cache=trace
+  docker logs kss-test-cache-hit 2>&1 | grep -q "compiled cache used" && ok "a verified read-only cache mount is used" || fail "the cache was not used"
+  # Wasmtime traces every lookup (get_data) and, after a miss, the write
+  # of the newly compiled entry (update_data). A hit has only lookups.
+  hit_log="$(docker logs kss-test-cache-hit 2>&1)"
+  if grep -q "get_data() for path: /opt/kubeswift-spin-cache/cache/modules/" <<<"$hit_log" && ! grep -q "update_data()" <<<"$hit_log"; then
+    ok "Wasmtime loaded every component from the compiled cache"
+  else
+    grep -i "cache" <<<"$hit_log" | head -20 >&2
+    fail "Wasmtime did not hit the compiled cache"
+  fi
+  cached_up kss-test-cache-rw 3212 -v "$TMP/out-hello:/opt/kubeswift-spin-cache" "${expect[@]}"
+  docker logs kss-test-cache-rw 2>&1 | grep -q "not used: the cache mount is writable" && ok "a writable cache mount is not used" || fail "a writable mount was used"
+  cached_up kss-test-cache-other 3213 -v "$TMP/out-hello:/opt/kubeswift-spin-cache:ro" -e "KUBESWIFT_SPIN_CACHE_SOURCE=$src" \
+    -e "KUBESWIFT_SPIN_CACHE_RUNTIME=${RT_REF%0}1" -e "KUBESWIFT_SPIN_CACHE_ARCHITECTURE=$ARCH"
+  docker logs kss-test-cache-other 2>&1 | grep -q "not used: the cache was built by another runtime image" && ok "a cache of another runtime image is not used" || fail "a mismatched cache was used"
+  cached_up kss-test-cache-none 3214 "${expect[@]}" -e WASMTIME_CACHE_FILE=/nonexistent.toml
+  logs="$(docker logs kss-test-cache-none 2>&1)"
+  grep -q "not used: no cache is mounted" <<<"$logs" && grep -q "ignoring WASMTIME_CACHE_FILE" <<<"$logs" \
+    && ok "without a mount Spin starts normally and a foreign WASMTIME_CACHE_FILE is dropped" || fail "no-mount case: $logs"
+else
+  fail "no compiled hello-http output to mount"
+fi
+
 if [[ $FAILED -ne 0 ]]; then
   echo "runtime image tests FAILED" >&2
   exit 1

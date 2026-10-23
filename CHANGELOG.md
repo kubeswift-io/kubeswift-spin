@@ -42,11 +42,30 @@ running replicas on upgrade) say so under "Upgrade notes".
   source) and the claims kind, namespace, source, runtime, architecture and
   compiler. docs/compiled-cache.md describes the key, the registry
   credential and the SwiftArtifactVerificationPolicy to create.
+- Delivery of signed caches. The cache manager keeps one
+  `SwiftArtifactPlacement` per warm pool of a signed cache's consumers;
+  records are `Ready` once every pool is prepared. New replicas get the
+  signed cache as an optional, platform-verified artifact at
+  `/opt/kubeswift-spin-cache` (`fetchTimeout` 0s from a warm pool,
+  `compiledCache.fetchTimeout` when cold), read with
+  `compiledCache.pullSecretName`, outside the revision. The runtime
+  entrypoint uses the mount only when it is read-only and its metadata
+  matches, and drops `WASMTIME_CACHE_FILE` and `DISABLE_WASMTIME_CACHE`
+  from anywhere else. New metrics count lookups and attachments. KubeSwift
+  v0.19.1 fails a replica whose optional cache names a pull Secret it
+  cannot read; the controller then starts that SpinApp's new replicas
+  without the cache for 30 minutes and reports `CompiledCache=False`
+  (`DeliveryFailed`). KubeSwift v0.19.1 also never accepts the readiness of
+  a warm replica whose optional artifact it skipped after the checkout:
+  warm replicas get the cache only once their pool's placement is
+  prepared on every node, and a warm replica that is not ready a minute
+  after such a skip is replaced and the cache held back for 30 minutes.
 
 ### Upgrade notes
 
-- The runtime image is `spin-4.2.1-r3` (compile mode). Upgrading replaces
-  every replica that uses the chart's default runtime image.
+- The runtime image is `spin-4.2.1-r3` (compile mode and the compiled
+  cache mount). Upgrading replaces every replica that uses the chart's
+  default runtime image.
 
 ### Changed
 

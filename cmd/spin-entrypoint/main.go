@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -38,6 +39,12 @@ type plan struct {
 	env           []string
 	runtimeConfig []byte
 	dockerConfig  []byte
+	// cache is the compiled cache the controller asked for, if any;
+	// cacheConfig is the Wasmtime cache configuration once it is used.
+	cache       *cacheExpectation
+	cacheConfig []byte
+	// dropped are reserved variables found in the environment and removed.
+	dropped []string
 }
 
 type readFileFunc func(string) ([]byte, error)
@@ -60,6 +67,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	for _, k := range p.dropped {
+		fmt.Fprintf(os.Stderr, "kubeswift-spin-entrypoint: ignoring %s: only the entrypoint sets it\n", k)
+	}
+	useCompiledCache(p, hostFS, runtimecontract.CompiledCacheDir)
 	if err := prepare(p, os.Geteuid() == 0); err != nil {
 		return err
 	}
@@ -82,7 +93,8 @@ func run(args []string) error {
 // entrypoint contract and must not reach Spin.
 func internalEnv(k string) bool {
 	switch k {
-	case runtimecontract.RuntimeConfigEnv, runtimecontract.RuntimeConfigFileEnv, runtimecontract.RegistryAuthFilesEnv:
+	case runtimecontract.RuntimeConfigEnv, runtimecontract.RuntimeConfigFileEnv, runtimecontract.RegistryAuthFilesEnv,
+		runtimecontract.CompiledCacheSourceEnv, runtimecontract.CompiledCacheRuntimeEnv, runtimecontract.CompiledCacheArchitectureEnv:
 		return true
 	}
 	return strings.HasPrefix(k, runtimecontract.SecretValueEnvPrefix)
@@ -113,6 +125,11 @@ func buildPlan(args, environ []string, readFile readFileFunc) (*plan, error) {
 		switch k {
 		case "HOME", "TMPDIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "PATH", "DOCKER_CONFIG":
 			continue // set below
+		case runtimecontract.WasmtimeCacheFileEnv, runtimecontract.DisableWasmtimeCacheEnv:
+			// Reserved for the compiled cache: a value the entrypoint did
+			// not set could point Spin at code nobody verified.
+			p.dropped = append(p.dropped, k)
+			continue
 		}
 		env = append(env, kv)
 	}
@@ -133,7 +150,27 @@ func buildPlan(args, environ []string, readFile readFileFunc) (*plan, error) {
 	if err := planRegistryAuth(p, vars, readFile); err != nil {
 		return nil, err
 	}
+	if want, ok := expectation(vars); ok && args[0] == "up" {
+		p.cache = &want
+	}
 	return p, nil
+}
+
+// useCompiledCache points Spin at the compiled cache mounted at dir when
+// the controller asked for one and the mount passes every check, and logs
+// the decision. It never fails: without the cache Spin compiles as usual.
+func useCompiledCache(p *plan, fsys cacheFS, dir string) {
+	if p.cache == nil {
+		return
+	}
+	cfg, why := compiledCacheConfig(fsys, dir, *p.cache)
+	if cfg == nil {
+		fmt.Fprintf(os.Stderr, "kubeswift-spin-entrypoint: compiled cache not used: %s\n", why)
+		return
+	}
+	p.cacheConfig = cfg
+	p.env = append(p.env, runtimecontract.WasmtimeCacheFileEnv+"="+runtimecontract.CompiledCacheConfigPath)
+	fmt.Fprintf(os.Stderr, "kubeswift-spin-entrypoint: compiled cache used from %s\n", dir)
 }
 
 func planRuntimeConfig(p *plan, args []string, vars map[string]string, readFile readFileFunc) error {
@@ -307,6 +344,17 @@ func prepare(p *plan, asRoot bool) error {
 	if p.dockerConfig != nil {
 		if err := writePrivate(runtimecontract.HomeDir+"/.docker/config.json", p.dockerConfig, asRoot); err != nil {
 			return fmt.Errorf("write registry credentials: %w", err)
+		}
+	}
+	if p.cacheConfig != nil {
+		if err := writePrivate(runtimecontract.CompiledCacheConfigPath, p.cacheConfig, asRoot); err != nil {
+			// Spin refuses a WASMTIME_CACHE_FILE that does not exist; start
+			// it without the cache instead.
+			fmt.Fprintf(os.Stderr, "kubeswift-spin-entrypoint: compiled cache not used: write its configuration: %v\n", err)
+			p.cacheConfig = nil
+			p.env = slices.DeleteFunc(p.env, func(kv string) bool {
+				return strings.HasPrefix(kv, runtimecontract.WasmtimeCacheFileEnv+"=")
+			})
 		}
 	}
 	return nil

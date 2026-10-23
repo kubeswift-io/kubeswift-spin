@@ -50,6 +50,7 @@ spec:
             - --zap-log-level={{ .Values.controller.logLevel }}
             {{- if .Values.compiledCache.enabled }}
             {{- include "kubeswift-spin.compiledCacheArgs" . | nindent 12 }}
+            {{- include "kubeswift-spin.compiledCacheDeliveryArgs" . | nindent 12 }}
             {{- end }}
             {{- range .Values.controller.extraArgs }}
             - {{ . }}

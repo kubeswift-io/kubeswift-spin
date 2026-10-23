@@ -98,6 +98,8 @@ type SpinAppReconciler struct {
 	// the SpinCompiledCache API is installed.
 	CompiledCache        compiledcache.Settings
 	CompiledCachesServed bool
+	// CacheDelivery says how new replicas mount a signed cache.
+	CacheDelivery compiledcache.Delivery
 
 	Metrics *metrics.Tracker
 	Backoff *Backoff
@@ -118,6 +120,13 @@ type SpinAppReconciler struct {
 	// still reports its findings.
 	annMu   sync.Mutex
 	annSeen map[string]string
+
+	// attached remembers which replicas' compiled-cache outcome was
+	// counted, so each replica is counted once.
+	attachMu  sync.Mutex
+	attached  map[types.UID]string
+	holds     map[string]cacheHold
+	startedAt time.Time
 }
 
 // SetupWithManager registers the controller, its watches and the field index.
@@ -160,7 +169,8 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 		b = b.Watches(&sandboxv1alpha1.SwiftSandboxPool{}, handler.EnqueueRequestsFromMapFunc(r.appsForPool))
 	}
 	if r.CompiledCache.Configured() && r.CompiledCachesServed {
-		b = b.Watches(&cachev1alpha1.SpinCompiledCache{}, handler.EnqueueRequestsFromMapFunc(r.appsForRecord)).
+		b = b.Watches(&cachev1alpha1.SpinCompiledCache{}, handler.EnqueueRequestsFromMapFunc(r.appsForRecord),
+			builder.WithPredicates(recordViewChanged)).
 			Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.appsForNamespace),
 				builder.WithPredicates(predicate.LabelChangedPredicate{}))
 	}
@@ -246,6 +256,18 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	owned, err := r.ownedSandboxes(ctx, &app)
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	stuckWait := cacheStuckRecheck(owned, r.Now())
+	for _, sb := range r.countAttachments(key, owned) {
+		// The cache cannot keep a replica from becoming ready: replace it
+		// (the replacement gets no cache while the hold lasts).
+		if err := r.deleteSandbox(ctx, sb, "CompiledCacheNotReady"); err != nil {
+			return ctrl.Result{}, err
+		}
+		now := metav1.NewTime(r.Now())
+		sb.DeletionTimestamp = &now
+		r.event(&app, corev1.EventTypeWarning, EventCompiledCacheFailed, "Delete",
+			"replaced sandbox %s: KubeSwift skipped its compiled cache after the warm checkout and the replica did not become ready", sb.Name)
 	}
 
 	var exec spinv1alpha1.SpinAppExecutor
@@ -380,6 +402,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		if ord == int(app.Spec.Replicas) {
 			sb.Labels[translate.LabelSurge] = "true"
 		}
+		lookup := r.decorateCache(sb, cache)
 		if err := controllerutil.SetControllerReference(&app, sb, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -458,6 +481,9 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		r.Backoff.ClearRejection(key)
 		metrics.SandboxCreations.Inc()
+		if lookup != "" {
+			metrics.CompiledCacheLookups.WithLabelValues(lookup).Inc()
+		}
 		logger.Info("created sandbox", "sandbox", sb.Name, "revision", tmpl.Revision)
 		r.event(&app, corev1.EventTypeNormal, EventSandboxCreated, "Create", "created sandbox %s at revision %s", sb.Name, tmpl.Revision)
 	}
@@ -482,6 +508,14 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Watches normally trigger the next step (owned sandbox events);
 		// this is a bounded safety net for conflicts and in-flight work.
 		return ctrl.Result{RequeueAfter: r.WaitingRequeue}, nil
+	}
+	if stuckWait > 0 {
+		// A replica whose skipped cache may keep it from becoming ready.
+		return ctrl.Result{RequeueAfter: stuckWait}, nil
+	}
+	if cache.holdUntil != nil {
+		// Report the end of a compiled-cache hold when it ends.
+		return ctrl.Result{RequeueAfter: cache.holdUntil.Sub(r.Now()) + time.Second}, nil
 	}
 	return ctrl.Result{}, nil
 }
@@ -835,6 +869,7 @@ func (r *SpinAppReconciler) forget(key string) {
 	r.annMu.Lock()
 	delete(r.annSeen, key)
 	r.annMu.Unlock()
+	r.forgetAttachments(key)
 }
 
 // annotationsChanged records the SpinApp's spin.kubeswift.io/ annotations

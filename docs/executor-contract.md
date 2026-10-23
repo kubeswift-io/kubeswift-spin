@@ -160,10 +160,13 @@ server would otherwise drop them silently. `ports`, `podMetadata` and the
 probes are set together, for every replica, whenever exposure is detected.
 
 `timeout` and `ttl` are never set: a Spin server runs until it is replaced.
-GPU fields, `scratchDisk`, `model` and `artifacts` are never set. Spin 4.2.1
-can run an application only from a manifest, a `.wasm` file or a registry
-reference, not from a local OCI layout, so KubeSwift's read-only artifact
-mounts cannot replace the in-guest pull.
+GPU fields, `scratchDisk` and `model` are never set. `artifacts` is set
+only for a signed compiled cache
+([compiled-cache.md](compiled-cache.md#replicas)): one optional entry,
+`wasmtime-cache`, outside the revision. The application itself is still
+pulled in the guest: Spin 4.2.1 can run an application only from a
+manifest, a `.wasm` file or a registry reference, not from a local OCI
+layout.
 
 ### Probes
 
@@ -253,6 +256,7 @@ drops root (see [runtime-image.md](runtime-image.md)).
 | `KUBESWIFT_SPIN_SECRET_<n>` | `valueFrom.secretKeyRef` of the n-th Secret-backed runtime-config option, as a reference |
 | `KUBESWIFT_SPIN_RUNTIME_CONFIG_FILE` | `/run/kubeswift-spin/runtime-config.toml` when `runtimeConfig.loadFromSecret` is set |
 | `KUBESWIFT_SPIN_REGISTRY_AUTH_FILES` | comma-separated registry credential files from `imagePullSecrets` |
+| `KUBESWIFT_SPIN_CACHE_SOURCE`, `KUBESWIFT_SPIN_CACHE_RUNTIME`, `KUBESWIFT_SPIN_CACHE_ARCHITECTURE` | the identity a mounted compiled cache must have; set only with the `wasmtime-cache` artifact |
 
 KubeSwift writes literal environment values in plain text into the
 sandbox's runtime-intent ConfigMap. A `valueFrom.secretKeyRef` stays a
@@ -646,8 +650,10 @@ Service (new connection per request): see
 
 ## What triggers replacement
 
-The revision label is a hash of the full sandbox spec. A change to any of
-these replaces the replicas (one at a time, as in
+The revision label is a hash of the sandbox spec the SpinApp and executor
+produce. The compiled cache (the `wasmtime-cache` artifact and the
+`KUBESWIFT_SPIN_CACHE_*` variables) is added after the hash and never
+replaces replicas. A change to any of these replaces the replicas (one at a time, as in
 [Rolling updates](#rolling-updates)):
 
 - `spec.image`, `spec.components`, `spec.variables`,

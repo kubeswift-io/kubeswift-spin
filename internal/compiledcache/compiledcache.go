@@ -295,6 +295,7 @@ const (
 	ReasonSignFailed          = "SignFailed"
 	ReasonPlacing             = "Placing"
 	ReasonPlacementFailed     = "PlacementFailed"
+	ReasonDeliveryFailed      = "DeliveryFailed"
 	ReasonReady               = "Ready"
 )
 

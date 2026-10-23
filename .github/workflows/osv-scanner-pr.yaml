@@ -31,6 +31,7 @@ jobs:
       scan-args: |-
         --lockfile=go.mod
         --lockfile=examples/Cargo.lock
+        --lockfile=signer/cosign/go.mod
       # Pull requests from forks get a read-only token, which cannot upload
       # SARIF; they still get annotations and the pass/fail result.
       upload-sarif: ${{ github.event.pull_request.head.repo.full_name == github.repository }}

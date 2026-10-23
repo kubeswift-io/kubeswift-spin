@@ -107,12 +107,16 @@ warm-pool checkout (next list); the others still hold.
 - `spec.network.egress.allow` (restricted mode only) admits a Service
   ClusterIP or an IPv4 CIDR, optionally narrowed to ports;
   `169.254.0.0/16` stays blocked.
-- `spec.artifacts` mounts OCI artifacts read-only. kubeswift-spin does not
-  use it: Spin 4.2.1 cannot run an application from a local OCI layout.
+- `spec.artifacts` mounts OCI artifacts read-only. kubeswift-spin uses it
+  only for a signed compiled cache (optional, platform-verified, with
+  claims); Spin 4.2.1 cannot run the application itself from a local OCI
+  layout. On v0.19.1 a sandbox whose optional artifact names a pull Secret
+  that cannot be read fails instead of skipping the artifact.
 - Warm-pool checkout compares the full slot shape (image, network mode,
   egress, ports, verify key, rootfs mode, kernel, CPU, memory, node
-  selector) and boots cold on a mismatch; sandboxes with artifacts always
-  boot cold.
+  selector) and boots cold on a mismatch. Artifacts are not part of the
+  shape: a slot whose kernel has warm mounts mounts them at checkout, and
+  `SwiftArtifactPlacement` prepares them on a pool's nodes in advance.
 
 **Spin v4.2.1**:
 
@@ -214,14 +218,18 @@ flowchart LR
     SB0 -- KubeSwift --> P0[launcher pod app-0]
     SB0 -- KubeSwift --> CM0[ConfigMap app-0-runtime-intent]
     SB0 -- KubeSwift --> NP0[NetworkPolicy app-0-restricted]
+    SCC[SpinCompiledCache] -. cache manager, labels and record UID .-> SAP[SwiftArtifactPlacement per warm pool]
 ```
 
 kubeswift-spin creates only SwiftSandboxes for SpinApps. Everything below a
 SwiftSandbox belongs to KubeSwift; the Service belongs to Spin Operator.
 There is no finalizer. The optional compiled cache adds platform records
-(`SpinCompiledCache`, in the kubeswift-spin namespace) and compiler
-sandboxes ([compiled-cache.md](compiled-cache.md)); without it there is no
-kubeswift-spin CRD.
+(`SpinCompiledCache`, in the kubeswift-spin namespace), compiler
+sandboxes, and one `SwiftArtifactPlacement` per warm pool of a signed
+cache's consumers in their namespace, which a record cannot own across
+namespaces: the cache manager tracks them by labels and the record's UID
+and deletes them with the record ([compiled-cache.md](compiled-cache.md)).
+Without it there is no kubeswift-spin CRD.
 
 ## Two OCI artifacts
 

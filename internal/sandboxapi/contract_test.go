@@ -104,6 +104,8 @@ func TestTypesMatchUpstream(t *testing.T) {
 		{"SwiftSandboxList", ours.SwiftSandboxList{}, upstream.SwiftSandboxList{}},
 		{"SwiftSandboxPool", ours.SwiftSandboxPool{}, upstream.SwiftSandboxPool{}},
 		{"SwiftSandboxPoolList", ours.SwiftSandboxPoolList{}, upstream.SwiftSandboxPoolList{}},
+		{"SwiftArtifactPlacement", ours.SwiftArtifactPlacement{}, upstream.SwiftArtifactPlacement{}},
+		{"SwiftArtifactPlacementList", ours.SwiftArtifactPlacementList{}, upstream.SwiftArtifactPlacementList{}},
 	}
 	for _, p := range pairs {
 		compare(t, p.name, reflect.TypeOf(p.ours), reflect.TypeOf(p.up))
@@ -129,6 +131,10 @@ func TestConstantsMatchUpstream(t *testing.T) {
 	eq("phase Completed", string(ours.SwiftSandboxCompleted), string(upstream.SwiftSandboxCompleted))
 	eq("phase Failed", string(ours.SwiftSandboxFailed), string(upstream.SwiftSandboxFailed))
 	eq("phase Exporting", string(ours.SwiftSandboxExporting), string(upstream.SwiftSandboxExporting))
+	eq("artifact Mounted", string(ours.SandboxArtifactMounted), string(upstream.SandboxArtifactMounted))
+	eq("artifact Skipped", string(ours.SandboxArtifactSkipped), string(upstream.SandboxArtifactSkipped))
+	eq("artifact Failed", string(ours.SandboxArtifactFailed), string(upstream.SandboxArtifactFailed))
+	eq("placement Prepared", ours.PlacementConditionPrepared, upstream.PlacementConditionPrepared)
 	eq("condition Resolved", ours.SwiftSandboxConditionResolved, upstream.SwiftSandboxConditionResolved)
 	eq("condition GuestRunning", ours.SwiftSandboxConditionGuestRunning, upstream.SwiftSandboxConditionGuestRunning)
 	eq("condition WorkloadReady", ours.SwiftSandboxConditionWorkloadReady, upstream.SwiftSandboxConditionWorkloadReady)
@@ -220,8 +226,9 @@ func moduleDir(t *testing.T) string {
 // required in spec is declared, since kubeswift-spin creates sandboxes.
 func TestRequiredFieldsDeclared(t *testing.T) {
 	for file, typ := range map[string]reflect.Type{
-		"sandbox.kubeswift.io_swiftsandboxes.yaml":    reflect.TypeOf(ours.SwiftSandboxSpec{}),
-		"sandbox.kubeswift.io_swiftsandboxpools.yaml": reflect.TypeOf(ours.SwiftSandboxPoolSpec{}),
+		"sandbox.kubeswift.io_swiftsandboxes.yaml":          reflect.TypeOf(ours.SwiftSandboxSpec{}),
+		"sandbox.kubeswift.io_swiftsandboxpools.yaml":       reflect.TypeOf(ours.SwiftSandboxPoolSpec{}),
+		"sandbox.kubeswift.io_swiftartifactplacements.yaml": reflect.TypeOf(ours.SwiftArtifactPlacementSpec{}),
 	} {
 		raw, err := os.ReadFile(filepath.Join(moduleDir(t), "config", "crd", "bases", file))
 		if err != nil {
