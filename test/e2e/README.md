@@ -142,3 +142,50 @@ registering one:
 - give it a kubeconfig limited to the test namespace plus the cluster-wide
   reads the script needs (CRDs, nodes, the OpenAPI schema, Events, the
   logs of the kubeswift-spin and KubeSwift pods).
+
+## Compiled caches
+
+`compiled-cache-e2e.sh` tests trusted compiled Wasmtime caches
+([docs/compiled-cache.md](../../docs/compiled-cache.md)) with the released
+KubeSwift export, verification and placement features:
+
+| Phase | Checks |
+|---|---|
+| 1 functional | hello-http, multi-component, request-info, outbound-http, key-value, serverless-ai and the MCP example on the warm pool `kss-cc-e2e`: each SpinApp is `Available` before its cache exists; its record becomes Ready (compiled, exported, signed, placed); the second replica mounts the cache from its prepared node (`Mounted/Cached`); the application answers through its Service |
+| 2 boundaries | a tenant (SpinApps only) cannot create or patch records, placements or sandbox status, or read the release namespace's Secrets; no sandbox spec names the signing key or a registry credential, and compiler sandboxes reference no Secret; records forged as a compromised status writer could (an unsigned export, another application's signed artifact, an artifact outside the cache repository and, with `CC_WRONG_KEY_JOB`, an export signed with another key) are refused by KubeSwift's platform verification or not attached at all, and the SpinApp stays `Available` |
+| 3 restart | deleting the cache manager and signer pods during a compilation keeps the one compiler (attempt 1), trusts nothing before the export is signed, and ends Ready |
+| 4 teardown | the pool's placements go with their consumers |
+
+Requirements, on top of the [KVM e2e requirements](#requirements):
+
+- KubeSwift v0.19.1 or later, and a SwiftKernel `sandbox` in the namespace
+  on `kernels/sandbox:6.6.17` or later (outputs and warm mounts);
+- kubeswift-spin installed with `compiledCache.enabled=true`, a signing
+  key and a registry credential for the signer, and the namespace labelled
+  `spin.kubeswift.io/compiled-cache=enabled`;
+- the `SwiftArtifactExportPolicy` and `SwiftArtifactVerificationPolicy` of
+  [docs/compiled-cache.md](../../docs/compiled-cache.md), with the export
+  credential Secret in the KubeSwift namespace;
+- the example artifacts pushed to a registry the sandboxes and KubeSwift
+  can read, pinned by digest in a file:
+
+```text
+hello-http registry.example.com/kubeswift-spin-examples/hello-http@sha256:...
+multi-component registry.example.com/kubeswift-spin-examples/multi-component@sha256:...
+request-info registry.example.com/kubeswift-spin-examples/request-info@sha256:...
+request-info-b registry.example.com/kubeswift-spin-examples/request-info-b@sha256:...
+outbound-http registry.example.com/kubeswift-spin-examples/outbound-http@sha256:...
+key-value registry.example.com/kubeswift-spin-examples/key-value@sha256:...
+serverless-ai registry.example.com/kubeswift-spin-examples/serverless-ai@sha256:...
+mcp-tools registry.example.com/kubeswift-spin-examples/mcp-tools@sha256:...
+```
+
+`request-info-b` is the request-info artifact pushed under another
+repository name, a second identity for phases 2 and 3.
+
+```bash
+CC_IMAGES=cc-images.txt test/e2e/compiled-cache-e2e.sh
+```
+
+Phase 2 scales the signer to zero while it runs and forges record status;
+run it only on a test cluster.
