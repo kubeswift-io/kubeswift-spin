@@ -172,10 +172,12 @@ func TestCompiledCacheRecordLifecycle(t *testing.T) {
 		if len(recs) != 2 {
 			return fmt.Errorf("%d records", len(recs))
 		}
-		var first *cachev1alpha1.SpinCompiledCache
+		var first, second *cachev1alpha1.SpinCompiledCache
 		for i := range recs {
 			if recs[i].Name == name {
 				first = &recs[i]
+			} else {
+				second = &recs[i]
 			}
 		}
 		if first == nil {
@@ -187,6 +189,12 @@ func TestCompiledCacheRecordLifecycle(t *testing.T) {
 		}
 		if !cur["two"] || cur["one"] {
 			return fmt.Errorf("consumers of the first record %+v", first.Status.Consumers)
+		}
+		// The second record must list its consumer too: a record that was
+		// never in use keeps the reference time the test backdates below and
+		// would expire at once.
+		if len(second.Status.Consumers) != 1 || second.Status.Consumers[0].Name != "one" || !second.Status.Consumers[0].Current {
+			return fmt.Errorf("consumers of the second record %+v", second.Status.Consumers)
 		}
 		return nil
 	})
