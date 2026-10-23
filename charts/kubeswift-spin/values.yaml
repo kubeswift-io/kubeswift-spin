@@ -70,6 +70,8 @@ executors:
     #                             # running after leaving the Service (KubeSwift
     #                             # default 5s); a SpinApp annotation overrides it
     # maxDrainPeriod: 2m          # the longest drain a SpinApp may set (default 10m)
+    # compiledCache: enabled      # SpinApps get signed compiled caches; needs
+    #                             # compiledCache.enabled (docs/compiled-cache.md)
     # otel:
     #   exporter_otlp_endpoint: http://otel-collector.observability:4318
 
@@ -156,10 +158,13 @@ compiledCache:
   # which the prerequisites rule out.
   pullSecretName: ""
   # How long a replica that does not come from a warm pool may wait for its
-  # cache before starting without it (0s to 5m). Warm-pool replicas never
-  # wait: they use the cache only when a placement already put it on their
-  # node.
-  fetchTimeout: 3s
+  # cache before starting without it (0s to 5m). 0s gives cold replicas no
+  # cache: KubeSwift verifies the signature with the registry on every cold
+  # start and fetches the cache on a new node, which costs more than it
+  # saves for small applications. Warm-pool replicas always get the cache
+  # and never wait: they use it only when a placement already put it on
+  # their node.
+  fetchTimeout: 0s
   # Compiler sandboxes: one per record and attempt, in the SpinApp's
   # namespace, cold-booted (KubeSwift outputs do not use warm slots).
   compiler:

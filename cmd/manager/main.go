@@ -120,7 +120,7 @@ func main() {
 	flag.IntVar(&o.maxCompilersPerNS, "compiled-cache-max-compilers-per-namespace", 1, "Most compiler sandboxes running at once in one namespace.")
 	flag.DurationVar(&o.cacheRetention, "compiled-cache-retention", 24*time.Hour, "How long the cache manager keeps a SpinCompiledCache that no SpinApp uses (the most recently replaced one of each SpinApp is always kept).")
 	flag.StringVar(&o.cachePullSecret, "compiled-cache-pull-secret", "", "Name of a docker-registry Secret, in every enabled namespace, that reads that namespace's cache repository. Empty uses the runtime image pull Secret for replicas and anonymous reads for placements.")
-	flag.DurationVar(&o.cacheFetchTimeout, "compiled-cache-fetch-timeout", compiledcache.DefaultColdFetchTimeout, "How long a replica that does not come from a warm pool may wait for its compiled cache before it starts without it (0s to 5m). Warm-pool replicas never wait.")
+	flag.DurationVar(&o.cacheFetchTimeout, "compiled-cache-fetch-timeout", compiledcache.DefaultColdFetchTimeout, "How long a replica that does not come from a warm pool may wait for its compiled cache before it starts without it (0s to 5m); 0s gives such replicas no cache. Warm-pool replicas never wait.")
 	zapOpts := zap.Options{}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()

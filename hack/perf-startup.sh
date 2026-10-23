@@ -38,6 +38,9 @@
 #   PERF_OUT            output directory (default bin/perf/<UTC time>)
 #   PERF_LAUNCHER_LOGS=1  also record KubeSwift launcher stages from the pod
 #                       logs (grants the benchmark pods/log in the namespace)
+#   PERF_COMPILED_CACHE=1  the executors enable compiled caches
+#                       (docs/compiled-cache.md); each result lists the
+#                       state KubeSwift reported for the cache artifact
 #   PERF_KEEP=1         keep the objects afterwards
 set -euo pipefail
 
@@ -92,6 +95,7 @@ READINESS_STARTUP="${PERF_READINESS_STARTUP:-}"
 [[ -z "${PERF_INTERVAL:-}" || "${PERF_INTERVAL}" =~ ^[0-9]+(ms|s)$ ]] || die "PERF_INTERVAL must be like 20ms"
 EXEC_EXTRA="    spin.kubeswift.io/runtime-image: $(sq "$RUNTIME_IMAGE")"
 [[ -n "$READINESS_STARTUP" ]] && EXEC_EXTRA+=$'\n'"    spin.kubeswift.io/readiness-startup: $READINESS_STARTUP"
+[[ "${PERF_COMPILED_CACHE:-}" == "1" ]] && EXEC_EXTRA+=$'\n'"    spin.kubeswift.io/compiled-cache: enabled"
 
 if [[ -z "${PERF_IMAGE:-}" ]]; then
   [[ -n "${PERF_REGISTRY:-}" ]] || die "set PERF_IMAGE, or PERF_REGISTRY to build and push startupbench"

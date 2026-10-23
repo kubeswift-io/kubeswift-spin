@@ -111,3 +111,17 @@ func TestTruncateKeepsRunes(t *testing.T) {
 		}
 	}
 }
+
+func TestDeliversColdOnlyWithATimeout(t *testing.T) {
+	cold, warm := &sandboxv1alpha1.SwiftSandbox{}, &sandboxv1alpha1.SwiftSandbox{}
+	warm.Spec.PoolRef = &corev1.LocalObjectReference{Name: "warm"}
+	if d := (Delivery{}); d.Delivers(cold) || !d.Delivers(warm) {
+		t.Fatal("without a cold fetch timeout only warm-pool replicas get the cache")
+	}
+	if d := (Delivery{ColdFetchTimeout: time.Second}); !d.Delivers(cold) || !d.Delivers(warm) {
+		t.Fatal("with a cold fetch timeout every replica gets the cache")
+	}
+	if DefaultColdFetchTimeout != 0 {
+		t.Fatal("cold replicas get no cache by default")
+	}
+}

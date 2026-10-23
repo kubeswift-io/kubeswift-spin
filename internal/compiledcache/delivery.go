@@ -27,10 +27,15 @@ const ComponentPlacement = "placement"
 
 // Fetch timeouts of a replica's optional cache artifact. A replica checked
 // out of a warm pool uses the cache only if its node already holds it
-// (a placement prepares the nodes), so it never waits. A cold replica may
-// wait a little, bounded well below what a hit saves.
+// (a placement prepares the nodes), so it never waits. A cold replica gets
+// the cache only when the platform sets a cold fetch timeout: KubeSwift
+// verifies the signature with the registry on every cold start and, on a
+// node without the entry, fetches it, all within the timeout counted from
+// the sandbox's creation. On the KVM lab a first fetch did not finish in 3
+// seconds, and for small applications the verification costs more than
+// the compilation it saves.
 const (
-	DefaultColdFetchTimeout = 3 * time.Second
+	DefaultColdFetchTimeout = 0
 	MaxColdFetchTimeout     = 5 * time.Minute
 )
 
@@ -41,7 +46,7 @@ type Delivery struct {
 	// replica's runtime pull Secret, and anonymous reads for placements.
 	PullSecret string
 	// ColdFetchTimeout bounds how long a replica that does not come from a
-	// warm pool may wait for its cache.
+	// warm pool may wait for its cache; zero gives such replicas no cache.
 	ColdFetchTimeout time.Duration
 }
 
@@ -91,6 +96,12 @@ func (d Delivery) PlacementArtifact(id Identity, artifact string) sandboxv1alpha
 		Claims:                      r.Claims,
 		RequirePlatformVerification: r.RequirePlatformVerification,
 	}
+}
+
+// Delivers reports whether a replica gets the cache: every replica checked
+// out of a warm pool, and cold ones only with a cold fetch timeout.
+func (d Delivery) Delivers(sb *sandboxv1alpha1.SwiftSandbox) bool {
+	return sb.Spec.PoolRef != nil || d.ColdFetchTimeout > 0
 }
 
 // Decorate adds the compiled cache to one replica: the artifact and the
