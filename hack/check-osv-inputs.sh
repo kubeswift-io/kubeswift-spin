@@ -5,6 +5,9 @@
 #     dependency manifests, so a new lockfile cannot go unscanned. The scans
 #     use explicit --lockfile flags because a recursive scan follows
 #     .gitignore, even for tracked files.
+#   - every scan passes --config=osv-scanner.toml. Without it OSV-Scanner
+#     applies a config file only to lockfiles in the same directory, so the
+#     root exceptions would not cover signer/cosign/go.mod.
 #   - an osv-scanner.toml exists only at the repository root, and every
 #     ignored vulnerability in it names one ID with a reason and an
 #     ignoreUntil review date; package-wide ignores are not allowed.
@@ -41,6 +44,13 @@ for wf in .github/workflows/osv-scanner-pr.yaml .github/workflows/osv-scanner.ya
   fi
   if [[ "$got" != "$expect" ]]; then
     echo "$wf: --lockfile arguments do not match OSV_LOCKFILES" >&2
+    fail=1
+  fi
+done
+
+for f in Makefile .github/workflows/osv-scanner-pr.yaml .github/workflows/osv-scanner.yaml .github/workflows/release.yaml; do
+  if ! grep -q -- '--config=osv-scanner.toml' "$f"; then
+    echo "$f: the OSV-Scanner scan does not pass --config=osv-scanner.toml" >&2
     fail=1
   fi
 done

@@ -2,7 +2,13 @@ module github.com/kubeswift-io/kubeswift-spin/signer/cosign
 
 go 1.26.10
 
-require github.com/sigstore/cosign/v3 v3.1.3
+require (
+	github.com/sigstore/cosign/v3 v3.1.3
+	github.com/sigstore/sigstore/pkg/signature/kms/aws v1.10.8
+	github.com/sigstore/sigstore/pkg/signature/kms/azure v1.10.8
+	github.com/sigstore/sigstore/pkg/signature/kms/gcp v1.10.8
+	github.com/sigstore/sigstore/pkg/signature/kms/hashivault v1.10.8
+)
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260415201107-50325440f8f2.1 // indirect
@@ -199,10 +205,6 @@ require (
 	github.com/sigstore/rekor-tiles/v2 v2.3.0 // indirect
 	github.com/sigstore/sigstore v1.10.8 // indirect
 	github.com/sigstore/sigstore-go v1.2.2 // indirect
-	github.com/sigstore/sigstore/pkg/signature/kms/aws v1.10.8 // indirect
-	github.com/sigstore/sigstore/pkg/signature/kms/azure v1.10.8 // indirect
-	github.com/sigstore/sigstore/pkg/signature/kms/gcp v1.10.8 // indirect
-	github.com/sigstore/sigstore/pkg/signature/kms/hashivault v1.10.8 // indirect
 	github.com/sigstore/timestamp-authority/v2 v2.1.2 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect

@@ -113,7 +113,7 @@ vulncheck: $(GOVULNCHECK) ## Scan Go dependencies for known vulnerabilities.
 
 .PHONY: osv-scan
 osv-scan: $(OSV_SCANNER) ## Scan go.mod, signer/cosign/go.mod and examples/Cargo.lock with OSV-Scanner (needs network), as CI does.
-	$(OSV_SCANNER) scan source $(addprefix --lockfile=,$(OSV_LOCKFILES))
+	$(OSV_SCANNER) scan source --config=osv-scanner.toml $(addprefix --lockfile=,$(OSV_LOCKFILES))
 
 .PHONY: check-osv-inputs
 check-osv-inputs: ## Check that every OSV scan covers all dependency manifests and that exceptions follow the policy.
