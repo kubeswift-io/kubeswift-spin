@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 )
@@ -20,10 +23,43 @@ const maxCacheMetadata = 1 << 20
 // metadata file and the cache directory. Tests replace it.
 type cacheFS struct {
 	readFile readFileFunc
+	// readMeta reads a file of the mounted cache.
+	readMeta func(path string, limit int64) ([]byte, error)
 	lstat    func(string) (os.FileInfo, error)
 }
 
-var hostFS = cacheFS{readFile: os.ReadFile, lstat: os.Lstat}
+var hostFS = cacheFS{readFile: os.ReadFile, readMeta: readRegular, lstat: os.Lstat}
+
+// readRegular reads at most limit bytes of a regular file without following
+// a link in any path component and without blocking on a FIFO or device.
+// The cache is signed and verified by KubeSwift, but the entrypoint reads it
+// as root, so it does not depend on that.
+func readRegular(path string, limit int64) ([]byte, error) {
+	fd, err := unix.Openat2(unix.AT_FDCWD, path, &unix.OpenHow{
+		Flags:   unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK,
+		Resolve: unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+	})
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), path)
+	defer func() { _ = f.Close() }()
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return nil, err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return nil, fmt.Errorf("%s is not a regular file", filepath.Base(path))
+	}
+	b, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, fmt.Errorf("%s is larger than %d bytes", filepath.Base(path), limit)
+	}
+	return b, nil
+}
 
 // cacheExpectation is what the controller asked for: the application,
 // runtime image and architecture the replica's cache must have been built
@@ -58,7 +94,7 @@ func compiledCacheConfig(fsys cacheFS, dir string, want cacheExpectation) ([]byt
 	case !ro:
 		return nil, "the cache mount is writable"
 	}
-	raw, err := readBounded(fsys.readFile, filepath.Join(dir, runtimecontract.CompiledCacheMetadataFile), maxCacheMetadata)
+	raw, err := fsys.readMeta(filepath.Join(dir, runtimecontract.CompiledCacheMetadataFile), maxCacheMetadata)
 	if err != nil {
 		return nil, "the cache metadata is missing or too large"
 	}
@@ -83,8 +119,12 @@ func compiledCacheConfig(fsys cacheFS, dir string, want cacheExpectation) ([]byt
 		return nil, "the cache has no entries"
 	}
 	entries := filepath.Join(dir, runtimecontract.CompiledCacheEntries)
-	if fi, err := fsys.lstat(filepath.Join(entries, "modules", md.WasmtimeCache)); err != nil || !fi.IsDir() {
-		return nil, "the cache has no entry directory"
+	// Every level is a real directory, so the configured path cannot lead
+	// out of the read-only mount.
+	for _, d := range []string{entries, filepath.Join(entries, "modules"), filepath.Join(entries, "modules", md.WasmtimeCache)} {
+		if fi, err := fsys.lstat(d); err != nil || !fi.IsDir() {
+			return nil, "the cache has no entry directory"
+		}
 	}
 	// Wasmtime 49 accepts only the [cache] table and refuses unknown keys.
 	// A read-only directory serves hits; its statistics and cleanup writes

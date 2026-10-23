@@ -51,7 +51,11 @@ running replicas on upgrade) say so under "Upgrade notes".
   `compiledCache.pullSecretName`, outside the revision. The runtime
   entrypoint uses the mount only when it is read-only and its metadata
   matches, and drops `WASMTIME_CACHE_FILE` and `DISABLE_WASMTIME_CACHE`
-  from anywhere else. New metrics count lookups and attachments.
+  from anywhere else. New metrics count lookups and attachments. KubeSwift
+  v0.19.1 fails a replica whose optional cache names a pull Secret it
+  cannot read; the controller then starts that SpinApp's new replicas
+  without the cache for 30 minutes and reports `CompiledCache=False`
+  (`DeliveryFailed`).
 
 ### Upgrade notes
 

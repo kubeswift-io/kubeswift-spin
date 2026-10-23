@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -99,5 +100,14 @@ func TestPlacementName(t *testing.T) {
 	a, b := PlacementName(rec, "warm-a"), PlacementName(rec, "warm-b")
 	if a == b || !strings.HasPrefix(a, rec+"-") || len(a) > 63 || PlacementName(rec, "warm-a") != a {
 		t.Fatalf("names %s %s", a, b)
+	}
+}
+
+func TestTruncateKeepsRunes(t *testing.T) {
+	s := strings.Repeat("a", 8) + "ééé"
+	for n := 4; n < len(s); n++ {
+		if got := Truncate(s, n); len(got) > n || !utf8.ValidString(got) {
+			t.Fatalf("Truncate(%d) = %q", n, got)
+		}
 	}
 }

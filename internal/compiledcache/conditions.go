@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,12 +60,20 @@ func condition(t string, ok bool, reason, msg string) metav1.Condition {
 	return metav1.Condition{Type: t, Status: st, Reason: reason, Message: truncate(msg)}
 }
 
-func truncate(s string) string {
-	const n = 1024
+func truncate(s string) string { return Truncate(s, 1024) }
+
+// Truncate shortens s to at most n bytes, ending in "...", without
+// splitting a UTF-8 sequence: a split one would be stored as U+FFFD and
+// never compare equal to the next computation.
+func Truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n-3] + "..."
+	cut := n - 3
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 // RecordConditions computes the conditions of a record from its status.
@@ -163,8 +172,9 @@ func placedCondition(rec *cachev1alpha1.SpinCompiledCache, trusted bool) metav1.
 func placementFailed(reason string) bool {
 	switch reason {
 	case "PrepareFailed", "VerificationFailed", "ClaimMismatch", "PolicyDenied", "ArtifactRefused", "PoolNotFound",
-		// The cache manager's own: another object holds the placement's name.
-		"PlacementConflict":
+		// The cache manager's own: another object holds the placement's name,
+		// or the API server refused it.
+		"PlacementConflict", "PlacementRejected":
 		return true
 	}
 	return false

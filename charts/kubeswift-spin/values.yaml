@@ -149,8 +149,11 @@ compiledCache:
   # Name of a kubernetes.io/dockerconfigjson Secret, present in every
   # enabled namespace, that can read only that namespace's cache repository
   # (<repository>/<namespace>/**). Replicas and placements read the signed
-  # cache with it. Empty: replicas use the runtime image pull Secret and
-  # placements read anonymously, which the prerequisites rule out.
+  # cache with it. Create it before labelling a namespace: KubeSwift
+  # v0.19.1 fails a replica whose cache names a Secret it cannot read (the
+  # controller then stops adding the cache for 30 minutes). Empty: replicas
+  # use the runtime image pull Secret and placements read anonymously,
+  # which the prerequisites rule out.
   pullSecretName: ""
   # How long a replica that does not come from a warm pool may wait for its
   # cache before starting without it (0s to 5m). Warm-pool replicas never

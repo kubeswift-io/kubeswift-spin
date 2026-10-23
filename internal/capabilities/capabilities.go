@@ -29,7 +29,9 @@ var Required = []schema.GroupVersionResource{
 var Pools = schema.GroupVersionResource{Group: "sandbox.kubeswift.io", Version: "v1alpha1", Resource: "swiftsandboxpools"}
 
 // Placements is the SwiftArtifactPlacement API (KubeSwift v0.17.0), which
-// prepares artifacts on the nodes of a warm pool.
+// prepares artifacts on the nodes of a warm pool. The cache manager
+// requires it and refuses to start without it; compiled caches need
+// KubeSwift v0.19.1 anyway, for outputs and platform verification.
 var Placements = schema.GroupVersionResource{Group: "sandbox.kubeswift.io", Version: "v1alpha1", Resource: "swiftartifactplacements"}
 
 // CompiledCaches is kubeswift-spin's own SpinCompiledCache API, installed by

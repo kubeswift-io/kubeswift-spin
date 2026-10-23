@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -154,10 +155,16 @@ func (r *RecordReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	requeue, err := r.compile(ctx, &rec)
 	if err == nil {
-		err = r.place(ctx, &rec)
-	}
-	if err == nil {
-		err = r.writeConditions(ctx, &rec)
+		var placeAgain time.Duration
+		placeAgain, err = r.place(ctx, &rec)
+		if placeAgain > 0 && (requeue == 0 || placeAgain < requeue) {
+			requeue = placeAgain
+		}
+		// A pool's error is returned after the conditions are written, so
+		// the other pools and the record's state stay current.
+		if werr := r.writeConditions(ctx, &rec); werr != nil {
+			err = errors.Join(err, werr)
+		}
 	}
 	if apierrors.IsConflict(err) {
 		// Another writer (the namespace reconciler or the signer) changed
@@ -487,10 +494,7 @@ func until(now time.Time, t *metav1.Time) time.Duration {
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-3] + "..."
+	return compiledcache.Truncate(s, n)
 }
 
 // consumer returns a current consumer of the record and its executor

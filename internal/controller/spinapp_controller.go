@@ -125,6 +125,7 @@ type SpinAppReconciler struct {
 	// counted, so each replica is counted once.
 	attachMu  sync.Mutex
 	attached  map[types.UID]string
+	holds     map[string]cacheHold
 	startedAt time.Time
 }
 
@@ -136,7 +137,6 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	if r.Backoff == nil {
 		r.Backoff = NewBackoff()
 	}
-	r.startedAt = r.Now()
 	if r.Metrics == nil {
 		r.Metrics = metrics.NewTracker()
 	}
@@ -169,7 +169,8 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 		b = b.Watches(&sandboxv1alpha1.SwiftSandboxPool{}, handler.EnqueueRequestsFromMapFunc(r.appsForPool))
 	}
 	if r.CompiledCache.Configured() && r.CompiledCachesServed {
-		b = b.Watches(&cachev1alpha1.SpinCompiledCache{}, handler.EnqueueRequestsFromMapFunc(r.appsForRecord)).
+		b = b.Watches(&cachev1alpha1.SpinCompiledCache{}, handler.EnqueueRequestsFromMapFunc(r.appsForRecord),
+			builder.WithPredicates(recordViewChanged)).
 			Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.appsForNamespace),
 				builder.WithPredicates(predicate.LabelChangedPredicate{}))
 	}
@@ -390,7 +391,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		if ord == int(app.Spec.Replicas) {
 			sb.Labels[translate.LabelSurge] = "true"
 		}
-		r.decorateCache(sb, cache)
+		lookup := r.decorateCache(sb, cache)
 		if err := controllerutil.SetControllerReference(&app, sb, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -469,6 +470,9 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		r.Backoff.ClearRejection(key)
 		metrics.SandboxCreations.Inc()
+		if lookup != "" {
+			metrics.CompiledCacheLookups.WithLabelValues(lookup).Inc()
+		}
 		logger.Info("created sandbox", "sandbox", sb.Name, "revision", tmpl.Revision)
 		r.event(&app, corev1.EventTypeNormal, EventSandboxCreated, "Create", "created sandbox %s at revision %s", sb.Name, tmpl.Revision)
 	}
@@ -493,6 +497,10 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Watches normally trigger the next step (owned sandbox events);
 		// this is a bounded safety net for conflicts and in-flight work.
 		return ctrl.Result{RequeueAfter: r.WaitingRequeue}, nil
+	}
+	if cache.holdUntil != nil {
+		// Report the end of a compiled-cache hold when it ends.
+		return ctrl.Result{RequeueAfter: cache.holdUntil.Sub(r.Now()) + time.Second}, nil
 	}
 	return ctrl.Result{}, nil
 }

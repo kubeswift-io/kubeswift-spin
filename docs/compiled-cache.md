@@ -63,6 +63,10 @@ kubeswift-spin cannot check them:
 - The namespace's cache repository (`<repository>/<namespace>/**`) is
   readable only with that namespace's pull credential, and the registry
   denies anonymous reads: compiled code reveals as much as the application.
+- The Secret named by `compiledCache.pullSecretName` exists in the
+  namespace as a `kubernetes.io/dockerconfigjson` Secret before the label
+  is set. KubeSwift v0.19.1 fails a replica whose cache names a pull Secret
+  it cannot read (see [Fallback](#fallback)).
 
 An administrator records that a namespace meets them with the label
 `spin.kubeswift.io/compiled-cache=enabled`. Only labelled namespaces get
@@ -300,9 +304,13 @@ The record's `status.placements` copies each placement's `Prepared`
 condition and node counts. `Placed` is True once every pool reports every
 node prepared, and `Ready` is `Trusted` and `Placed`. A placement whose
 pool no consumer uses any more, or whose record is no longer trusted or
-is deleted, is deleted. An object the cache manager did not create that
-holds a placement's name is never changed; the record reports
-`PlacementConflict`.
+is deleted, is deleted. A placement is the cache manager's when it has the
+record's labels and the record's UID in the annotation
+`spin.kubeswift.io/compiled-cache-uid`; any other object that holds a
+placement's name is never changed, and the record reports
+`PlacementConflict`. A placement the API server refuses (a quota, an
+admission policy) is reported as `PlacementRejected` and does not hold back
+the other pools. Both are looked at again every 2 minutes.
 
 ### Replicas
 
@@ -362,6 +370,7 @@ The cache never stops a replica:
 | No record, compiling, failed, signing, rejected | No artifact; Spin compiles |
 | The node does not hold the cache in time; the registry refuses; verification or claims fail | KubeSwift skips the optional artifact (`status.artifacts` says why); Spin compiles |
 | Mount missing, writable, or with other metadata | The entrypoint starts Spin without it |
+| The cache pull Secret is missing or not a `kubernetes.io/dockerconfigjson` Secret | KubeSwift v0.19.1 fails the replica (`ArtifactResolveFailed`) although the artifact is optional. The controller then starts the SpinApp's new replicas without the cache for 30 minutes and reports `DeliveryFailed`; one replica start is lost each time ([upstream proposal](upstream/kubeswift-optional-artifact-pull-secret.md)) |
 | CPU features or Wasmtime version not in the cache | Wasmtime misses and compiles |
 
 ### Metrics
@@ -373,8 +382,34 @@ The cache never stops a replica:
 | `kubeswift_spin_compiled_cache_compilations_total` | `result`, `reason` |
 | `kubeswift_spin_compiled_cache_signatures_total` | `result` |
 
-Attachments are counted once per replica by the controller process that
-created it; replicas created before the process started are not counted.
+Lookups are counted when a replica is created. Attachments are counted
+once per replica, by the controller that is leader when KubeSwift reports
+the outcome; replicas created before it started reconciling are not
+counted.
+
+### Settings that must agree
+
+The controller and the cache manager build the replica artifact and the
+placement from the same settings (`compiledCache.pullSecretName`,
+`compiledCache.fetchTimeout`, rendered for both by the chart). A warm
+checkout uses a prepared entry only when both name the same pull Secret,
+layout and claims: do not override these flags in only one of them with
+`extraArgs`.
+
+### Turning it off or revoking a cache
+
+The cache is outside the revision, so neither removing a record nor
+disabling the feature replaces running replicas that mount a cache. To
+stop using one:
+
+1. Delete the records (the cache manager deletes their placements), or
+   remove the namespace label to stop new records there.
+2. Restart the affected SpinApps' replicas, for example by scaling to zero
+   and back, so new replicas start without the cache.
+3. To disable the feature, set `compiledCache.enabled=false` only after
+   step 1: without the cache manager, nothing deletes placements, and
+   `kubectl delete swiftartifactplacements -A -l spin.kubeswift.io/component=placement`
+   removes what is left.
 
 ## What a SpinApp reports
 
@@ -392,11 +427,12 @@ The `CompiledCache` condition is separate from `Available` and
 | False | `Compiling`, `CompileFailed` | Compilation pending (including while waiting for a compiler slot), running, or failed (retried with backoff) |
 | False | `Signing`, `SignFailed` | Waiting for, or refused by, the signer |
 | True | `Placing`, `PlacementFailed` | New replicas mount the cache; warm-pool nodes are still being prepared, or preparing failed |
+| False | `DeliveryFailed` | A replica failed while mounting the cache; new replicas start without it for 30 minutes |
 | True | `Ready` | New replicas mount the cache |
 
 Events: `CompiledCacheRequested`, `CompiledCacheReady`,
-`CompiledCacheFailed`, `CompiledCacheSkipped` and
-`CompiledCachePlacementFailed`, once per change of reason.
+`CompiledCacheFailed` (also for `DeliveryFailed`), `CompiledCacheSkipped`
+and `CompiledCachePlacementFailed`, once per change of reason.
 
 ## Records
 

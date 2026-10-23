@@ -3,9 +3,11 @@ package cachemanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -23,9 +25,24 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
 )
 
-// ReasonPlacementConflict is a placement status reason: an object the cache
-// manager did not create holds the placement's name.
-const ReasonPlacementConflict = "PlacementConflict"
+// Placement status reasons of the cache manager's own: an object it did not
+// create holds the placement's name, or the API server refused to create
+// or update the placement (a quota or an admission policy).
+const (
+	ReasonPlacementConflict = "PlacementConflict"
+	ReasonPlacementRejected = "PlacementRejected"
+)
+
+// AnnRecordUID names the record a placement was created for, by UID. The
+// cache manager changes or deletes a placement of an existing record only
+// when it matches: tenants can set labels, but cannot read record UIDs in
+// the release namespace.
+const AnnRecordUID = "spin.kubeswift.io/compiled-cache-uid"
+
+// placementRecheck is when a placement blocked by another object or a
+// refusal is looked at again; nothing the cache manager watches says when
+// that changes.
+const placementRecheck = 2 * time.Minute
 
 // maxPlacementMessage bounds the placement message copied into the record.
 const maxPlacementMessage = 512
@@ -39,15 +56,15 @@ func placementLabels(record string) map[string]string {
 	}
 }
 
-// ownPlacement reports whether p carries the labels of a placement of
-// record.
-func ownPlacement(p *sandboxv1alpha1.SwiftArtifactPlacement, record string) bool {
-	for k, v := range placementLabels(record) {
+// ownPlacement reports whether p is a placement of rec: it carries the
+// record's labels and its UID.
+func ownPlacement(p *sandboxv1alpha1.SwiftArtifactPlacement, rec *cachev1alpha1.SpinCompiledCache) bool {
+	for k, v := range placementLabels(rec.Name) {
 		if p.Labels[k] != v {
 			return false
 		}
 	}
-	return true
+	return p.Annotations[AnnRecordUID] == string(rec.UID)
 }
 
 // recordsForPlacement enqueues the record of a placement. A placement whose
@@ -97,8 +114,10 @@ func (r *RecordReconciler) deletePlacements(ctx context.Context, ns, record stri
 // place keeps one SwiftArtifactPlacement per warm pool the record's current
 // consumers check out from, while the record is trusted, and copies their
 // state into status.placements. A placement prepares exactly what a
-// replica mounts: the same reference, layout, claims and pull Secret.
-func (r *RecordReconciler) place(ctx context.Context, rec *cachev1alpha1.SpinCompiledCache) error {
+// replica mounts: the same reference, layout, claims and pull Secret. One
+// pool's failure never holds back the others or the record's conditions.
+// It returns when to look again if no watch event will say so.
+func (r *RecordReconciler) place(ctx context.Context, rec *cachev1alpha1.SpinCompiledCache) (time.Duration, error) {
 	artifact := compiledcache.TrustedArtifact(rec)
 	var pools []string
 	if artifact != "" {
@@ -106,25 +125,38 @@ func (r *RecordReconciler) place(ctx context.Context, rec *cachev1alpha1.SpinCom
 	}
 	ns := rec.Spec.Namespace
 	if err := r.deletePlacements(ctx, ns, rec.Name, func(p *sandboxv1alpha1.SwiftArtifactPlacement) bool {
-		return slices.Contains(pools, p.Spec.PoolRef.Name) && p.Name == compiledcache.PlacementName(rec.Name, p.Spec.PoolRef.Name)
+		// Another record's object with forged labels is never deleted here;
+		// one of this record's is kept only for a pool it still needs.
+		return !ownPlacement(p, rec) ||
+			(slices.Contains(pools, p.Spec.PoolRef.Name) && p.Name == compiledcache.PlacementName(rec.Name, p.Spec.PoolRef.Name))
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	id := compiledcache.IdentityOf(rec)
 	statuses := make([]cachev1alpha1.PlacementStatus, 0, len(pools))
+	var errs []error
+	var requeue time.Duration
 	for _, pool := range pools {
 		st, err := r.ensurePlacement(ctx, rec, pool, r.Delivery.PlacementArtifact(id, artifact))
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			st.Reason, st.Message = "Preparing", ""
+		}
+		if st.Reason == ReasonPlacementConflict || st.Reason == ReasonPlacementRejected {
+			requeue = placementRecheck
 		}
 		statuses = append(statuses, st)
 	}
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Pool < statuses[j].Pool })
-	return r.patchPlacements(ctx, rec, statuses)
+	if err := r.patchPlacements(ctx, rec, statuses); err != nil {
+		return 0, err
+	}
+	return requeue, errors.Join(errs...)
 }
 
 // ensurePlacement creates or updates the placement of rec on pool and
-// returns its state.
+// returns its state. A refusal by the API server is reported in the state;
+// other errors are returned.
 func (r *RecordReconciler) ensurePlacement(ctx context.Context, rec *cachev1alpha1.SpinCompiledCache, pool string, a sandboxv1alpha1.PlacementArtifact) (cachev1alpha1.PlacementStatus, error) {
 	name := compiledcache.PlacementName(rec.Name, pool)
 	st := cachev1alpha1.PlacementStatus{Pool: pool, Name: name}
@@ -132,16 +164,38 @@ func (r *RecordReconciler) ensurePlacement(ctx context.Context, rec *cachev1alph
 		PoolRef:   corev1.LocalObjectReference{Name: pool},
 		Artifacts: []sandboxv1alpha1.PlacementArtifact{a},
 	}
+	rejected := func(verb string, err error) (cachev1alpha1.PlacementStatus, error) {
+		if apierrors.IsForbidden(err) || apierrors.IsInvalid(err) {
+			// A quota or an admission policy: the API message can echo
+			// values, so only the log carries it.
+			log.FromContext(ctx).Error(err, "SwiftArtifactPlacement "+verb+" refused", "placement", name, "pool", pool)
+			st.Reason = ReasonPlacementRejected
+			st.Message = fmt.Sprintf("the API server refused to %s SwiftArtifactPlacement %s in namespace %s; check ResourceQuota and admission policies there, and the cache manager log", verb, name, rec.Spec.Namespace)
+			return st, nil
+		}
+		return st, fmt.Errorf("%s SwiftArtifactPlacement %s/%s: %w", verb, rec.Spec.Namespace, name, err)
+	}
+	conflict := func() (cachev1alpha1.PlacementStatus, error) {
+		st.Reason = ReasonPlacementConflict
+		st.Message = fmt.Sprintf("SwiftArtifactPlacement %s in namespace %s was not created by the cache manager for pool %s; remove it to let the cache manager place the cache there", name, rec.Spec.Namespace, pool)
+		return st, nil
+	}
 	var cur sandboxv1alpha1.SwiftArtifactPlacement
 	err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: rec.Spec.Namespace, Name: name}, &cur)
 	switch {
 	case apierrors.IsNotFound(err):
 		p := &sandboxv1alpha1.SwiftArtifactPlacement{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: rec.Spec.Namespace, Labels: placementLabels(rec.Name)},
-			Spec:       want,
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: rec.Spec.Namespace, Labels: placementLabels(rec.Name),
+				Annotations: map[string]string{AnnRecordUID: string(rec.UID)}},
+			Spec: want,
 		}
-		if err := r.Client.Create(ctx, p); err != nil && !apierrors.IsAlreadyExists(err) {
-			return st, fmt.Errorf("create SwiftArtifactPlacement %s/%s: %w", p.Namespace, name, err)
+		if err := r.Client.Create(ctx, p); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				// Created in between, by this process or not: look again.
+				st.Reason = "Preparing"
+				return st, nil
+			}
+			return rejected("create", err)
 		}
 		log.FromContext(ctx).Info("created placement", "placement", name, "pool", pool)
 		st.Reason = "Preparing"
@@ -149,11 +203,10 @@ func (r *RecordReconciler) ensurePlacement(ctx context.Context, rec *cachev1alph
 	case err != nil:
 		return st, fmt.Errorf("read SwiftArtifactPlacement %s/%s: %w", rec.Spec.Namespace, name, err)
 	}
-	if !ownPlacement(&cur, rec.Name) {
-		// Never take over an object the cache manager did not create.
-		st.Reason = ReasonPlacementConflict
-		st.Message = fmt.Sprintf("SwiftArtifactPlacement %s in namespace %s was not created by the cache manager; remove it to let the cache manager place the cache on pool %s", name, rec.Spec.Namespace, pool)
-		return st, nil
+	// Never take over an object the cache manager did not create for this
+	// record and pool (two pools whose names share a hash prefix included).
+	if !ownPlacement(&cur, rec) || cur.Spec.PoolRef.Name != pool {
+		return conflict()
 	}
 	if !cur.DeletionTimestamp.IsZero() {
 		st.Reason = "Preparing"
@@ -162,19 +215,23 @@ func (r *RecordReconciler) ensurePlacement(ctx context.Context, rec *cachev1alph
 	if !apiequality.Semantic.DeepEqual(cur.Spec, want) {
 		cur.Spec = want
 		if err := r.Client.Update(ctx, &cur); err != nil {
-			return st, fmt.Errorf("update SwiftArtifactPlacement %s/%s: %w", cur.Namespace, name, err)
+			if apierrors.IsConflict(err) {
+				st.Reason = "Preparing"
+				return st, err
+			}
+			return rejected("update", err)
 		}
 		log.FromContext(ctx).Info("updated placement", "placement", name, "pool", pool)
 		st.Reason = "Preparing"
 		return st, nil
 	}
-	st.PreparedNodes, st.TargetNodes = cur.Status.PreparedNodes, cur.Status.TargetNodes
 	c := apimeta.FindStatusCondition(cur.Status.Conditions, sandboxv1alpha1.PlacementConditionPrepared)
 	switch {
 	case c == nil || cur.Status.ObservedGeneration < cur.Generation || c.ObservedGeneration < cur.Generation:
 		// KubeSwift has not acted on this generation yet.
 		st.Reason = "Preparing"
 	default:
+		st.PreparedNodes, st.TargetNodes = cur.Status.PreparedNodes, cur.Status.TargetNodes
 		st.Prepared = c.Status == metav1.ConditionTrue
 		st.Reason = c.Reason
 		st.Message = truncate(c.Message, maxPlacementMessage)

@@ -110,5 +110,5 @@ func (d Delivery) Decorate(sb *sandboxv1alpha1.SwiftSandbox, id Identity, artifa
 // pool, in the record's consumer namespace.
 func PlacementName(record, pool string) string {
 	h := sha256.Sum256([]byte(pool))
-	return record + "-" + hex.EncodeToString(h[:])[:8]
+	return record + "-" + hex.EncodeToString(h[:])[:16]
 }

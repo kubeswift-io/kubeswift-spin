@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 )
 
@@ -50,7 +52,8 @@ func cacheDir(t *testing.T, md any, mounts func(dir string) string) (string, cac
 			}
 			return os.ReadFile(p)
 		},
-		lstat: os.Lstat,
+		readMeta: readRegular,
+		lstat:    os.Lstat,
 	}
 }
 
@@ -161,7 +164,7 @@ func TestBuildPlanReservesTheWasmtimeCacheVariables(t *testing.T) {
 	}
 
 	// Without a delivered cache, Spin gets no cache file.
-	useCompiledCache(p, cacheFS{readFile: func(string) ([]byte, error) { return []byte(""), nil }, lstat: os.Lstat}, runtimecontract.CompiledCacheDir)
+	useCompiledCache(p, cacheFS{readFile: func(string) ([]byte, error) { return []byte(""), nil }, readMeta: readRegular, lstat: os.Lstat}, runtimecontract.CompiledCacheDir)
 	if _, ok := envValue(p.env, "WASMTIME_CACHE_FILE"); ok || p.cacheConfig != nil {
 		t.Fatal("a cache was configured without a mount")
 	}
@@ -190,4 +193,45 @@ func TestBuildPlanNeedsTheWholeExpectation(t *testing.T) {
 	if err != nil || p.cache != nil {
 		t.Fatalf("--version asked for a cache (err %v)", err)
 	}
+}
+
+func TestCompiledCacheRefusesLinksAndSpecialFiles(t *testing.T) {
+	ro := func(d string) string { return mountLine(d, "ro") }
+	t.Run("metadata link", func(t *testing.T) {
+		dir, fsys := cacheDir(t, goodMetadata(), ro)
+		target := filepath.Join(t.TempDir(), "m.json")
+		b, _ := os.ReadFile(filepath.Join(dir, "metadata.json"))
+		_ = os.WriteFile(target, b, 0o444)
+		_ = os.Remove(filepath.Join(dir, "metadata.json"))
+		if err := os.Symlink(target, filepath.Join(dir, "metadata.json")); err != nil {
+			t.Fatal(err)
+		}
+		if cfg, why := compiledCacheConfig(fsys, dir, testWant()); cfg != nil || !strings.Contains(why, "metadata") {
+			t.Fatalf("got %q, %q", cfg, why)
+		}
+	})
+	t.Run("metadata FIFO", func(t *testing.T) {
+		dir, fsys := cacheDir(t, nil, ro)
+		if err := unix.Mkfifo(filepath.Join(dir, "metadata.json"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Must not block.
+		if cfg, _ := compiledCacheConfig(fsys, dir, testWant()); cfg != nil {
+			t.Fatal("a FIFO was read as metadata")
+		}
+	})
+	t.Run("linked cache directory", func(t *testing.T) {
+		dir, fsys := cacheDir(t, goodMetadata(), ro)
+		elsewhere := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(elsewhere, "modules", runtimecontract.WasmtimeCacheVersion), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.RemoveAll(filepath.Join(dir, "cache"))
+		if err := os.Symlink(elsewhere, filepath.Join(dir, "cache")); err != nil {
+			t.Fatal(err)
+		}
+		if cfg, why := compiledCacheConfig(fsys, dir, testWant()); cfg != nil || !strings.Contains(why, "entry directory") {
+			t.Fatalf("got %q, %q", cfg, why)
+		}
+	})
 }
