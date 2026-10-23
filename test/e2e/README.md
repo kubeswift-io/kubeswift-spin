@@ -120,7 +120,11 @@ The script passed every check of all nine phases on the KVM lab cluster
 described in
 [compatibility.md](../../docs/compatibility.md#validation-of-v010), with
 KubeSwift v0.16.3 and the v0.1.0 source. Earlier builds also passed it on
-KubeSwift v0.16.0, v0.16.1 and v0.16.2. Not covered: arm64.
+KubeSwift v0.16.0, v0.16.1 and v0.16.2. The v0.2.0-rc1 release artifacts
+passed phases 1 to 5 and 7 to 9 on KubeSwift v0.19.1, and
+`compiled-cache-e2e.sh` (see
+[compatibility.md](../../docs/compatibility.md#validation-of-v020-rc1)).
+Not covered: arm64.
 
 ## CI
 

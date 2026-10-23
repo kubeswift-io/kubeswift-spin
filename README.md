@@ -29,10 +29,10 @@ termination, warm pools) and v0.16.4 (the drain period, rolling updates
 under traffic, warm pools).
 
 v0.2.0-rc1 is a pre-release that adds optional compiled Wasmtime caches
-([CHANGELOG](CHANGELOG.md)). They were validated on the same cluster with
-KubeSwift v0.19.1; the rest of the end-to-end suite has not yet run on
-v0.19.1. [docs/compatibility.md](docs/compatibility.md) lists what was
-tested.
+([CHANGELOG](CHANGELOG.md)). Its release artifacts passed the end-to-end
+test suite (except the private registry phase) and the compiled-cache
+end-to-end test on the same cluster with KubeSwift v0.19.1.
+[docs/compatibility.md](docs/compatibility.md) lists what was tested.
 
 It has been run on that one cluster only. Evaluate it with your own
 workloads, and read the [known limitations](#known-limitations), before

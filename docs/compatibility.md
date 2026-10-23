@@ -7,11 +7,11 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches, validated on KubeSwift v0.19.1 (see [Compiled caches on KubeSwift v0.19.1](#compiled-caches-on-kubeswift-v0191)) |
+| kubeswift-spin | v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)) |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
-| KubeSwift | v0.19.1 | compiled caches: the compiled-cache end-to-end test (seven examples, trust boundaries, restarts, teardown) and the compiled-cache startup benchmark on the lab cluster with a development build of v0.2.0-rc1 (see [Compiled caches on KubeSwift v0.19.1](#compiled-caches-on-kubeswift-v0191)); contract test of `internal/sandboxapi` against the v0.19.1 Go types and CRDs; v0.19.1 sandbox and placement CRDs in envtest. The required version for compiled caches. The general KVM e2e test has not run on v0.19.1 yet |
+| KubeSwift | v0.19.1 | compiled caches: the compiled-cache end-to-end test (seven examples, trust boundaries, restarts, teardown) and the compiled-cache startup benchmark on the lab cluster with a development build of v0.2.0-rc1 (see [Compiled caches on KubeSwift v0.19.1](#compiled-caches-on-kubeswift-v0191)); the KVM e2e (all phases but 6) and the compiled-cache e2e with the v0.2.0-rc1 release artifacts (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); contract test of `internal/sandboxapi` against the v0.19.1 Go types and CRDs; v0.19.1 sandbox and placement CRDs in envtest. The required version for compiled caches |
 | KubeSwift | v0.16.4 | drain period: default, `0s`, `10s` and a request longer than the drain, through rolling updates, scale-down and a broken replacement under traffic, `ingress-from` through a 10-second drain, invalid values; warm-pool checkout and refill on the lab cluster (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); contract test of `internal/sandboxapi` against the v0.16.4 Go types and CRDs and v0.16.4 sandbox CRDs in envtest, in kubeswift-spin v0.1.1 (now v0.19.1). The recommended baseline without compiled caches |
 | KubeSwift | v0.16.3 | KVM e2e, rolling updates under traffic, termination and `ingress-from` through deletion, re-creation under the same name, readiness startup and the startup benchmark on the lab cluster; contract test against the v0.16.3 Go types and CRDs in kubeswift-spin v0.1.0 (now v0.16.4). The minimum for the termination behavior kubeswift-spin relies on |
 | KubeSwift | v0.16.0 to v0.16.2 | KVM e2e, startup benchmark and, on v0.16.2, rolling updates with earlier builds on the lab cluster; see [Known upstream issues](#known-upstream-issues) for what they lack |
@@ -169,16 +169,50 @@ old replica's deletion; "withdrawn" is its endpoint turning not ready.
   without a readiness check and 3.38 and 3.40 seconds with the example's
   check (client side, including the apply).
 
+### Validation of v0.2.0-rc1
+
+Environment: the lab cluster above with KubeSwift v0.19.1 and Spin
+Operator v0.6.1, using the artifacts the release workflow published for
+the tag v0.2.0-rc1.
+
+- Release artifacts: the files of the draft release matched `SHA256SUMS`;
+  cosign v3.1.3 verified the controller and cache signer images, the
+  chart and the seven example artifacts against the workflow identity of
+  the tag, and the runtime image against the release workflow identity of
+  a version tag; the packaged chart pins the controller, runtime and cache
+  signer digests listed in `images.txt`.
+- Upgrade: from v0.1.1 with `helm upgrade --reset-then-reuse-values`, as
+  the README describes. The controller started as v0.2.0-rc1 and detected
+  every SwiftSandbox feature, including compiled caches. `helm rollback`
+  to v0.1.1 afterwards also worked.
+- `test/e2e/kvm-e2e.sh` with the v0.2.0-rc1 example artifacts passed every
+  check (64) of phases 1 to 5 and 7 to 9. hello-http was `Available` 16.4
+  seconds after creation from a cold start and 2.1 seconds from a warm
+  slot, the rolling update took 34.4 seconds, and after a liveness failure
+  the SpinApp was `Available` again 26.7 seconds after its health check
+  target recovered, including the replacement backoff. Phase 6
+  (private registry) was not run: it pushes a test runtime image from the
+  machine running the script to a scratch registry, and none was used for
+  this run.
+- `test/e2e/compiled-cache-e2e.sh` with the release's chart, images and
+  example artifacts (and request-info copied to the lab registry as
+  `request-info-b`) passed every check (98) of all four phases: the seven
+  examples mounted their signed caches from prepared nodes
+  (`Mounted/Cached`), and the forged records were refused as in the
+  development run below, including the signature with another key
+  (`VerificationFailed`). The controller logged no error and replaced no
+  replica for `compiled_cache_not_ready`.
+
 ### Compiled caches on KubeSwift v0.19.1
 
 Environment: the lab cluster above with KubeSwift v0.19.1, the SwiftKernel
 artifact `kernels/sandbox:6.6.17`, a lab registry for the cache
 repository, and a development build of kubeswift-spin whose compiled-cache
-code matches v0.2.0-rc1 except for later review fixes that have not run
-on the lab: the narrowed replacement of stuck replicas, `NoWarmPool`, and
-waking records that wait for a compiler when a compile ends. The
-end-to-end script has since gained the `E2E_CONTEXT` check and cleanup
-changes.
+code matches v0.2.0-rc1 except for later review fixes (the narrowed
+replacement of stuck replicas, `NoWarmPool`, and waking records that wait
+for a compiler when a compile ends), which ran with the release artifacts
+in [Validation of v0.2.0-rc1](#validation-of-v020-rc1). The end-to-end
+script has since gained the `E2E_CONTEXT` check and cleanup changes.
 
 - `test/e2e/compiled-cache-e2e.sh` passed every phase: seven examples
   (including multi-component) compiled, signed, placed on a warm pool and
@@ -193,7 +227,8 @@ changes.
 - Startup, hello-http, 30 warm starts per case: see
   [performance.md](performance.md#compiled-wasmtime-cache-kubeswift-v0191-2026-10-23).
 - Not run on KVM: the replacement of a replica stuck after a skipped cache
-  (unit tests only; the placement gate prevented the case), a cold fetch
+  (unit tests only; the placement gate prevented the case in both runs), a
+  cold fetch
   timeout above `0s` other than the 3 and 20 seconds tried by hand, arm64.
 
 ### Not tested
