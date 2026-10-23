@@ -7,6 +7,8 @@
 // therefore rolls every instance, so treat it as a versioned contract.
 package runtimecontract
 
+import "regexp"
+
 const (
 	// EntrypointPath is the absolute path of the entrypoint binary in the
 	// runtime image. The controller always sets it as the sandbox command so
@@ -84,9 +86,74 @@ const (
 	// after the entrypoint drops root.
 	ListenPort = 3000
 
+	// CompileCommand is the entrypoint's compile mode (ADR 0014): it
+	// compiles a Spin application into a Wasmtime cache and writes it, with
+	// CompiledCacheMetadata, to CompileOutputDir, which KubeSwift exports
+	// as an OCI artifact. It never serves requests.
+	CompileCommand = "compile"
+
+	// CompileOutputDir is the guest directory of the compiler sandbox's
+	// KubeSwift output (spec.outputs[].path).
+	CompileOutputDir = "/var/lib/kubeswift-spin-output"
+
+	// CompileWorkDir is compile mode's writable scratch directory.
+	CompileWorkDir = BaseDir + "/compile"
+
+	// CompileListenAddress is the loopback listener of `spin up` in compile
+	// mode. Nothing outside the guest can reach it, and nothing connects to
+	// it except the entrypoint's TCP check that compilation finished.
+	CompileListenAddress = "127.0.0.1:3999"
+
+	// CompiledCacheMetadataFile is the metadata file at the root of a
+	// compiled cache artifact; CompiledCacheEntries is the directory that
+	// holds Wasmtime's cache layout (modules/wasmtime-<version>/<key>).
+	CompiledCacheMetadataFile = "metadata.json"
+	CompiledCacheEntries      = "cache"
+
+	// CompiledCacheKind is the "kind" of compiled cache metadata.
+	CompiledCacheKind = "kubeswift-spin.wasmtime-cache"
+
 	// RunAsUID and RunAsGID are the unprivileged identity the entrypoint
 	// switches to before exec'ing Spin. They match the distroless "nonroot"
 	// user shipped in the runtime image.
 	RunAsUID = 65532
 	RunAsGID = 65532
 )
+
+// CacheMetadata is the metadata.json of a compiled cache artifact. Compile
+// mode writes it, the cache signer checks it before signing, and the
+// entrypoint checks it before using a mounted cache. It has no timestamps,
+// so compiling the same application with the same runtime gives the same
+// file.
+type CacheMetadata struct {
+	// Kind is CompiledCacheKind.
+	Kind string `json:"kind"`
+	// Source is the application, repository@sha256:...
+	Source string `json:"source"`
+	// Runtime is the runtime image that compiled it, repository@sha256:...
+	Runtime string `json:"runtime"`
+	// Architecture is the GOARCH of the compiler: amd64 or arm64.
+	Architecture string `json:"architecture"`
+	// Spin is the first line of `spin --version`.
+	Spin string `json:"spin"`
+	// WasmtimeCache is the directory of Wasmtime's cache layout that holds
+	// the entries, for example wasmtime-49.0.1.
+	WasmtimeCache string `json:"wasmtimeCache"`
+	// Entries are the cache entry file names, sorted.
+	Entries []string `json:"entries"`
+	// Components are the IDs of the compiled components, sorted.
+	Components []string `json:"components"`
+}
+
+var (
+	cacheEntryName = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+	wasmtimeDir    = regexp.MustCompile(`^wasmtime-[0-9]+\.[0-9]+\.[0-9]+$`)
+)
+
+// ValidCacheEntryName reports whether name is a Wasmtime cache entry: the
+// unpadded base64url SHA-256 that Wasmtime uses as the file name.
+func ValidCacheEntryName(name string) bool { return cacheEntryName.MatchString(name) }
+
+// ValidWasmtimeCacheDir reports whether name is a version directory of
+// Wasmtime's cache layout.
+func ValidWasmtimeCacheDir(name string) bool { return wasmtimeDir.MatchString(name) }

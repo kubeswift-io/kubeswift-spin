@@ -163,14 +163,15 @@ platform signed for the same identity.
   (no Service selects it), and one output.
 - Compile mode (runtime entrypoint) pulls the application, reads its
   locked application, supplies placeholder values for required variables
-  without one and an in-memory runtime configuration for every key-value
+  without one and a scratch runtime configuration for every key-value
   and SQLite label, runs `spin up` for the components of HTTP triggers on a
   loopback listener as the unprivileged user, waits for the listener to
   accept a TCP connection, stops Spin, copies only well-formed cache
   entries (regular files named by Wasmtime's key) and writes
   `metadata.json`. It never sends a request. Literal SpinApp variables are
   passed as for a replica; Secret-backed ones are not, so the compiler
-  holds no tenant secret.
+  holds the SpinApp's pull credentials, as a replica does, and no other
+  tenant Secret.
 - KubeSwift exports the output directory when the workload exits 0. The
   push credential is in the KubeSwift namespace; the compiler guest has no
   registry push credential and no signing key.
@@ -183,9 +184,12 @@ platform signed for the same identity.
   deleted, by UID precondition, and a new attempt starts. The cache manager
   deletes only sandboxes that carry its labels for that record; a tenant who
   copies the labels onto a sandbox of their own can at most have it deleted
-  in their own namespace. Compilers also carry a TTL, so a compiler orphaned
-  by a deleted record goes away by itself; the record reconciler also
-  deletes the compilers of a record it finds gone.
+  in their own namespace, and it deletes only sandboxes that also run compile
+  mode with an allowed runtime, so labels alone never make it delete a
+  replica. Compilers also carry a one-hour TTL, so a compiler orphaned by a
+  deleted record goes away by itself; the record reconciler also deletes the
+  compilers of a record it finds gone. A failure counter is reset only once a
+  cache is signed, so an artifact the signer keeps refusing backs off.
 - Concurrent compilers are bounded cluster-wide and per namespace, so one
   namespace cannot hold KubeSwift's export capacity.
 - A failed attempt (non-zero exit, timeout, export failure) records the
@@ -201,10 +205,14 @@ platform signed for the same identity.
   that writes signatures. It never runs tenant code.
 - For a record whose compile attempt exported an artifact, it checks,
   independently of the cache manager: the compiler sandbox exists with the
-  recorded UID and is not being deleted (its spec is then frozen), its spec
-  hashes to the recorded spec hash and runs an allowed runtime image in
-  compile mode for the record's source with the record's output repository,
-  and it completed. It does not trust the sandbox's labels or its
+  recorded UID and is not being deleted (its spec is then frozen); its whole
+  stored spec, every field included, hashes to the hash the cache manager
+  recorded at creation; it sets no field a compiler never has (artifacts,
+  model, scratch disk, GPU, probes, pool, pod metadata), no environment
+  variable other than literal Spin variables and the registry credential
+  list, no secret file other than registry credentials and no port; it runs
+  an allowed runtime image in compile mode for the record's source with the
+  record's output repository and architecture; and it completed. It does not trust the sandbox's labels or its
   `status.outputs` digest: it resolves the tag `<sandbox UID>.wasmtime-cache`
   in the repository, which only KubeSwift's export Job pushes, and requires
   that digest to be the record's. It
@@ -218,7 +226,8 @@ platform signed for the same identity.
   `runtime`, `architecture` and `compiler` (the signer's version) inside the
   signed payload, then records the signed digest and key ID. An artifact
   that fails a check is marked rejected and never signed; the cache manager
-  compiles again after its backoff.
+  compiles again after its backoff. A decision names the compiler it judged,
+  so a later compiler that exports the same bytes is judged again.
 
 ### Verification policy
 

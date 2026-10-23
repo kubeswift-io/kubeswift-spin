@@ -27,6 +27,18 @@ running replicas on upgrade) say so under "Upgrade notes".
   retention period, and reports the SpinApp condition `CompiledCache` with
   Events. Compilation, signing and delivery follow.
 - The chart's Leases are restricted to each component's own Lease name.
+- Compile mode in the runtime image (`kubeswift-spin-entrypoint compile`),
+  and compiler SwiftSandboxes: the cache manager compiles each record's
+  application in its namespace, with the SpinApp's pull credentials and
+  literal variables only, and KubeSwift exports the cache with platform
+  credentials (`SwiftArtifactExportPolicy`). Compilers are bounded in size,
+  time and concurrency, failures back off from 1 minute to 6 hours, and an
+  unrecorded compiler is never adopted.
+
+### Upgrade notes
+
+- The runtime image is `spin-4.2.1-r3` (compile mode). Upgrading replaces
+  every replica that uses the chart's default runtime image.
 
 ### Changed
 

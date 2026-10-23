@@ -349,18 +349,31 @@ func Env(app *spinv1alpha1.SpinApp, p *executor.Profile, f capabilities.Sandbox)
 		if err := needSecrets("spec.imagePullSecrets"); err != nil {
 			return nil, nil, err
 		}
-		var paths []string
-		for i, ps := range app.Spec.ImagePullSecrets {
-			path := fmt.Sprintf("%s/%d.json", runtimecontract.RegistryAuthDir, i)
-			paths = append(paths, path)
-			files = append(files, sandboxv1alpha1.SandboxSecretFile{
-				SecretName: ps.Name,
-				Items:      []sandboxv1alpha1.SandboxSecretFileItem{{Key: corev1.DockerConfigJsonKey, Path: path}},
-			})
-		}
-		env = append(env, corev1.EnvVar{Name: runtimecontract.RegistryAuthFilesEnv, Value: strings.Join(paths, ",")})
+		e, f := RegistryAuth(app)
+		env = append(env, e...)
+		files = append(files, f...)
 	}
 	return env, files, nil
+}
+
+// RegistryAuth delivers the .dockerconfigjson of each Secret in
+// spec.imagePullSecrets to the guest as a secret file, and names the files
+// for the entrypoint. The Secrets are referenced, never read.
+func RegistryAuth(app *spinv1alpha1.SpinApp) ([]corev1.EnvVar, []sandboxv1alpha1.SandboxSecretFile) {
+	if len(app.Spec.ImagePullSecrets) == 0 {
+		return nil, nil
+	}
+	var files []sandboxv1alpha1.SandboxSecretFile
+	var paths []string
+	for i, ps := range app.Spec.ImagePullSecrets {
+		path := fmt.Sprintf("%s/%d.json", runtimecontract.RegistryAuthDir, i)
+		paths = append(paths, path)
+		files = append(files, sandboxv1alpha1.SandboxSecretFile{
+			SecretName: ps.Name,
+			Items:      []sandboxv1alpha1.SandboxSecretFileItem{{Key: corev1.DockerConfigJsonKey, Path: path}},
+		})
+	}
+	return []corev1.EnvVar{{Name: runtimecontract.RegistryAuthFilesEnv, Value: strings.Join(paths, ",")}}, files
 }
 
 // VariableEnvName maps a Spin variable name to the environment variable read

@@ -35,7 +35,7 @@ make help
 
 Build both images from the same commit and push them to a registry your
 cluster can pull from. The runtime image has its own version, read from
-`runtime/VERSION` (currently `spin-4.2.1-r2`), so that controller upgrades
+`runtime/VERSION` (currently `spin-4.2.1-r3`), so that controller upgrades
 do not replace running replicas:
 
 ```bash
@@ -47,7 +47,7 @@ docker push <registry>/kubeswift-spin:v0.1.0-dev
 ```
 
 ```bash
-docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r2
+docker push <registry>/kubeswift-spin-runtime:spin-4.2.1-r3
 ```
 
 Then install from the source tree, with a `kubeswift` executor in an

@@ -177,8 +177,10 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	if o.cacheManager {
-		ns := &cachemanager.NamespaceReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Settings: o.compiledCache, Detector: o.detector, Retention: time.Hour}
-		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: o.compiledCache}
+		ns := &cachemanager.NamespaceReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Options: r.Options, Settings: o.compiledCache,
+			Detector: o.detector, Retention: time.Hour}
+		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: o.compiledCache, Defaults: r.Defaults,
+			Recorder: mgr.GetEventRecorder("kubeswift-spin-cache-manager"), MaxCompilers: 4, MaxCompilersPerNamespace: 1}
 		if err := ns.SetupWithManager(mgr); err != nil {
 			cancel()
 			t.Fatal(err)

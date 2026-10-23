@@ -50,6 +50,12 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == runtimecontract.CompileCommand {
+		return runCompile(args[1:], os.Environ())
+	}
+	if len(args) == 1 && args[0] == reapCommand {
+		return reap()
+	}
 	p, err := buildPlan(args, os.Environ(), os.ReadFile)
 	if err != nil {
 		return err
@@ -86,7 +92,7 @@ func internalEnv(k string) bool {
 // runtime configuration and registry credentials. It only reads files.
 func buildPlan(args, environ []string, readFile readFileFunc) (*plan, error) {
 	if len(args) == 0 {
-		return nil, errors.New("usage: kubeswift-spin-entrypoint up [spin up flags] | --version")
+		return nil, errors.New("usage: kubeswift-spin-entrypoint up [spin up flags] | compile [flags] | --version")
 	}
 	switch args[0] {
 	case "up", "--version":

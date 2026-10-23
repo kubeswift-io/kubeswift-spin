@@ -18,6 +18,7 @@ SPIN_VERSION="${SPIN_VERSION:-4.2.1}"
 REGISTRY_IMAGE="registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
 REG_PORT="${REG_PORT:-5555}"
 AUTH_REG_PORT="${AUTH_REG_PORT:-5556}"
+TLS_REG_PORT="${TLS_REG_PORT:-5557}"
 TMP="$(mktemp -d)"
 CONTAINERS=()
 FAILED=0
@@ -25,6 +26,8 @@ FAILED=0
 cleanup() {
   for c in "${CONTAINERS[@]}"; do docker rm -f "$c" >/dev/null 2>&1 || true; done
   [[ -n "${UPSTREAM_PID:-}" ]] && kill "$UPSTREAM_PID" 2>/dev/null || true
+  # Compile mode writes its output as root.
+  docker run --rm -v "$TMP:/t" --entrypoint /bin/sh "$REGISTRY_IMAGE" -c 'rm -rf /t/out-*' >/dev/null 2>&1 || true
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -217,6 +220,106 @@ elif grep -q "runtime-config-file" "$TMP/out"; then
 else
   fail "unexpected entrypoint error: $(cat "$TMP/out")"
 fi
+
+# 11. Compile mode (ADR 0014). It accepts no --insecure, so the application
+# comes from a TLS registry whose throwaway CA is added to the image's bundle.
+mkdir -p "$TMP/tls" "$TMP/multi"
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$TMP/tls/ca.key" -out "$TMP/tls/ca.crt" \
+  -days 1 -subj /CN=kss-test-ca 2>/dev/null
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$TMP/tls/srv.key" -out "$TMP/tls/srv.csr" -subj /CN=localhost 2>/dev/null
+printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\n' >"$TMP/tls/ext"
+openssl x509 -req -in "$TMP/tls/srv.csr" -CA "$TMP/tls/ca.crt" -CAkey "$TMP/tls/ca.key" -CAcreateserial \
+  -out "$TMP/tls/srv.crt" -days 1 -extfile "$TMP/tls/ext" 2>/dev/null
+cat /etc/ssl/certs/ca-certificates.crt "$TMP/tls/ca.crt" >"$TMP/tls/bundle.crt"
+chmod 0644 "$TMP/tls/"*
+docker run -d --name kss-test-registry-tls -p "127.0.0.1:$TLS_REG_PORT:5000" -v "$TMP/tls:/certs:ro" \
+  -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/srv.crt -e REGISTRY_HTTP_TLS_KEY=/certs/srv.key "$REGISTRY_IMAGE" >/dev/null
+CONTAINERS+=(kss-test-registry-tls)
+for _ in $(seq 1 40); do curl -s --cacert "$TMP/tls/ca.crt" -o /dev/null "https://localhost:$TLS_REG_PORT/v2/" && break; sleep 0.25; done
+# Three HTTP components (two identical), a required variable used in an
+# outbound host template, a Secret-like required variable and a key-value
+# label that needs runtime configuration.
+W="$ROOT/examples/target/wasm32-wasip2/release"
+cat >"$TMP/multi/spin.toml" <<EOF
+spin_manifest_version = 2
+[application]
+name = "kss-multi"
+version = "0.1.0"
+[variables]
+api_host = { required = true }
+token = { required = true, secret = true }
+[[trigger.http]]
+route = "/hello/..."
+component = "hello"
+[[trigger.http]]
+route = "/kv/..."
+component = "kv"
+[[trigger.http]]
+route = "/info/..."
+component = "info"
+[component.hello]
+source = "$W/hello_http.wasm"
+[component.kv]
+source = "$W/key_value.wasm"
+key_value_stores = ["default", "cache"]
+allowed_outbound_hosts = ["https://{{ api_host }}"]
+[component.kv.variables]
+token = "{{ token }}"
+[component.info]
+source = "$W/hello_http.wasm"
+EOF
+push_tls() { SSL_CERT_FILE="$TMP/tls/bundle.crt" "$SPIN" registry push "$@" 2>/dev/null | sed -n 's/.*digest \(sha256:[0-9a-f]*\).*/\1/p'; }
+multi_digest="$(cd "$TMP/multi" && push_tls "localhost:$TLS_REG_PORT/kss-multi:test")"
+hello_digest="$(cd "$ROOT/examples/hello-http" && push_tls "localhost:$TLS_REG_PORT/hello-http:test")"
+RT_REF="ghcr.io/kubeswift-io/kubeswift-spin-runtime@sha256:$(printf '0%.0s' $(seq 64))"
+ARCH="$(docker image inspect "$IMAGE" --format '{{.Architecture}}')"
+# compile <name> <source> [extra docker args]
+compile() {
+  local name="$1" src="$2"
+  shift 2
+  mkdir -p "$TMP/out-$name"
+  chmod 0777 "$TMP/out-$name"
+  docker run --rm --network host --user 0 -v "$TMP/tls/bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro" \
+    -v "$TMP/out-$name:/var/lib/kubeswift-spin-output" "$@" --entrypoint /usr/local/bin/kubeswift-spin-entrypoint "$IMAGE" \
+    compile "--source=$src" "--runtime=$RT_REF" "--architecture=$ARCH" >"$TMP/compile-$name.log" 2>&1
+}
+if compile multi "localhost:$TLS_REG_PORT/kss-multi@$multi_digest"; then
+  meta="$TMP/out-multi/metadata.json"
+  comps="$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(",".join(m["components"]), len(m["entries"]), m["source"].endswith(sys.argv[2]))' "$meta" "$multi_digest")"
+  [[ "$comps" == "hello,info,kv 2 True" ]] && ok "compile mode: 3 components, 2 entries (identical components share one)" || fail "compile metadata: $comps"
+  files="$(cd "$TMP/out-multi" && find . -type f | grep -v -E '^\./metadata\.json$|^\./cache/modules/wasmtime-[0-9.]+/[A-Za-z0-9_-]{43}$' || true)"
+  [[ -z "$files" ]] && ok "compile mode: only metadata and cache entries" || fail "unexpected output files: $files"
+  grep -q "2 placeholder variables" "$TMP/compile-multi.log" && ok "compile mode: placeholders for required variables" || fail "no placeholders"
+else
+  cat "$TMP/compile-multi.log" >&2
+  fail "compile mode failed for a multi-component application"
+fi
+# The compiled entry is the entry a normal start of the same application
+# writes: same key, so a replica can use it.
+if compile hello "localhost:$TLS_REG_PORT/hello-http@$hello_digest"; then
+  docker run -d --name kss-test-tls-hello --network host --user 0 -v "$TMP/tls/bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro" \
+    --entrypoint /usr/local/bin/kubeswift-spin-entrypoint "$IMAGE" \
+    up "--from=localhost:$TLS_REG_PORT/hello-http@$hello_digest" --listen=127.0.0.1:3210 >/dev/null
+  CONTAINERS+=(kss-test-tls-hello)
+  wait_http http://127.0.0.1:3210/hello || fail "hello-http from the TLS registry"
+  docker cp kss-test-tls-hello:/var/lib/kubeswift-spin/home/.cache/wasmtime "$TMP/runtime-cache" >/dev/null
+  want="$(ls "$TMP/out-hello/cache/modules/"*/ | sort)"
+  got="$(find "$TMP/runtime-cache/modules" -mindepth 2 -maxdepth 2 -type f -printf '%f\n' | grep -E '^[A-Za-z0-9_-]{43}$' | sort)"
+  [[ -n "$want" && "$want" == "$got" ]] && ok "compile mode writes the key a normal start uses" || fail "compiled [$want], runtime [$got]"
+else
+  cat "$TMP/compile-hello.log" >&2
+  fail "compile mode failed for hello-http"
+fi
+# Refusals: a tag, the wrong architecture, a non-empty output.
+compile tag "localhost:$TLS_REG_PORT/hello-http:test" && fail "compile accepted a tag" || ok "compile mode refuses a tag"
+other=amd64; [[ "$ARCH" == amd64 ]] && other=arm64
+if docker run --rm --user 0 -v "$TMP/out-hello:/var/lib/kubeswift-spin-output" --entrypoint /usr/local/bin/kubeswift-spin-entrypoint "$IMAGE" \
+  compile "--source=localhost:$TLS_REG_PORT/hello-http@$hello_digest" "--runtime=$RT_REF" "--architecture=$other" >/dev/null 2>&1; then
+  fail "compile accepted another architecture"
+else
+  ok "compile mode refuses another architecture"
+fi
+compile hello "localhost:$TLS_REG_PORT/hello-http@$hello_digest" && fail "compile wrote into a non-empty output" || ok "compile mode refuses a non-empty output"
 
 if [[ $FAILED -ne 0 ]]; then
   echo "runtime image tests FAILED" >&2

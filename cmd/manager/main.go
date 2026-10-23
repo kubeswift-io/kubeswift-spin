@@ -16,8 +16,10 @@ import (
 	authorizationv1 "k8s.io/api/authorization/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -30,6 +32,7 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
 	"github.com/kubeswift-io/kubeswift-spin/internal/controller"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
+	"github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 	"github.com/kubeswift-io/kubeswift-spin/internal/scheme"
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
 	"github.com/kubeswift-io/kubeswift-spin/internal/version"
@@ -66,6 +69,13 @@ type options struct {
 	cacheRetention    time.Duration
 	cacheRuntimes     string
 	cacheMaxRecords   int
+	compilerCPU       int
+	compilerMemory    string
+	compilerTimeout   time.Duration
+	cacheMaxSize      string
+	cacheMaxEntries   int64
+	maxCompilers      int
+	maxCompilersPerNS int
 }
 
 // Modes of the manager binary.
@@ -97,6 +107,14 @@ func main() {
 	flag.StringVar(&o.cacheArchitecture, "compiled-cache-architecture", "amd64", "Architecture of compiled caches for executors whose node selector does not name kubernetes.io/arch: amd64 or arm64.")
 	flag.StringVar(&o.cacheRuntimes, "compiled-cache-runtimes", "", "Comma-separated runtime images, repository@sha256:<digest>, that compiled caches are built and signed for. Executors with another runtime image get no cache.")
 	flag.IntVar(&o.cacheMaxRecords, "compiled-cache-max-records-per-namespace", 32, "Most SpinCompiledCache records the cache manager keeps for one namespace.")
+	cs := compiledcache.DefaultCompilerSettings()
+	flag.IntVar(&o.compilerCPU, "compiled-cache-compiler-cpu", int(cs.CPU), "vCPUs of a compiler sandbox.")
+	flag.StringVar(&o.compilerMemory, "compiled-cache-compiler-memory", cs.Memory.String(), "Memory of a compiler sandbox.")
+	flag.DurationVar(&o.compilerTimeout, "compiled-cache-compiler-timeout", cs.Timeout, "Run time limit of a compiler sandbox (spec.timeout), 1m to 1h.")
+	flag.StringVar(&o.cacheMaxSize, "compiled-cache-max-size", cs.MaxSize.String(), "Largest compiled cache a compiler may export.")
+	flag.Int64Var(&o.cacheMaxEntries, "compiled-cache-max-entries", cs.MaxEntries, "Most files and directories a compiled cache may hold.")
+	flag.IntVar(&o.maxCompilers, "compiled-cache-max-compilers", 4, "Most compiler sandboxes running at once, cluster-wide.")
+	flag.IntVar(&o.maxCompilersPerNS, "compiled-cache-max-compilers-per-namespace", 1, "Most compiler sandboxes running at once in one namespace.")
 	flag.DurationVar(&o.cacheRetention, "compiled-cache-retention", 24*time.Hour, "How long the cache manager keeps a SpinCompiledCache that no SpinApp uses (the most recently replaced one of each SpinApp is always kept).")
 	zapOpts := zap.Options{}
 	zapOpts.BindFlags(flag.CommandLine)
@@ -188,6 +206,12 @@ func run(o options) error {
 		recordNS = settings.Namespace
 	}
 	cacheOpts := controller.CacheOptions(namespaces, recordNS)
+	if o.mode == modeCacheManager {
+		// The cache manager only needs its compiler sandboxes, not the
+		// SpinApps' replicas.
+		cacheOpts.ByObject[&sandboxapi.SwiftSandbox{}] = cache.ByObject{Label: labels.SelectorFromSet(labels.Set{
+			translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: compiledcache.ComponentCompiler})}
+	}
 
 	metricsOpts := metricsserver.Options{BindAddress: o.metricsAddr, SecureServing: o.metricsSecure}
 	if o.metricsSecure {
@@ -226,7 +250,20 @@ func run(o options) error {
 		if err := ns.SetupWithManager(mgr); err != nil {
 			return err
 		}
-		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: settings}
+		compiler, err := o.compilerSettings()
+		if err != nil {
+			return err
+		}
+		rec := &cachemanager.RecordReconciler{
+			Client:                   mgr.GetClient(),
+			APIReader:                mgr.GetAPIReader(),
+			Settings:                 settings,
+			Compiler:                 compiler,
+			Defaults:                 defaults,
+			Recorder:                 mgr.GetEventRecorder("kubeswift-spin-cache-manager"),
+			MaxCompilers:             o.maxCompilers,
+			MaxCompilersPerNamespace: o.maxCompilersPerNS,
+		}
 		if err := rec.SetupWithManager(mgr); err != nil {
 			return err
 		}
@@ -259,6 +296,34 @@ func run(o options) error {
 		return err
 	}
 	return mgr.Start(ctx)
+}
+
+// compilerSettings validates the compiler sandbox flags.
+func (o options) compilerSettings() (compiledcache.CompilerSettings, error) {
+	var cs compiledcache.CompilerSettings
+	if o.compilerCPU < 1 || o.compilerCPU > maxVCPUFlag {
+		return cs, fmt.Errorf("--compiled-cache-compiler-cpu must be between 1 and %d", maxVCPUFlag)
+	}
+	cs.CPU = int32(o.compilerCPU)
+	var err error
+	if cs.Memory, err = resource.ParseQuantity(o.compilerMemory); err != nil || cs.Memory.Sign() <= 0 {
+		return cs, fmt.Errorf("--compiled-cache-compiler-memory must be a positive quantity, got %q", o.compilerMemory)
+	}
+	if o.compilerTimeout < time.Minute || o.compilerTimeout > time.Hour {
+		return cs, fmt.Errorf("--compiled-cache-compiler-timeout must be between 1m and 1h")
+	}
+	cs.Timeout = o.compilerTimeout
+	if cs.MaxSize, err = resource.ParseQuantity(o.cacheMaxSize); err != nil || cs.MaxSize.Sign() <= 0 {
+		return cs, fmt.Errorf("--compiled-cache-max-size must be a positive quantity, got %q", o.cacheMaxSize)
+	}
+	if o.cacheMaxEntries < 2 || o.cacheMaxEntries > 1<<20 {
+		return cs, fmt.Errorf("--compiled-cache-max-entries must be between 2 and %d", 1<<20)
+	}
+	cs.MaxEntries = o.cacheMaxEntries
+	if o.maxCompilers < 1 || o.maxCompilersPerNS < 1 || o.maxCompilersPerNS > o.maxCompilers {
+		return cs, fmt.Errorf("--compiled-cache-max-compilers and --compiled-cache-max-compilers-per-namespace must be at least 1, the second at most the first")
+	}
+	return cs, nil
 }
 
 func (o options) policy() (executor.Defaults, translate.ResourcePolicy, error) {
@@ -402,7 +467,11 @@ func cacheManagerBase() []check {
 		{"core.spinkube.dev", "spinapps", "", "watch"},
 		{"core.spinkube.dev", "spinappexecutors", "", "list"},
 		{"core.spinkube.dev", "spinappexecutors", "", "watch"},
-		{"events.k8s.io", "events", "", "create"},
+		// Compiler sandboxes, in the namespaces of the SpinApps they compile.
+		{"sandbox.kubeswift.io", "swiftsandboxes", "", "list"},
+		{"sandbox.kubeswift.io", "swiftsandboxes", "", "watch"},
+		{"sandbox.kubeswift.io", "swiftsandboxes", "", "create"},
+		{"sandbox.kubeswift.io", "swiftsandboxes", "", "delete"},
 	}
 }
 
@@ -428,7 +497,8 @@ func cacheManagerChecks(s compiledcache.Settings) []namespacedCheck {
 	}
 	out = append(out, namespacedCheck{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "status", "patch"}},
 		namespacedCheck{"", check{"", "namespaces", "", "list"}},
-		namespacedCheck{"", check{"", "namespaces", "", "watch"}})
+		namespacedCheck{"", check{"", "namespaces", "", "watch"}},
+		namespacedCheck{s.Namespace, check{"events.k8s.io", "events", "", "create"}})
 	return out
 }
 
