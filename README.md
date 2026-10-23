@@ -20,19 +20,18 @@ SpinKube is the better choice.
 
 ## Status
 
-The current release is v0.1.1, which adds a configurable drain period for
-deleted replicas. It was validated on a KVM lab cluster: Kubernetes 1.34
-(k0s) with the Calico CNI on linux/amd64 nodes, Spin Operator v0.6.1 and
-KubeSwift v0.16.3 (v0.1.0: the end-to-end test suite, rolling updates,
-scaling and deletion under continuous traffic, network isolation during
-termination, warm pools) and v0.16.4 (the drain period, rolling updates
-under traffic, warm pools).
-
-v0.2.0-rc1 is a pre-release that adds optional compiled Wasmtime caches
-([CHANGELOG](CHANGELOG.md)). Its release artifacts passed the end-to-end
-test suite (except the private registry phase) and the compiled-cache
-end-to-end test on the same cluster with KubeSwift v0.19.1.
-[docs/compatibility.md](docs/compatibility.md) lists what was tested.
+The current release is v0.2.0, which adds optional compiled Wasmtime
+caches ([CHANGELOG](CHANGELOG.md)). Its release candidate passed the
+end-to-end test suite (except the private registry phase), the
+compiled-cache end-to-end test and the startup benchmark on a KVM lab
+cluster: Kubernetes 1.34 (k0s) with the Calico CNI on linux/amd64 nodes,
+Spin Operator v0.6.1 and KubeSwift v0.19.1. Earlier releases were
+validated on the same cluster with KubeSwift v0.16.3 (v0.1.0: the
+end-to-end test suite, rolling updates, scaling and deletion under
+continuous traffic, network isolation during termination, warm pools) and
+v0.16.4 (v0.1.1: the drain period, rolling updates under traffic, warm
+pools). [docs/compatibility.md](docs/compatibility.md) lists what was
+tested.
 
 It has been run on that one cluster only. Evaluate it with your own
 workloads, and read the [known limitations](#known-limitations), before
@@ -53,7 +52,7 @@ relying on it in production.
 - Egress allowlists, ingress restriction and warm pools, set per executor.
 - A configurable drain period for deleted replicas, so that long requests
   in flight can finish ([drain period](docs/executor-contract.md#drain-period)).
-- Optional compiled Wasmtime caches (v0.2.0-rc1, KubeSwift v0.19.1 or
+- Optional compiled Wasmtime caches (v0.2.0, KubeSwift v0.19.1 or
   later): compiled in an isolated sandbox, signed by a separate signer,
   verified by KubeSwift and mounted read-only in warm-pool replicas, so
   Spin starts serving without compiling the application first
@@ -109,16 +108,15 @@ The images, chart and example artifacts are published on
 ([verification](docs/releasing.md#verifying-a-release)). The chart pins the
 controller, runtime and cache signer images by digest.
 
-The commands below install the v0.2.0-rc1 pre-release; for the current
-release, use `--version 0.1.1`. The SpinApp namespace (`demo` here) must
-exist before the chart creates an executor in it:
+The SpinApp namespace (`demo` here) must exist before the chart creates an
+executor in it:
 
 ```bash
 kubectl create namespace demo
 ```
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0-rc1 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -136,23 +134,24 @@ your values and takes everything else, including the image digests, from
 the new chart:
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0-rc1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0 \
   --namespace kubeswift-spin-system --reset-then-reuse-values
 ```
 
 Do not use `--reuse-values`: it also reuses the previous chart's values,
 including the controller, runtime and cache signer image digests that the
 released chart pins, so the chart version changes but the controller does
-not (from v0.1.1 to v0.2.0-rc1, the chart fails to render instead,
-because v0.1.1 has no `compiledCache` values). A plain `helm upgrade`
-without your values resets them, including the executors. With Helm before 3.14, save your values and pass them back:
+not (from v0.1.1 to v0.2.0, the chart fails to render instead, because
+v0.1.1 has no `compiledCache` values). A plain `helm upgrade` without
+your values resets them, including the executors. With Helm before 3.14,
+save your values and pass them back:
 
 ```bash
 helm get values kubeswift-spin --namespace kubeswift-spin-system --output yaml > kubeswift-spin-values.yaml
 ```
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0-rc1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0 \
   --namespace kubeswift-spin-system --values kubeswift-spin-values.yaml
 ```
 
@@ -167,7 +166,7 @@ Building from source: [CONTRIBUTING.md](CONTRIBUTING.md#build-from-source).
 ## Quick start
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.2.0-rc1/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.2.0/examples/hello-http/spinapp.yaml
 ```
 
 ```bash

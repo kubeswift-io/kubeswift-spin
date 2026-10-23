@@ -116,7 +116,7 @@ cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.1 \
 The same command, with only the image reference changed, verifies
 `ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.1` and
 `ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.1`, and from
-v0.2.0-rc1 on, the cache signer image
+v0.2.0 on, the cache signer image
 `ghcr.io/kubeswift-io/kubeswift-spin-cache-signer:<tag>`. The
 runtime image has its own version and is reused by later releases, so it
 carries the signature of the release that first built it, not of the

@@ -1,0 +1,40 @@
+mode cold: 10 runs
+metric (ms)                      n      min      p50      p90      p95      max     mean   stdev
+sandbox_created                 10       17       22       32       41       51       25      10
+direct_http                     10     6830     7832     8975     9044     9113     8026     820
+service_http                    10     8843    10866    11124    11163    11202    10523     761
+available                       10     8421     9451    10597    10631    10666     9659     823
+pod_ready                       10     8747     9698    10813    10859    10906     9887     806
+endpointslice_ready             10     8753     9710    10827    10873    10919     9896     807
+sandbox_workload_ready          10     8396     9422    10553    10595    10637     9625     823
+direct_to_available             10     1544     1638     1697     1711     1724     1633      60
+available_to_pod_ready          10      170      213      323      324      325      227      56
+pod_ready_to_endpointslice      10        5        9       14       14       14       10       3
+endpointslice_to_service_http   10       90      315     1442     1469     1496      627     565
+
+mode warm: 10 runs
+metric (ms)                      n      min      p50      p90      p95      max     mean   stdev
+sandbox_created                 10       17       23       49       55       60       32      16
+direct_http                     10     1502     1588     1644     1702     1760     1587      79
+service_http                    10     3300     3310     3318     3320     3323     3311       6
+available                       10     3104     3143     3170     3171     3173     3143      24
+pod_ready                       10     3110     3149     3177     3178     3180     3149      26
+endpointslice_ready             10     3116     3157     3183     3188     3193     3157      26
+slot_claim                      10       28       42       63       63       63       44      13
+create_to_claim                 10       46       76      106      108      111       76      24
+claim_to_direct_http            10     1401     1505     1580     1630     1679     1511      78
+sandbox_workload_ready          10     3078     3101     3120     3120     3120     3101      15
+direct_to_available             10     1385     1558     1638     1651     1664     1556      79
+available_to_pod_ready          10       -2        6       10       13       15        6       4
+pod_ready_to_endpointslice      10        5        7       12       13       14        8       3
+endpointslice_to_service_http   10      124      149      186      188      191      154      24
+
+comparison with the baseline (flagged above +25% and +100 ms; only meaningful on comparable hardware, cluster and registry)
+mode   metric           old p50   new p50   change   old p95   new p95   change
+cold   direct_http         7761      7832      +1%      8603      9044      +5%
+cold   service_http        9995     10866      +9%     11699     11163      -5%
+cold   available           9425      9451      +0%     10159     10631      +5%
+warm   direct_http         1555      1588      +2%      1764      1702      -4%
+warm   service_http        3309      3310      +0%      3313      3320      +0%
+warm   available           3135      3143      +0%      3164      3171      +0%
+warm   slot_claim            42        42      -2%        54        63     +17%
