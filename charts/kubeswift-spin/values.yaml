@@ -161,9 +161,10 @@ compiledCache:
   # cache before starting without it (0s to 5m). 0s gives cold replicas no
   # cache: KubeSwift verifies the signature with the registry on every cold
   # start and fetches the cache on a new node, which costs more than it
-  # saves for small applications. Warm-pool replicas always get the cache
-  # and never wait: they use it only when a placement already put it on
-  # their node.
+  # saves for small applications. Warm-pool replicas never wait: they get
+  # the cache once the placement on their pool reports every node prepared,
+  # and use it only when their node holds it. An executor without a
+  # sandboxPool gets no cache while this is 0s (NoWarmPool).
   fetchTimeout: 0s
   # Compiler sandboxes: one per record and attempt, in the SpinApp's
   # namespace, cold-booted (KubeSwift outputs do not use warm slots).

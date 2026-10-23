@@ -1,8 +1,7 @@
 # 0014: Trusted compiled Wasmtime cache delivered as a KubeSwift artifact
 
-Status: accepted for kubeswift-spin v0.2.0. Implemented in stages; see
-[compiled-cache.md](../compiled-cache.md) for what the current revision
-does.
+Status: accepted; implemented in kubeswift-spin v0.2.0-rc1. See
+[compiled-cache.md](../compiled-cache.md) for the operator documentation.
 
 ## Context
 
@@ -256,13 +255,30 @@ another namespace, application, runtime or architecture.
   claims above and `requirePlatformVerification`. `fetchTimeout` is `0s`
   for replicas checked out of a warm pool (the placement prepares the
   nodes, so a replica uses the cache only if its node already holds it and
-  never waits). Cold replicas get the cache only when the platform sets a
-  cold fetch timeout (default none): KubeSwift verifies the signature with
-  the registry on every cold start and fetches the cache on a new node
-  within that timeout, which on the lab took longer than 3 seconds and,
-  for small applications, costs more than the compilation it saves.
+  never waits). A warm replica gets the artifact only once its pool's
+  placement reports every node prepared: KubeSwift v0.19.1 never accepts
+  the readiness of a warm replica whose optional artifact it skipped after
+  the checkout (kubeswift-io/kubeswift#843). Cold replicas get the cache
+  only when the platform sets a cold fetch timeout (default none):
+  KubeSwift verifies the signature with the registry on every cold start
+  and fetches the cache on a new node within that timeout, which on the
+  lab took longer than 3 seconds and, for small applications, costs more
+  than the compilation it saves.
   The controller also sets the runtime contract variables that name the
-  expected source, runtime and architecture.
+  expected source, runtime and architecture. SpinApps on an executor
+  without a sandbox pool, while the cold fetch timeout is none, get no
+  record (`NoWarmPool`).
+- Two KubeSwift v0.19.1 defects can still cost a replica: a warm replica
+  whose node lost its entry while the placement reports it prepared
+  (kubeswift-io/kubeswift#843), and a cache pull Secret KubeSwift cannot
+  read, which fails the sandbox although the artifact is optional
+  (kubeswift-io/kubeswift#844). The controller replaces a replica that
+  matches the first defect exactly (checked out, cache skipped after the
+  claim, no readiness verdict accepted for a minute, or for its readiness
+  check's initial delay, two periods and 15 seconds if longer), one per
+  reconcile, and after either defect starts the SpinApp's new replicas
+  without the cache for 30 minutes (`DeliveryFailed`). The hold is kept
+  in memory; a controller restart ends it early.
 - The decoration is applied per replica outside the revision fingerprint:
   a cache becoming available, or going away, never rolls replicas.
 - The runtime entrypoint owns activation. It uses the cache only when the

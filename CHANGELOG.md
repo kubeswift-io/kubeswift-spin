@@ -7,70 +7,93 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## Unreleased (v0.2.0)
+## v0.2.0-rc1 (2026-10-23)
+
+First release candidate of v0.2.0, for evaluation of trusted compiled
+Wasmtime caches. With compiled caches disabled (the default) it behaves as
+v0.1.1, apart from the runtime image upgrade below.
+
+Compiled caches need KubeSwift v0.19.1 or later and the
+`kernels/sandbox:6.6.17` SwiftKernel or later in the namespaces that use
+them. They were validated on the KVM lab with KubeSwift v0.19.1, Spin
+Operator v0.6.1 and Spin v4.2.1 on linux/amd64
+(test/e2e/compiled-cache-e2e.sh, docs/performance.md), and have not run on
+arm64. The general KVM end-to-end test (test/e2e/kvm-e2e.sh) last ran on
+KubeSwift v0.16.3, for v0.1.0; this candidate is the build to run it on
+v0.19.1.
 
 ### Added
 
-- Trusted compiled Wasmtime cache, in progress (ADR 0014,
-  docs/compiled-cache.md). Off by default. The chart value
-  `compiledCache.enabled` installs the `SpinCompiledCache` CRD
-  (`spin.kubeswift.io/v1alpha1`) and the cache manager
-  (`manager --mode=cache-manager`, its own ServiceAccount); executors opt in
-  with `spin.kubeswift.io/compiled-cache: enabled` and SpinApps can opt out.
-  Administrators enable namespaces with the label
-  `spin.kubeswift.io/compiled-cache=enabled` after checking the
-  prerequisites in docs/compiled-cache.md, and caches are built only for the
-  platform's runtime images (`runtimeImage.digest`,
-  `compiledCache.extraRuntimes`). This revision records one cache per
-  namespace, application digest, runtime digest, architecture and
-  repository, tracks its consumers, deletes unused records after a
-  retention period, and reports the SpinApp condition `CompiledCache` with
-  Events. Compilation, signing and delivery follow.
-- The chart's Leases are restricted to each component's own Lease name.
-- Compile mode in the runtime image (`kubeswift-spin-entrypoint compile`),
-  and compiler SwiftSandboxes: the cache manager compiles each record's
-  application in its namespace, with the SpinApp's pull credentials and
-  literal variables only, and KubeSwift exports the cache with platform
-  credentials (`SwiftArtifactExportPolicy`). Compilers are bounded in size,
-  time and concurrency, failures back off from 1 minute to 6 hours, and an
-  unrecorded compiler is never adopted.
+- Trusted compiled Wasmtime caches (ADR 0014, docs/compiled-cache.md). Off
+  by default; three switches turn them on: the chart value
+  `compiledCache.enabled`, the namespace label
+  `spin.kubeswift.io/compiled-cache=enabled` (an administrator's assertion
+  of the prerequisites), and the executor annotation
+  `spin.kubeswift.io/compiled-cache: enabled` (chart value
+  `executors[].compiledCache`). A SpinApp can opt out with the same
+  annotation set to `disabled`.
+  - One `SpinCompiledCache` record (`spin.kubeswift.io/v1alpha1`, in the
+    release namespace) per namespace, application digest, runtime digest,
+    architecture and repository; unused records are deleted after a
+    retention period, keeping each SpinApp's current and previous record.
+  - The cache manager (`manager --mode=cache-manager`, its own
+    ServiceAccount) compiles each record in a SwiftSandbox running the
+    runtime image's compile mode, with no signing key or push credential;
+    KubeSwift exports the result with platform credentials
+    (`SwiftArtifactExportPolicy`). Compilers are bounded in size, time and
+    concurrency, and failures back off from 1 minute to 6 hours.
+  - The cache signer (`kubeswift-spin-cache-signer` image, its own
+    Deployment and ServiceAccount, the only holder of the signing key)
+    checks the compiler, its export and the artifact, and signs the digest
+    with cosign v3.1.3 and claims for the kind, namespace, source, runtime,
+    architecture and compiler. KubeSwift verifies them under a
+    `SwiftArtifactVerificationPolicy`.
+  - The cache manager keeps one `SwiftArtifactPlacement` per warm pool of
+    a cache's consumers. New warm-pool replicas get the signed cache as an
+    optional, platform-verified artifact at `/opt/kubeswift-spin-cache`
+    once their pool is prepared; replicas that boot cold get it only when
+    `compiledCache.fetchTimeout` is above `0s` (the default is `0s`). The
+    cache is not part of the revision: it never replaces running replicas.
+  - The runtime entrypoint uses the cache only from a read-only mount whose
+    metadata names the replica's application, runtime and architecture,
+    and drops `WASMTIME_CACHE_FILE` and `DISABLE_WASMTIME_CACHE` set
+    anywhere else.
+  - The SpinApp condition `CompiledCache` and the Events
+    `CompiledCacheRequested`, `CompiledCacheReady`, `CompiledCacheFailed`,
+    `CompiledCacheSkipped` and `CompiledCachePlacementFailed`. The cache
+    never affects `Available` or `Progressing`.
+  - Metrics `kubeswift_spin_compiled_cache_lookups_total`,
+    `_attachments_total`, `_compilations_total` and `_signatures_total`,
+    and the deletion reason `compiled_cache_not_ready`
+    (docs/observability.md).
+  - Workarounds for KubeSwift v0.19.1
+    ([kubeswift-io/kubeswift#843](https://github.com/kubeswift-io/kubeswift/issues/843),
+    [#844](https://github.com/kubeswift-io/kubeswift/issues/844)): a warm
+    replica whose cache KubeSwift skipped after the checkout and whose
+    readiness it never accepts is replaced, one per reconcile. After such a
+    replacement, or after a replica fails on an unreadable cache pull
+    Secret, the SpinApp's new replicas start without the cache for up to
+    30 minutes (`DeliveryFailed`).
+- The `multi-component` example.
+- `test/e2e/compiled-cache-e2e.sh`, and `PERF_COMPILED_CACHE` in
+  `hack/perf-startup.sh`.
 
-- The cache signer (`kubeswift-spin-cache-signer` image, its own
-  Deployment and ServiceAccount, the only holder of the signing key): it
-  checks each exported cache's compiler sandbox, spec and export tag and the
-  artifact itself, then signs its digest with cosign (v3.1.3, built from
-  source) and the claims kind, namespace, source, runtime, architecture and
-  compiler. docs/compiled-cache.md describes the key, the registry
-  credential and the SwiftArtifactVerificationPolicy to create.
-- Delivery of signed caches. The cache manager keeps one
-  `SwiftArtifactPlacement` per warm pool of a signed cache's consumers;
-  records are `Ready` once every pool is prepared. New replicas get the
-  signed cache as an optional, platform-verified artifact at
-  `/opt/kubeswift-spin-cache` (`fetchTimeout` 0s from a warm pool; cold
-  replicas only when `compiledCache.fetchTimeout` is set, default `0s`),
-  read with
-  `compiledCache.pullSecretName`, outside the revision. The runtime
-  entrypoint uses the mount only when it is read-only and its metadata
-  matches, and drops `WASMTIME_CACHE_FILE` and `DISABLE_WASMTIME_CACHE`
-  from anywhere else. New metrics count lookups and attachments. KubeSwift
-  v0.19.1 fails a replica whose optional cache names a pull Secret it
-  cannot read; the controller then starts that SpinApp's new replicas
-  without the cache for 30 minutes and reports `CompiledCache=False`
-  (`DeliveryFailed`). KubeSwift v0.19.1 also never accepts the readiness of
-  a warm replica whose optional artifact it skipped after the checkout:
-  warm replicas get the cache only once their pool's placement is
-  prepared on every node, and a warm replica that is not ready a minute
-  after such a skip is replaced and the cache held back for 30 minutes.
+### Changed
+
+- The KubeSwift test dependency is v0.19.1, and Go is 1.26.10.
+- The chart's Leases are restricted to each component's own Lease name.
+- Releases also publish the cache signer image, with an SPDX SBOM, and
+  list it in `images.txt`.
 
 ### Upgrade notes
 
 - The runtime image is `spin-4.2.1-r3` (compile mode and the compiled
   cache mount). Upgrading replaces every replica that uses the chart's
   default runtime image.
-
-### Changed
-
-- The KubeSwift test dependency is v0.19.1, and Go is 1.26.10.
+- Upgrade with `--reset-then-reuse-values`, not `--reuse-values`, as the
+  README describes: the new chart values must take their defaults. With
+  `--reuse-values` the chart fails to render (`nil pointer evaluating
+  interface {}.enabled`), because v0.1.1 has no `compiledCache` values.
 
 ## v0.1.1 (2026-10-12)
 

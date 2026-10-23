@@ -4,11 +4,11 @@ Installs the kubeswift-spin controller and, optionally, KubeSwift-backed
 SpinAppExecutors. It does not install KubeSwift or Spin Operator: their CRDs
 must exist first, and the controller exits at startup if they do not.
 
-The released chart is published as an OCI artifact and pins both images by
-digest:
+The released chart is published as an OCI artifact and pins the
+controller, runtime and cache signer images by digest:
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.1 --namespace kubeswift-spin-system --create-namespace
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0-rc1 --namespace kubeswift-spin-system --create-namespace
 ```
 
 From a source checkout, at the repository root (the images must exist in
@@ -24,7 +24,8 @@ see [Executors](#executors) to change that.
 To upgrade, use `helm upgrade --reset-then-reuse-values` (Helm 3.14 or
 later), or pass your saved values with `--values`. Do not use
 `--reuse-values`: it also reuses the previous chart's pinned image
-digests, so the controller and runtime images do not change. See
+digests, so the controller, runtime and cache signer images do not
+change. See
 [Upgrade](../../README.md#upgrade) in the repository README.
 
 ## Values
@@ -50,12 +51,26 @@ digests, so the controller and runtime images do not change. See
 | `metrics.secure` | `false` | HTTPS with Kubernetes token authentication and authorization |
 | `metrics.serviceMonitor.enabled` | `false` | create a Prometheus Operator ServiceMonitor |
 | `podSecurityContext`, `securityContext` | hardened | non-root, read-only root filesystem, no capabilities, RuntimeDefault seccomp |
+| `compiledCache.enabled` | `false` | install the SpinCompiledCache CRD, the cache manager and the cache signer ([docs/compiled-cache.md](../../docs/compiled-cache.md)); needs KubeSwift v0.19.1 or later and `runtimeImage.digest` |
+| `compiledCache.repository` | `""` | base repository of compiled caches; each namespace's go to `<repository>/<namespace>/wasmtime-cache` |
+| `compiledCache.architecture` | `amd64` | architecture for executors whose node selector does not name `kubernetes.io/arch` |
+| `compiledCache.extraRuntimes` | `[]` | runtime images (`repository@sha256:...`), besides `runtimeImage`, that caches are built for |
+| `compiledCache.retention` / `maxRecordsPerNamespace` | `24h` / `32` | how long an unused record is kept, and most records per namespace |
+| `compiledCache.pullSecretName` | `""` | `kubernetes.io/dockerconfigjson` Secret in every enabled namespace that reads only that namespace's caches; create it before labelling the namespace |
+| `compiledCache.fetchTimeout` | `0s` | how long a replica that does not come from a warm pool may wait for its cache (`0s` to `5m`); `0s` gives such replicas no cache |
+| `compiledCache.compiler.*` | 1 CPU, `1Gi`, `10m` | compiler sandbox size and timeout, largest export (`maxSize`, `maxEntries`) and concurrency (`maxConcurrent`, `maxConcurrentPerNamespace`) |
+| `compiledCache.signer.image.*` | `ghcr.io/kubeswift-io/kubeswift-spin-cache-signer`, chart appVersion | cache signer image (the released chart sets the digest) |
+| `compiledCache.signer.key.secretName` / `kmsRef` | `""` | the signing key: a Secret in the release namespace with `cosign.key` and `cosign.password`, or a KMS reference |
+| `compiledCache.signer.registryCredentialsSecret` | `""` | `kubernetes.io/dockerconfigjson` Secret in the release namespace that reads exported caches and pushes signatures |
 
 Other values: `controller.extraArgs`, `serviceAccount.create`,
 `serviceAccount.name`, `serviceAccount.annotations`, `podAnnotations`,
 `podLabels`, `resources`, `nodeSelector`, `tolerations`, `affinity`,
 `priorityClassName`, `metrics.port`, `metrics.service.annotations`,
-`metrics.serviceMonitor.interval` and `metrics.serviceMonitor.labels`; see
+`metrics.serviceMonitor.interval`, `metrics.serviceMonitor.labels`,
+`compiledCache.signer.extraEnv`, `compiledCache.signer.serviceAccountAnnotations`,
+`compiledCache.signer.logLevel`, `compiledCache.signer.extraArgs`,
+`compiledCache.signer.resources` and `compiledCache.manager.*`; see
 `values.yaml`. `values.schema.json` rejects unknown keys and invalid enum
 values.
 
@@ -90,8 +105,14 @@ executors:
 Fields: `networkMode`, `rootfsMode`, `kernelProfile`, `sandboxPool`,
 `nodeSelector`, `defaultCPU`, `defaultMemory`, `runtimeImage`,
 `runtimeImagePullSecret`, `runtimeImageVerifyKeySecret`, `egressAllow`,
-`ingressFrom`, `readinessStartup`, `drainPeriod`, `maxDrainPeriod`, `otel`. The namespaces
-must exist before installing.
+`ingressFrom`, `readinessStartup`, `drainPeriod`, `maxDrainPeriod`, `otel`,
+`compiledCache`. The namespaces must exist before installing.
+
+`compiledCache` (`enabled` or `disabled`) renders
+`spin.kubeswift.io/compiled-cache`: with `enabled`, the executor's SpinApps
+get signed compiled Wasmtime caches when `compiledCache.enabled` is set and
+the namespace is labelled; replicas from its `sandboxPool` mount them. See
+[docs/compiled-cache.md](../../docs/compiled-cache.md).
 
 `egressAllow` (1 to 32 rules, each a `service` with `name` and optional
 `namespace`, or a `cidr`, with optional `ports`) renders the

@@ -447,13 +447,24 @@ jobs:
           registry-password: ${{ secrets.GITHUB_TOKEN }}
           upload-artifact: false
           upload-release-assets: false
+      - name: Cache signer image SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.REGISTRY }}/kubeswift-spin-cache-signer@${{ needs.signer-image.outputs.digest }}
+          format: spdx-json
+          output-file: dist/kubeswift-spin-cache-signer.spdx.json
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          upload-artifact: false
+          upload-release-assets: false
       - name: Image digests and checksums
         env:
           CONTROLLER: ${{ env.REGISTRY }}/kubeswift-spin:${{ github.ref_name }}@${{ needs.controller-image.outputs.digest }}
           RUNTIME: ${{ env.REGISTRY }}/kubeswift-spin-runtime@${{ needs.runtime-image.outputs.digest }}
+          SIGNER: ${{ env.REGISTRY }}/kubeswift-spin-cache-signer:${{ github.ref_name }}@${{ needs.signer-image.outputs.digest }}
           CHART: ${{ env.REGISTRY }}/charts/kubeswift-spin@${{ needs.chart.outputs.digest }}
         run: |
-          printf '%s\n' "$CONTROLLER" "$RUNTIME" "$CHART" > dist/images.txt
+          printf '%s\n' "$CONTROLLER" "$RUNTIME" "$SIGNER" "$CHART" > dist/images.txt
           cd dist
           sha256sum -- *.tgz *.spdx.json images.txt examples.txt > SHA256SUMS
           cat SHA256SUMS

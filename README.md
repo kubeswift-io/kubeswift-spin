@@ -26,8 +26,13 @@ deleted replicas. It was validated on a KVM lab cluster: Kubernetes 1.34
 KubeSwift v0.16.3 (v0.1.0: the end-to-end test suite, rolling updates,
 scaling and deletion under continuous traffic, network isolation during
 termination, warm pools) and v0.16.4 (the drain period, rolling updates
-under traffic, warm pools). [docs/compatibility.md](docs/compatibility.md)
-lists what was tested.
+under traffic, warm pools).
+
+v0.2.0-rc1 is a pre-release that adds optional compiled Wasmtime caches
+([CHANGELOG](CHANGELOG.md)). They were validated on the same cluster with
+KubeSwift v0.19.1; the rest of the end-to-end suite has not yet run on
+v0.19.1. [docs/compatibility.md](docs/compatibility.md) lists what was
+tested.
 
 It has been run on that one cluster only. Evaluate it with your own
 workloads, and read the [known limitations](#known-limitations), before
@@ -48,6 +53,11 @@ relying on it in production.
 - Egress allowlists, ingress restriction and warm pools, set per executor.
 - A configurable drain period for deleted replicas, so that long requests
   in flight can finish ([drain period](docs/executor-contract.md#drain-period)).
+- Optional compiled Wasmtime caches (v0.2.0-rc1, KubeSwift v0.19.1 or
+  later): compiled in an isolated sandbox, signed by a separate signer,
+  verified by KubeSwift and mounted read-only in warm-pool replicas, so
+  Spin starts serving without compiling the application first
+  ([compiled caches](docs/compiled-cache.md)).
 
 ## How it works
 
@@ -79,7 +89,9 @@ Details: [architecture](docs/architecture.md) and
   isolation being kept until a replica has stopped, and on a re-created
   sandbox never taking over the previous one's launcher. Older KubeSwift
   releases run with the limitations in
-  [compatibility](docs/compatibility.md#kubeswift-features).
+  [compatibility](docs/compatibility.md#kubeswift-features). Compiled
+  caches need KubeSwift v0.19.1 or later, and SwiftKernel 6.6.17 or later
+  in the namespaces that use them.
 - a node labelled `kubeswift.io/kernel-node=true`, and a Ready SwiftKernel
   named `sandbox` in every namespace that runs SpinApps (6.6.14 or later
   for secret files)
@@ -95,17 +107,18 @@ checks for their APIs and logs which KubeSwift features it detected
 The images, chart and example artifacts are published on
 `ghcr.io/kubeswift-io` and signed with cosign keyless signing
 ([verification](docs/releasing.md#verifying-a-release)). The chart pins the
-controller and runtime images by digest.
+controller, runtime and cache signer images by digest.
 
-The SpinApp namespace (`demo` here) must exist before the chart creates an
-executor in it:
+The commands below install the v0.2.0-rc1 pre-release; for the current
+release, use `--version 0.1.1`. The SpinApp namespace (`demo` here) must
+exist before the chart creates an executor in it:
 
 ```bash
 kubectl create namespace demo
 ```
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.1 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0-rc1 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -123,22 +136,23 @@ your values and takes everything else, including the image digests, from
 the new chart:
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0-rc1 \
   --namespace kubeswift-spin-system --reset-then-reuse-values
 ```
 
 Do not use `--reuse-values`: it also reuses the previous chart's values,
-including the controller and runtime image digests that the released chart
-pins, so the chart version changes but the controller does not. A plain
-`helm upgrade` without your values resets them, including the executors.
-With Helm before 3.14, save your values and pass them back:
+including the controller, runtime and cache signer image digests that the
+released chart pins, so the chart version changes but the controller does
+not (from v0.1.1 to v0.2.0-rc1, the chart fails to render instead,
+because v0.1.1 has no `compiledCache` values). A plain `helm upgrade`
+without your values resets them, including the executors. With Helm before 3.14, save your values and pass them back:
 
 ```bash
 helm get values kubeswift-spin --namespace kubeswift-spin-system --output yaml > kubeswift-spin-values.yaml
 ```
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.1.1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.0-rc1 \
   --namespace kubeswift-spin-system --values kubeswift-spin-values.yaml
 ```
 
@@ -153,7 +167,7 @@ Building from source: [CONTRIBUTING.md](CONTRIBUTING.md#build-from-source).
 ## Quick start
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.1.1/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.2.0-rc1/examples/hello-http/spinapp.yaml
 ```
 
 ```bash
@@ -187,9 +201,11 @@ and an experimental MCP server, are in [examples](examples/).
   `minSyncPeriod`, 1 second by default). Lowering it is optional cluster
   configuration.
 - Startup figures in [performance](docs/performance.md) are lab
-  measurements, not guarantees. The Wasmtime compilation cache measured
-  there was a diagnostic; kubeswift-spin ships no prebuilt cache, and every
-  sandbox starts with an empty one.
+  measurements, not guarantees. Without compiled caches every sandbox
+  starts with an empty Wasmtime cache. Compiled caches serve only replicas
+  from warm pools by default, have been run on linux/amd64 only, and
+  depend on two KubeSwift v0.19.1 workarounds
+  ([compiled caches](docs/compiled-cache.md#replicas)).
 - Any SpinApp author in a namespace can make that namespace's Secrets
   readable by their application, and registry credentials and
   Secret-backed values are readable by the Spin process in the guest; see

@@ -36,6 +36,11 @@ not rely on compiled caches there until it has.
   platform-verified artifacts and sandbox outputs from the published schema
   (present from v0.19.0; v0.19.1 is the tested baseline); without them
   SpinApps report `CompiledCache=False/Unsupported`.
+- The SwiftKernel `sandbox` in each enabled namespace on
+  `kernels/sandbox:6.6.17` or later. Compilers export their cache as a
+  KubeSwift output, which needs that kernel; on an older one KubeSwift
+  fails the compiler sandbox with `KernelUnsupported` and no cache is
+  built.
 - A runtime image pinned by digest (`runtimeImage.digest`). An executor
   that names another runtime image with `spin.kubeswift.io/runtime-image`
   gets a cache only if that digest is listed in
@@ -355,7 +360,7 @@ replaces such a replica. It matches exactly that defect: the replica was
 checked out of a warm slot (`CheckedOut`), the cache was skipped after the
 claim (`NotOnNode` or `FetchTimeout`), and no readiness verdict was
 accepted (`Probing`) for a minute, or for the readiness check's initial
-delay and two periods if that is longer. One replica is replaced per
+delay, two periods and 15 seconds if that is longer. One replica is replaced per
 reconcile, and the SpinApp's new replicas start without the cache for up to
 30 minutes (`DeliveryFailed`). The hold is kept in memory: a controller
 restart ends it early. The replacement path has unit tests but has not run

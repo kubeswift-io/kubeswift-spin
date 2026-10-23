@@ -701,6 +701,14 @@ These do not replace replicas:
   (`internal/translate/golden_test.go`) fails when the rendered spec changes,
   so this cannot happen by accident.
 
+One more replacement is outside the revision: on KubeSwift v0.19.1 the
+controller deletes a warm replica whose compiled cache KubeSwift skipped
+after the checkout and whose readiness it never accepts, one per reconcile
+(reason `compiled_cache_not_ready` in
+`kubeswift_spin_sandbox_deletions_total`); the replacement starts
+without the cache
+([compiled-cache.md](compiled-cache.md#replicas)).
+
 ## Executor changes
 
 | Event | Behavior |
