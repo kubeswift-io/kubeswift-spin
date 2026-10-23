@@ -86,9 +86,10 @@ Configure these before the first release:
 |---|---|
 | controller image | `ghcr.io/kubeswift-io/kubeswift-spin:<tag>` (linux/amd64, linux/arm64) |
 | runtime image | `ghcr.io/kubeswift-io/kubeswift-spin-runtime:<runtime/VERSION>` (linux/amd64, linux/arm64), built only when that tag does not exist yet; an existing tag is reused only if this workflow signed it |
-| Helm chart | `oci://ghcr.io/kubeswift-io/charts/kubeswift-spin`, version without the `v`; it pins both images by digest |
+| cache signer image | `ghcr.io/kubeswift-io/kubeswift-spin-cache-signer:<tag>` (linux/amd64, linux/arm64), used only with compiled caches |
+| Helm chart | `oci://ghcr.io/kubeswift-io/charts/kubeswift-spin`, version without the `v`; it pins the three images by digest |
 | example artifacts | `ghcr.io/kubeswift-io/kubeswift-spin-examples/<app>:<tag>` |
-| GitHub release | draft, marked as a pre-release for tags with a `-` suffix, with generated notes and these files: the chart package, SPDX SBOMs of both images, `images.txt` and `examples.txt` (references with digests) and `SHA256SUMS` |
+| GitHub release | draft, marked as a pre-release for tags with a `-` suffix, with generated notes and these files: the chart package, SPDX SBOMs of the three images, `images.txt` and `examples.txt` (references with digests) and `SHA256SUMS` |
 
 No `latest` tag is published. Only linux/amd64 has been tested end to end;
 the arm64 images are built but not validated.
@@ -114,7 +115,9 @@ cosign verify ghcr.io/kubeswift-io/kubeswift-spin:v0.1.1 \
 
 The same command, with only the image reference changed, verifies
 `ghcr.io/kubeswift-io/charts/kubeswift-spin:0.1.1` and
-`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.1`. The
+`ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:v0.1.1`, and from
+v0.2.0-rc1 on, the cache signer image
+`ghcr.io/kubeswift-io/kubeswift-spin-cache-signer:<tag>`. The
 runtime image has its own version and is reused by later releases, so it
 carries the signature of the release that first built it, not of the
 current tag. Verify the digest listed in the release's `images.txt` with

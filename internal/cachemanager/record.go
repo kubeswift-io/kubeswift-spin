@@ -100,9 +100,9 @@ func (r *RecordReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
 				return o.GetLabels()[compiledcache.LabelComponent] == compiledcache.ComponentCompiler
 			}))).
-		// A compile that ends frees a compiler slot: wake the records of
-		// its namespace that wait for one.
-		Watches(&cachev1alpha1.SpinCompiledCache{}, handler.EnqueueRequestsFromMapFunc(r.recordsOfNamespace),
+		// A compile that ends frees a compiler slot: wake the records that
+		// wait for one, in any namespace (the cluster-wide limit applies too).
+		Watches(&cachev1alpha1.SpinCompiledCache{}, handler.EnqueueRequestsFromMapFunc(r.recordsWaiting),
 			builder.WithPredicates(compileEnded)).
 		Watches(&sandboxv1alpha1.SwiftArtifactPlacement{}, handler.EnqueueRequestsFromMapFunc(r.recordsForPlacement),
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
@@ -128,20 +128,29 @@ func (r *RecordReconciler) recordsForCompiler(ctx context.Context, o client.Obje
 	return out
 }
 
-// recordsOfNamespace enqueues the other records of a record's consumer
-// namespace.
-func (r *RecordReconciler) recordsOfNamespace(ctx context.Context, o client.Object) []reconcile.Request {
-	var out []reconcile.Request
+// recordsWaiting enqueues the records, other than o, that have no compile
+// running and no trusted artifact: those a freed compiler slot can start.
+func (r *RecordReconciler) recordsWaiting(ctx context.Context, o client.Object) []reconcile.Request {
 	var list cachev1alpha1.SpinCompiledCacheList
-	if err := r.Client.List(ctx, &list, client.InNamespace(r.Settings.Namespace),
-		client.MatchingLabels{compiledcache.LabelNamespace: o.GetLabels()[compiledcache.LabelNamespace]}); err == nil {
-		for i := range list.Items {
-			if list.Items[i].Name != o.GetName() {
-				out = append(out, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
-			}
+	if err := r.Client.List(ctx, &list, client.InNamespace(r.Settings.Namespace)); err != nil {
+		log.FromContext(ctx).Error(err, "list SpinCompiledCaches to wake those waiting for a compiler")
+		return nil
+	}
+	var out []reconcile.Request
+	for i := range list.Items {
+		rec := &list.Items[i]
+		if rec.Name == o.GetName() || compileRunning(rec) || compiledcache.TrustedArtifact(rec) != "" {
+			continue
 		}
+		out = append(out, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rec)})
 	}
 	return out
+}
+
+// compileRunning reports whether a record has a compile attempt in progress.
+func compileRunning(r *cachev1alpha1.SpinCompiledCache) bool {
+	c := r.Status.Compile
+	return c != nil && c.Sandbox != nil && c.FinishedAt == nil
 }
 
 // compileEnded passes a record update whose compile attempt ended (it got a
@@ -149,18 +158,14 @@ func (r *RecordReconciler) recordsOfNamespace(ctx context.Context, o client.Obje
 var compileEnded = predicate.Funcs{
 	CreateFunc:  func(event.CreateEvent) bool { return false },
 	GenericFunc: func(event.GenericEvent) bool { return false },
-	DeleteFunc:  func(event.DeleteEvent) bool { return true },
+	DeleteFunc: func(e event.DeleteEvent) bool {
+		rec, ok := e.Object.(*cachev1alpha1.SpinCompiledCache)
+		return ok && compileRunning(rec)
+	},
 	UpdateFunc: func(e event.UpdateEvent) bool {
 		o, ok1 := e.ObjectOld.(*cachev1alpha1.SpinCompiledCache)
 		n, ok2 := e.ObjectNew.(*cachev1alpha1.SpinCompiledCache)
-		if !ok1 || !ok2 {
-			return false
-		}
-		running := func(r *cachev1alpha1.SpinCompiledCache) bool {
-			c := r.Status.Compile
-			return c != nil && c.Sandbox != nil && c.FinishedAt == nil
-		}
-		return running(o) && !running(n)
+		return ok1 && ok2 && compileRunning(o) && !compileRunning(n)
 	},
 }
 

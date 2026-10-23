@@ -81,6 +81,9 @@ func (r *SpinAppReconciler) compiledCache(ctx context.Context, app *spinv1alpha1
 			break
 		}
 		id, skip = compiledcache.Derive(app, p, r.CompiledCache)
+		if skip == nil && !r.CacheDelivery.Serves(p) {
+			id, skip = nil, compiledcache.NoWarmPool(p.ExecutorName)
+		}
 	}
 	if skip != nil {
 		c := compiledcache.AppCondition(skip, nil)
@@ -158,7 +161,7 @@ func (r *SpinAppReconciler) applyCache(app *spinv1alpha1.SpinApp, prev []metav1.
 	case compiledcache.ReasonPlacementFailed:
 		r.event(app, corev1.EventTypeWarning, EventCompiledCachePlacementFailed, "CompiledCache", "%s", cond.Message)
 	case compiledcache.ReasonNotConfigured, compiledcache.ReasonImageNotPinned, compiledcache.ReasonRuntimeNotPinned, compiledcache.ReasonUnsupported,
-		compiledcache.ReasonRuntimeNotAllowed, compiledcache.ReasonNamespaceNotEnabled:
+		compiledcache.ReasonRuntimeNotAllowed, compiledcache.ReasonNamespaceNotEnabled, compiledcache.ReasonNoWarmPool:
 		r.event(app, corev1.EventTypeNormal, EventCompiledCacheSkipped, "CompiledCache", "%s", cond.Message)
 	}
 }
@@ -253,24 +256,46 @@ func cacheFailure(sb *sandboxv1alpha1.SwiftSandbox) string {
 	return ""
 }
 
-// cacheStuckAfter is how long a warm replica whose cache KubeSwift skipped
-// after the checkout may stay not ready before it is replaced.
+// cacheStuckAfter is the least time a warm replica whose cache KubeSwift
+// skipped after the checkout may stay not ready before it is replaced.
 const cacheStuckAfter = time.Minute
 
 // reasonNotReadyAfterSkip is the hold reason of a replaced stuck replica.
 const reasonNotReadyAfterSkip = "NotReadyAfterSkip"
 
+// KubeSwift v0.19.1 strings the stuck check matches: the GuestRunning reason
+// of a warm checkout, the artifact skip reasons that lead to a re-dispatch
+// after the checkout, and the WorkloadReady reason before any verdict.
+const (
+	reasonCheckedOut   = "CheckedOut"
+	reasonNotOnNode    = "NotOnNode"
+	reasonFetchTimeout = "FetchTimeout"
+	reasonProbing      = "Probing"
+)
+
+// cacheStuckWindow is how long a replica of app may wait for its first
+// readiness verdict: at least cacheStuckAfter, and past the readiness check's
+// initial delay and two periods.
+func cacheStuckWindow(app *spinv1alpha1.SpinApp) time.Duration {
+	w := cacheStuckAfter
+	if app.Spec.Checks.Readiness != nil {
+		r := app.Spec.Checks.Readiness
+		d := time.Duration(r.InitialDelaySeconds)*time.Second + 2*time.Duration(max(r.PeriodSeconds, 1))*time.Second + 15*time.Second
+		w = max(w, d)
+	}
+	return w
+}
+
 // cacheStuckRecheck returns when the next replica that could become stuck
-// reaches cacheStuckAfter, so the reconcile looks again then: a stuck
-// replica produces no further events. Zero means none.
-func cacheStuckRecheck(owned []sandboxv1alpha1.SwiftSandbox, now time.Time) time.Duration {
+// reaches the window, so the reconcile looks again then: a stuck replica
+// produces no further events. Zero means none.
+func cacheStuckRecheck(owned []sandboxv1alpha1.SwiftSandbox, now time.Time, window time.Duration) time.Duration {
 	var wait time.Duration
 	for i := range owned {
 		sb := &owned[i]
-		later := now.Add(cacheStuckAfter)
-		if cacheStuck(sb, later) && !cacheStuck(sb, now) {
+		if cacheStuck(sb, now.Add(window), window) && !cacheStuck(sb, now, window) {
 			running := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionGuestRunning)
-			if d := running.LastTransitionTime.Add(cacheStuckAfter).Sub(now) + time.Second; wait == 0 || d < wait {
+			if d := running.LastTransitionTime.Add(window).Sub(now) + time.Second; wait == 0 || d < wait {
 				wait = d
 			}
 		}
@@ -278,17 +303,21 @@ func cacheStuckRecheck(owned []sandboxv1alpha1.SwiftSandbox, now time.Time) time
 	return wait
 }
 
-// cacheStuck reports whether a warm replica carried the cache, KubeSwift
-// skipped it after checking out the slot, and the replica has not become
-// ready a minute after the checkout. KubeSwift v0.19.1 runs such a replica
-// under a re-dispatched workload id whose readiness it never accepts.
-func cacheStuck(sb *sandboxv1alpha1.SwiftSandbox, now time.Time) bool {
+// cacheStuck reports whether a replica shows exactly the KubeSwift v0.19.1
+// re-dispatch defect (docs/upstream/kubeswift-redispatch-readiness.md): it was
+// checked out of a warm slot, KubeSwift skipped its cache after the checkout
+// (not on the node, or the fetch deadline passed) and dispatched the workload
+// again, and no readiness verdict has been accepted for the window since
+// the checkout. A replica that boots cold, had the cache skipped before the
+// claim, or became ready and later failed a probe does not match.
+func cacheStuck(sb *sandboxv1alpha1.SwiftSandbox, now time.Time, window time.Duration) bool {
 	if sb.Spec.PoolRef == nil || sb.Status.Phase != sandboxv1alpha1.SwiftSandboxRunning || !sb.DeletionTimestamp.IsZero() {
 		return false
 	}
 	skipped := false
 	for _, a := range sb.Status.Artifacts {
-		if a.Name == compiledcache.ArtifactName && a.State == sandboxv1alpha1.SandboxArtifactSkipped {
+		if a.Name == compiledcache.ArtifactName && a.State == sandboxv1alpha1.SandboxArtifactSkipped &&
+			(a.Reason == reasonNotOnNode || a.Reason == reasonFetchTimeout) {
 			skipped = true
 		}
 	}
@@ -297,9 +326,9 @@ func cacheStuck(sb *sandboxv1alpha1.SwiftSandbox, now time.Time) bool {
 	}
 	ready := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionWorkloadReady)
 	running := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionGuestRunning)
-	// Without a readiness probe there is no WorkloadReady condition to wait for.
-	return ready != nil && ready.Status != metav1.ConditionTrue &&
-		running != nil && running.Status == metav1.ConditionTrue && now.Sub(running.LastTransitionTime.Time) >= cacheStuckAfter
+	return ready != nil && ready.Status != metav1.ConditionTrue && ready.Reason == reasonProbing &&
+		running != nil && running.Status == metav1.ConditionTrue && running.Reason == reasonCheckedOut &&
+		now.Sub(running.LastTransitionTime.Time) >= window
 }
 
 // cacheHold returns the hold on artifact for a SpinApp, if one is active.
@@ -317,12 +346,13 @@ func (r *SpinAppReconciler) cacheHold(key, artifact string) (cacheHold, bool) {
 // compiled cache of a replica that carried one: mounted (reason Cached or
 // Fetched) or skipped (and why). Replicas created before this process
 // started are not counted, so a restart does not count them again.
-func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1.SwiftSandbox) (stuck []*sandboxv1alpha1.SwiftSandbox) {
+func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1.SwiftSandbox, window time.Duration) (stuck []*sandboxv1alpha1.SwiftSandbox) {
 	r.attachMu.Lock()
 	defer r.attachMu.Unlock()
 	if r.attached == nil {
 		r.attached = map[types.UID]string{}
 		r.holds = map[string]cacheHold{}
+		r.stuckDeleted = map[types.UID]string{}
 	}
 	if r.startedAt.IsZero() {
 		// Only the leader reconciles: count replicas from the moment this
@@ -331,10 +361,14 @@ func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1
 	}
 	for i := range owned {
 		sb := &owned[i]
-		if cacheStuck(sb, r.Now()) {
-			stuck = append(stuck, sb)
+		if cacheStuck(sb, r.Now(), window) {
+			if _, done := r.stuckDeleted[sb.UID]; !done {
+				// A deletion this process already started is not repeated,
+				// even before the informer shows it.
+				stuck = append(stuck, sb)
+			}
 			for _, a := range sb.Spec.Artifacts {
-				if a.Name == compiledcache.ArtifactName {
+				if h, ok := r.holds[key]; a.Name == compiledcache.ArtifactName && (!ok || h.artifact != a.Ref || !r.Now().Before(h.until)) {
 					r.holds[key] = cacheHold{artifact: a.Ref, sandbox: sb.Name, reason: reasonNotReadyAfterSkip, until: r.Now().Add(cacheHoldPeriod)}
 				}
 			}
@@ -377,6 +411,11 @@ func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1
 			delete(r.attached, uid)
 		}
 	}
+	for uid, k := range r.stuckDeleted {
+		if k == key && !live[uid] {
+			delete(r.stuckDeleted, uid)
+		}
+	}
 	return stuck
 }
 
@@ -390,6 +429,11 @@ func (r *SpinAppReconciler) forgetAttachments(key string) {
 		}
 	}
 	delete(r.holds, key)
+	for uid, k := range r.stuckDeleted {
+		if k == key {
+			delete(r.stuckDeleted, uid)
+		}
+	}
 }
 
 // recordViewChanged lets a record update through only when something a
@@ -419,4 +463,11 @@ func conditionsEqual(a, b []metav1.Condition) bool {
 		}
 	}
 	return true
+}
+
+// noteStuckDeleted records that this process deleted a stuck replica.
+func (r *SpinAppReconciler) noteStuckDeleted(key string, uid types.UID) {
+	r.attachMu.Lock()
+	defer r.attachMu.Unlock()
+	r.stuckDeleted[uid] = key
 }

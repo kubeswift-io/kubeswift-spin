@@ -184,8 +184,14 @@ mcp-tools registry.example.com/kubeswift-spin-examples/mcp-tools@sha256:...
 repository name, a second identity for phases 2 and 3.
 
 ```bash
-CC_IMAGES=cc-images.txt test/e2e/compiled-cache-e2e.sh
+E2E_CONTEXT=<test cluster context> CC_IMAGES=cc-images.txt test/e2e/compiled-cache-e2e.sh
 ```
+
+`E2E_CONTEXT` must name the current kubectl context. `CC_WRONG_KEY_JOB`
+names a push credential for the cache repository in the test namespace;
+create it for the run only and delete it afterwards. Even with `KEEP=1`,
+the script restores the signer's replica count and deletes a record whose
+status it forged.
 
 Phase 2 scales the signer to zero while it runs and forges record status;
 run it only on a test cluster.

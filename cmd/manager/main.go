@@ -264,6 +264,7 @@ func run(o options) error {
 			Defaults:   defaults,
 			Options:    compatibility.Options{MaxReplicas: int32(o.maxReplicas), Resources: policy}, //nolint:gosec // bounded in policy()
 			Settings:   settings,
+			Delivery:   delivery,
 			Detector:   detector,
 			Retention:  o.cacheRetention,
 			MaxRecords: o.cacheMaxRecords,

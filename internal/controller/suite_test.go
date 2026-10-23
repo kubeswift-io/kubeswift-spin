@@ -126,6 +126,9 @@ type harnessOpts struct {
 	compiledCache compiledcache.Settings
 	cacheManager  bool
 	delivery      compiledcache.Delivery
+	// noColdCache keeps the platform default, which gives SpinApps without a
+	// warm pool no cache; otherwise cold replicas get one (3s timeout).
+	noColdCache bool
 }
 
 func startManager(t *testing.T, o harnessOpts) *harness {
@@ -150,6 +153,9 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 	}
 	if o.maxReplicas == 0 {
 		o.maxReplicas = 10
+	}
+	if !o.noColdCache && o.delivery.ColdFetchTimeout == 0 {
+		o.delivery.ColdFetchTimeout = 3 * time.Second
 	}
 	b := NewBackoff()
 	b.Base, b.Max = 300*time.Millisecond, time.Second
@@ -179,7 +185,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	if o.cacheManager {
-		ns := &cachemanager.NamespaceReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Options: r.Options, Settings: o.compiledCache,
+		ns := &cachemanager.NamespaceReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Options: r.Options, Settings: o.compiledCache, Delivery: o.delivery,
 			Detector: o.detector, Retention: time.Hour}
 		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: o.compiledCache, Delivery: o.delivery, Defaults: r.Defaults,
 			Recorder: mgr.GetEventRecorder("kubeswift-spin-cache-manager"), MaxCompilers: 4, MaxCompilersPerNamespace: 1}

@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 )
@@ -96,6 +97,19 @@ func (d Delivery) PlacementArtifact(id Identity, artifact string) sandboxv1alpha
 		Claims:                      r.Claims,
 		RequirePlatformVerification: r.RequirePlatformVerification,
 	}
+}
+
+// Serves reports whether any replica of an executor can get a cache: one
+// with a warm pool always can, one without only with a cold fetch timeout.
+// The cache manager builds no cache for SpinApps it would not serve.
+func (d Delivery) Serves(p *executor.Profile) bool {
+	return p.SandboxPool != "" || d.ColdFetchTimeout > 0
+}
+
+// NoWarmPool is the Skip of a SpinApp whose executor Serves rules out.
+func NoWarmPool(executorName string) *Skip {
+	return &Skip{Reason: ReasonNoWarmPool,
+		Message: fmt.Sprintf("executor %q has no sandbox pool, and the platform gives replicas that boot cold no compiled cache (chart value compiledCache.fetchTimeout is 0s); compiled caches serve warm-pool replicas", executorName)}
 }
 
 // Delivers reports whether a replica gets the cache: every replica checked

@@ -289,6 +289,10 @@ new revision and deletes an available outdated replica only while
 `spec.replicas` other replicas are available ([ADR
 0013](adr/0013-surge-replacement.md)).
 
+A warm replica that KubeSwift v0.19.1 started without its compiled cache
+and never reports ready is deleted and recreated without the cache, one
+per reconcile ([compiled-cache.md](compiled-cache.md#replicas)).
+
 ## Networking
 
 On KubeSwift v0.16.0, kubeswift-spin sets `spec.network.ports` (`http-app`,

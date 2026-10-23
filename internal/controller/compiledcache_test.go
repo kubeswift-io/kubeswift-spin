@@ -411,3 +411,21 @@ func TestCompiledCacheHoldAfterDeliveryFailure(t *testing.T) {
 		return fmt.Errorf("no replacement yet")
 	})
 }
+
+// With the platform default (no cache for replicas that boot cold), a
+// SpinApp whose executor has no warm pool reports NoWarmPool and gets no
+// record: nothing is compiled that no replica would mount.
+func TestCompiledCacheNoWarmPool(t *testing.T) {
+	s := cacheSettings(t)
+	startManager(t, harnessOpts{compiledCache: s, cacheManager: true, noColdCache: true})
+	ns := enabledNamespace(t)
+	mustCreate(t, cacheExecutor(ns, true), pinnedApp(ns, "one", ccDigestA))
+	expectCondition(t, ns, "one", compiledcache.TypeCompiledCache, metav1.ConditionFalse, compiledcache.ReasonNoWarmPool)
+	expectEvent(t, ns, "one", EventCompiledCacheSkipped)
+	consistently(t, "no record", 2*time.Second, func() error {
+		if n := len(listRecords(t, s.Namespace, ns)); n != 0 {
+			return fmt.Errorf("%d records", n)
+		}
+		return nil
+	})
+}

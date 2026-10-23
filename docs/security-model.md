@@ -229,9 +229,9 @@ application.
   Dependabot proposes updates.
 - **CI** (`.github/workflows/ci.yaml`) runs `govulncheck`, golangci-lint
   (including gosec), actionlint, Grype image scans that fail on fixable
-  high or critical vulnerabilities, and generates SPDX SBOMs for both
-  images. OSV-Scanner runs in its own workflows (see
-  [Vulnerability scanning](#vulnerability-scanning)).
+  high or critical vulnerabilities, and generates SPDX SBOMs for the
+  controller, runtime and cache signer images. OSV-Scanner runs in its
+  own workflows (see [Vulnerability scanning](#vulnerability-scanning)).
 - **Releases** (`.github/workflows/release.yaml`) run only for validated
   semver tags in the canonical repository after approval of the `release`
   environment. The approval protects only jobs that declare the

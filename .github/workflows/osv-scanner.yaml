@@ -21,7 +21,7 @@ jobs:
       actions: read          # the SARIF upload reads the workflow run
       contents: read
       security-events: write # SARIF upload to code scanning
-    # google/osv-scanner-action v2.6.0; its own actions are pinned by SHA.
+    # google/osv-scanner-action v2.7.0; its own actions are pinned by SHA.
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
     with:
       runs-on: ubuntu-24.04

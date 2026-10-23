@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubeswift-spin
 description: SpinKube executor that runs SpinApps in KubeSwift microVM sandboxes
 type: application
-version: 0.1.1
-appVersion: v0.1.1
+version: 0.2.0-rc1
+appVersion: v0.2.0-rc1
 kubeVersion: ">=1.31.0-0"
 home: https://github.com/kubeswift-io/kubeswift-spin
 sources:
@@ -16,4 +16,4 @@ keywords:
   - microvm
 annotations:
   # Prerequisites, not chart dependencies: the chart never installs them.
-  spin.kubeswift.io/requires: "KubeSwift >= v0.16.3 (sandbox CRDs; v0.15.1 to v0.16.2 run with limitations), Spin Operator v0.6.1 (core.spinkube.dev CRDs)"
+  spin.kubeswift.io/requires: "KubeSwift >= v0.16.3 (sandbox CRDs; v0.15.1 to v0.16.2 run with limitations; compiledCache needs >= v0.19.1), Spin Operator v0.6.1 (core.spinkube.dev CRDs)"

@@ -29,13 +29,15 @@ fi
 # lockfile a branch adds is therefore left out of that scan until it is on
 # main; the full scan and the release gate scan it from the start. Remove an
 # entry once its lockfile is on main and add it to osv-scanner-pr.yaml.
-PR_SCAN_PENDING=""
+PR_SCAN_PENDING=()
 
 for wf in .github/workflows/osv-scanner-pr.yaml .github/workflows/osv-scanner.yaml .github/workflows/release.yaml; do
   got="$(grep -o -- '--lockfile=[^[:space:]]*' "$wf" | sed 's/^--lockfile=//' | sort)"
   expect="$want"
   if [[ "$wf" == *osv-scanner-pr.yaml ]]; then
-    expect="$(grep -vxF -f <(printf '%s\n' $PR_SCAN_PENDING) <<<"$want" || true)"
+    for pending in "${PR_SCAN_PENDING[@]}"; do
+      expect="$(grep -vxF -- "$pending" <<<"$expect" || true)"
+    done
   fi
   if [[ "$got" != "$expect" ]]; then
     echo "$wf: --lockfile arguments do not match OSV_LOCKFILES" >&2
