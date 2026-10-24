@@ -32,6 +32,35 @@ fi
 if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set compiledCache.signer.key.kmsRef=gcpkms://x >/dev/null 2>&1; then
   echo "compiledCache rendered with two signing keys" >&2; exit 1
 fi
+# A private CA for the cache registry: mounted into the signer as a file
+# (subPath) in SSL_CERT_DIR; nothing else may set the trust store.
+ca=(--set compiledCache.signer.key.secretName=k --set-file compiledCache.signer.registryCABundle=hack/testdata/registry-ca.pem)
+render "${cc[@]}" "${ca[@]}" | check
+signer_ca="$(render "${cc[@]}" "${ca[@]}" | python3 -c '
+import sys, yaml
+for d in yaml.safe_load_all(sys.stdin):
+    if d and d["kind"] == "Deployment" and d["metadata"]["name"].endswith("cache-signer"):
+        c = d["spec"]["template"]["spec"]["containers"][0]
+        env = {e["name"]: e.get("value") for e in c["env"]}
+        m = [v for v in c["volumeMounts"] if v["name"] == "registry-ca"]
+        print(env.get("SSL_CERT_DIR"), m[0]["mountPath"], m[0].get("subPath"), m[0].get("readOnly"))')"
+if [[ "$signer_ca" != "/var/run/kubeswift-spin-signer/ca /var/run/kubeswift-spin-signer/ca/ca.crt ca.crt True" ]]; then
+  echo "the signer's registry CA is not mounted as expected: $signer_ca" >&2; exit 1
+fi
+if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set compiledCache.signer.registryCABundle=x >/dev/null 2>&1; then
+  echo "compiledCache.signer.registryCABundle rendered without PEM certificates" >&2; exit 1
+fi
+if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set-string "compiledCache.signer.registryCABundle=$(cat hack/testdata/registry-ca.pem)
+-----BEGIN EC PRIVATE KEY-----
+x
+-----END EC PRIVATE KEY-----" >/dev/null 2>&1; then
+  echo "compiledCache.signer.registryCABundle rendered with a private key" >&2; exit 1
+fi
+for var in SSL_CERT_FILE SSL_CERT_DIR; do
+  if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set "compiledCache.signer.extraEnv[0].name=$var" --set 'compiledCache.signer.extraEnv[0].value=/x' >/dev/null 2>&1; then
+    echo "the signer rendered with $var in extraEnv" >&2; exit 1
+  fi
+done
 # compiledCache.enabled needs a repository and a runtime image digest.
 if render --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/c >/dev/null 2>&1; then
   echo "compiledCache.enabled rendered without runtimeImage.digest" >&2; exit 1
