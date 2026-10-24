@@ -49,6 +49,8 @@ is unchanged (`spin-4.2.1-r3`), so upgrading replaces no replica.
   are prepared) is documented as an optimization: a replica whose cache is
   skipped starts and becomes ready without it.
 - The KubeSwift test dependency is v0.19.3.
+- The cache signer's cosign is built with `github.com/go-chi/chi/v5`
+  v5.4.0 (GHSA-j6qf-3m9c-vwj3, in a dependency of cosign).
 
 ### Upgrade notes
 
