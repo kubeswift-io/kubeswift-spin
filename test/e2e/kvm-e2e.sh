@@ -37,10 +37,11 @@ TAG="${EXAMPLES_TAG:-v0.2.0}"
 EXECUTOR="${EXECUTOR:-kubeswift}"
 TIMEOUT="${TIMEOUT:-300}"
 SCRATCH="${E2E_SCRATCH_REGISTRY:-}"
+PRIV="${E2E_PRIVATE_REGISTRY_DIR:-}"
 PHASES=" ${E2E_PHASES:-1 2 3 5 7 8 9} "
 if [[ -z "${E2E_PHASES:-}" ]]; then
   [[ "${E2E_WARM_POOL:-}" == "1" ]] && PHASES+="4 "
-  [[ -n "$SCRATCH" ]] && PHASES+="6 "
+  [[ -n "$SCRATCH" || -n "$PRIV" ]] && PHASES+="6 "
 fi
 CURL_IMAGE="curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 GO_IMAGE="golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af"
@@ -267,11 +268,17 @@ cleanup() {
   [[ "${KEEP:-}" == "1" ]] && return
   # shellcheck disable=SC2086
   $K delete spinapp $APPS --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  $K delete pod e2e-client e2e-client-allowed upstream e2e-registry e2e-live-target --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  $K delete pod e2e-client e2e-client-allowed upstream e2e-live-target --ignore-not-found --wait=false >/dev/null 2>&1 || true
   $K delete job e2e-registry-seed --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  $K delete svc upstream e2e-registry e2e-live-target --ignore-not-found >/dev/null 2>&1 || true
+  $K delete svc upstream e2e-live-target --ignore-not-found >/dev/null 2>&1 || true
+  if [[ -z "$PRIV" ]]; then
+    # A registry from private-registry.sh is that script's to remove.
+    $K delete pod e2e-registry --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    $K delete svc e2e-registry --ignore-not-found >/dev/null 2>&1 || true
+    $K delete secret e2e-registry-files e2e-registry-auth --ignore-not-found >/dev/null 2>&1 || true
+  fi
   $K delete configmap upstream-src --ignore-not-found >/dev/null 2>&1 || true
-  $K delete secret e2e-greeting e2e-llm-token e2e-runtime-config e2e-registry-files e2e-registry-auth --ignore-not-found >/dev/null 2>&1 || true
+  $K delete secret e2e-greeting e2e-llm-token e2e-runtime-config --ignore-not-found >/dev/null 2>&1 || true
   $K delete spinappexecutor kubeswift-e2e-egress kubeswift-e2e-warm kubeswift-e2e-private kubeswift-e2e-ingress kubeswift-e2e-live --ignore-not-found --wait=false >/dev/null 2>&1 || true
   $K delete swiftsandboxpool spin-e2e-warm --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
@@ -293,8 +300,10 @@ kubectl get nodes -l kubeswift.io/kernel-node=true -o name | grep -q . || die "n
   || die "SpinAppExecutor $NS/$EXECUTOR is missing or not managed by kubeswift-spin"
 kubectl get deploy -A -l app.kubernetes.io/name=kubeswift-spin -o jsonpath='{.items[0].status.availableReplicas}' | grep -q '^[1-9]' \
   || die "kubeswift-spin controller is not available"
-if want 6; then
-  [[ -n "$SCRATCH" ]] || die "phase 6 needs E2E_SCRATCH_REGISTRY (a registry the cluster can pull from without credentials, for example ttl.sh)"
+if want 6 && [[ -n "$PRIV" ]]; then
+  [[ -f "$PRIV/host" ]] || die "E2E_PRIVATE_REGISTRY_DIR: no $PRIV/host (run test/e2e/private-registry.sh up)"
+elif want 6; then
+  [[ -n "$SCRATCH" ]] || die "phase 6 needs E2E_SCRATCH_REGISTRY (a registry the cluster can pull from without credentials, for example ttl.sh) or E2E_PRIVATE_REGISTRY_DIR"
   for tool in docker openssl python3; do command -v "$tool" >/dev/null || die "phase 6 needs $tool"; done
   python3 -c 'import bcrypt' 2>/dev/null || die "phase 6 needs the Python bcrypt module"
 fi
@@ -529,6 +538,16 @@ fi
 
 if want 6; then
 log "phase 6: private application registry through imagePullSecrets"
+if [[ -n "$PRIV" ]]; then
+# The registry behind a private CA from test/e2e/private-registry.sh, which
+# KubeSwift trusts (sandboxMaterialize.registryCABundle): the test runtime
+# image is built and pushed from inside the cluster.
+reg_host="$(cat "$PRIV/host")"
+REG_USER="$(cat "$PRIV/user")"
+REG_PASS="$(cat "$PRIV/password")"
+"$ROOT/test/e2e/private-registry.sh" copy "$EXAMPLES/hello-http:$TAG" private/hello-http:e2e >/dev/null \
+  && ok "hello-http copied into the private registry" || fail "seeding the private registry"
+else
 reg_host="e2e-registry.$NS.svc.cluster.local:5000"
 # A throwaway CA for an in-cluster TLS registry with htpasswd. Spin speaks
 # only HTTPS to registries and kubeswift-spin has no CA option, so a test
@@ -609,10 +628,14 @@ spec:
 YAML
 $K wait --for=condition=Complete job/e2e-registry-seed --timeout=180s >/dev/null \
   && ok "hello-http copied into the private registry" || fail "seeding the private registry"
+fi
 code="$(code_from e2e-client 10 -k "https://$reg_host/v2/private/hello-http/manifests/e2e")"
 [[ "$code" == "401" ]] && ok "the registry refuses anonymous pulls (HTTP 401)" || fail "anonymous manifest request returned HTTP $code"
 
 base="$(runtime_image)"
+if [[ -n "$PRIV" ]]; then
+test_image="$("$ROOT/test/e2e/private-registry.sh" runtime "$base" private/kubeswift-spin-runtime:e2e)"
+else
 docker pull -q "$base" >/dev/null
 cid="$(docker create "$base")"
 docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$WORK/bundle.crt" >/dev/null
@@ -625,6 +648,7 @@ docker build -q -t "$test_image" "$WORK" >/dev/null
 docker push -q "$test_image" >/dev/null
 test_image="$(docker inspect --format '{{index .RepoDigests 0}}' "$test_image")"
 docker rmi "$test_image" >/dev/null 2>&1 || true
+fi
 ok "test runtime image trusting the test CA: $test_image"
 cat <<YAML | $K apply -f - >/dev/null
 apiVersion: core.spinkube.dev/v1alpha1
@@ -635,6 +659,7 @@ metadata:
   annotations:
     spin.kubeswift.io/runtime-image: "$test_image"
     spin.kubeswift.io/egress-allow: '[{"service":{"name":"e2e-registry"},"ports":[{"port":5000}]}]'
+${PRIV:+    spin.kubeswift.io/runtime-image-pull-secret: e2e-registry-auth}
 spec:
   createDeployment: false
 YAML

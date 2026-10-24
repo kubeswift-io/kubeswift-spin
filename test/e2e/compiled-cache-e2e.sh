@@ -16,7 +16,14 @@
 #                  no key or credential reaches a compiler or a replica
 #   3 restart      restarting the cache manager and the signer during a
 #                  compilation neither duplicates nor trusts it early
-#   4 teardown     placements go with their records' consumers
+#   5 fallback     a replica whose cache KubeSwift skips (not on its node,
+#                  a pull Secret it cannot use, a credential the registry
+#                  refuses) starts and becomes ready without it, is never
+#                  replaced, and starts no hold; a replica that boots cold
+#                  mounts the cache its node already holds; a placement
+#                  the API server refuses leaves the SpinApp Available; a
+#                  controller restart leaves running replicas alone
+#   4 teardown     placements go with their records' consumers (runs last)
 #
 # Environment:
 #   E2E_CONTEXT    the kubectl context to run in; must equal the current
@@ -29,21 +36,37 @@
 #                  example: hello-http, multi-component, request-info,
 #                  outbound-http, key-value, serverless-ai, mcp-tools; and
 #                  "request-info-b" (the request-info artifact under another
-#                  repository) for phase 2 (required)
+#                  repository) for phases 2 and 3, and "hello-http-b" (the
+#                  hello-http artifact under another repository, never placed
+#                  before) for phase 5 (required)
 #   CC_WRONG_KEY_JOB  phase 2 also signs an export with a key no policy
 #                  names, in a Job in this namespace that can push to the
 #                  cache repository with this docker-registry Secret
 #                  (optional). It is a push credential for the cache
 #                  repository in the tenant test namespace: create it for the
 #                  run only and delete it afterwards.
-#   E2E_PHASES     phases to run (default "1 2 3 4")
+#   CC_PRIVATE_REGISTRY_DIR  run against the registry behind a private CA
+#                  that test/e2e/private-registry.sh started (its state
+#                  directory): the pool, executor, compilers and replicas
+#                  reach it (egress), pull with its docker-registry Secret
+#                  e2e-registry-auth, and phase 5 tests the cache pull
+#                  Secret. KubeSwift and the signer must trust its CA, and
+#                  CC_IMAGES and CC_RUNTIME_IMAGE must point into it
+#                  (optional)
+#   CC_RUNTIME_IMAGE  runtime image of the executor and pool, if not the
+#                  chart's (repo@sha256:...; it must be in
+#                  compiledCache.extraRuntimes)
+#   CC_CACHE_PULL_SECRET  the chart's compiledCache.pullSecretName, a Secret
+#                  in this namespace; phase 5 breaks and restores it (needs
+#                  CC_PRIVATE_REGISTRY_DIR, which recreates it)
+#   E2E_PHASES     phases to run (default "1 2 3 5 4")
 #   TIMEOUT        seconds to wait for each step (default 600)
 #   KEEP=1         keep the test objects afterwards
 set -euo pipefail
 
 NS="${E2E_NAMESPACE:-kubeswift-spin-e2e}"
 TIMEOUT="${TIMEOUT:-600}"
-PHASES=" ${E2E_PHASES:-1 2 3 4} "
+PHASES=" ${E2E_PHASES:-1 2 3 5 4} "
 CURL_IMAGE="curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 GO_IMAGE="golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -99,8 +122,20 @@ SIGNER="$(kubectl -n "$CTL_NS" get deploy -l app.kubernetes.io/component=cache-s
 [[ -n "$CM" && -n "$SIGNER" ]] || die "compiled caches are not enabled (chart value compiledCache.enabled)"
 [[ "$(kubectl get ns "$NS" -o jsonpath='{.metadata.labels.spin\.kubeswift\.io/compiled-cache}')" == enabled ]] \
   || die "namespace $NS lacks the label spin.kubeswift.io/compiled-cache=enabled"
-RUNTIME="$(kubectl -n "$CTL_NS" get "$CM" -o jsonpath='{.spec.template.spec.containers[0].args}' | tr ',' '\n' | sed -n 's/.*--runtime-image=\([^"]*\).*/\1/p')"
+RUNTIME="${CC_RUNTIME_IMAGE:-$(kubectl -n "$CTL_NS" get "$CM" -o jsonpath='{.spec.template.spec.containers[0].args}' | tr ',' '\n' | sed -n 's/.*--runtime-image=\([^"]*\).*/\1/p')}"
 [[ "$RUNTIME" == *@sha256:* ]] || die "the runtime image must be pinned by digest"
+# Private mode: everything is pulled from the registry behind a private CA
+# with the Secret private-registry.sh created.
+PRIV="${CC_PRIVATE_REGISTRY_DIR:-}"
+PULL=""
+EGRESS='{"service":{"name":"upstream"},"ports":[{"port":8090}]}'
+if [[ -n "$PRIV" ]]; then
+  [[ -f "$PRIV/host" ]] || die "CC_PRIVATE_REGISTRY_DIR: no $PRIV/host (run test/e2e/private-registry.sh up)"
+  PULL=e2e-registry-auth
+  EGRESS+=',{"service":{"name":"e2e-registry"},"ports":[{"port":5000}]}'
+  [[ "$RUNTIME" == "$(cat "$PRIV/host")/"* ]] || die "in private mode CC_RUNTIME_IMAGE must be in the private registry"
+fi
+CACHE_PULL="${CC_CACHE_PULL_SECRET:-}"
 
 # pool_prepared reports whether record $1's placement on the test pool is
 # prepared on every node.
@@ -111,12 +146,20 @@ record_of() { reason_msg="$(jp "spinapp/$1" '{.status.conditions[?(@.type=="Comp
 rec() { kubectl -n "$CTL_NS" get spincompiledcache "$1" -o jsonpath="$2" 2>/dev/null; }
 
 SIGNER_REPLICAS="$(kubectl -n "$CTL_NS" get "$SIGNER" -o jsonpath='{.spec.replicas}')"
+CM_REPLICAS="$(kubectl -n "$CTL_NS" get "$CM" -o jsonpath='{.spec.replicas}')"
 sec_record=""
+pull_broken=""
 
 # Even with KEEP=1, the platform is left as found: the signer runs again and
 # a record whose status was forged is removed.
 cleanup() {
   kubectl -n "$CTL_NS" scale "$SIGNER" --replicas="${SIGNER_REPLICAS:-1}" >/dev/null 2>&1 || true
+  kubectl -n "$CTL_NS" scale "$CM" --replicas="${CM_REPLICAS:-1}" >/dev/null 2>&1 || true
+  $K delete resourcequota kss-cc-e2e-no-placements --ignore-not-found >/dev/null 2>&1 || true
+  if [[ -n "$pull_broken" ]]; then
+    $K delete secret "$CACHE_PULL" --ignore-not-found >/dev/null 2>&1 || true
+    "$ROOT/test/e2e/private-registry.sh" secret "$NS" "$CACHE_PULL" >/dev/null 2>&1 || true
+  fi
   if [[ -n "$sec_record" ]]; then
     kubectl -n "$CTL_NS" delete spincompiledcache "$sec_record" --ignore-not-found >/dev/null 2>&1 || true
   fi
@@ -150,6 +193,7 @@ spec:
   image: $image
   executor: $EXEC
   replicas: $replicas
+${PULL:+  imagePullSecrets: [{name: $PULL\}]}
   checks:
     readiness:
       httpGet: {path: /healthz, httpHeaders: []}
@@ -203,13 +247,14 @@ metadata:
   name: $POOL
 spec:
   image: $RUNTIME
+${PULL:+  imagePullSecret: $PULL}
   cpu: 1
   memory: 512Mi
   network:
     mode: restricted
     ports: [{name: http-app, port: 3000}]
     egress:
-      allow: [{service: {name: upstream}, ports: [{port: 8090}]}]
+      allow: [$EGRESS]
   minWarm: 3
 ---
 apiVersion: core.spinkube.dev/v1alpha1
@@ -221,7 +266,8 @@ metadata:
     spin.kubeswift.io/sandbox-pool: $POOL
     spin.kubeswift.io/compiled-cache: enabled
     spin.kubeswift.io/runtime-image: '$RUNTIME'
-    spin.kubeswift.io/egress-allow: '[{"service":{"name":"upstream"},"ports":[{"port":8090}]}]'
+    spin.kubeswift.io/egress-allow: '[$EGRESS]'
+${PULL:+    spin.kubeswift.io/runtime-image-pull-secret: $PULL}
 spec:
   createDeployment: false
 YAML
@@ -443,6 +489,7 @@ kubectl -n "$CTL_NS" scale "$SIGNER" --replicas=0 >/dev/null
 kubectl -n "$CTL_NS" rollout status "$SIGNER" --timeout=120s >/dev/null
 app cc-sec request-info-b 1 </dev/null
 until_true "cc-sec: compiled and exported, not signed" has_reason cc-sec CompiledCache Signing
+until_true "cc-sec: Available while the signer is stopped" ready_replicas cc-sec 1
 sec_record="$(record_of cc-sec)"
 [[ -z "$sec_record" ]] && sec_record="$(kubectl -n "$CTL_NS" get spincompiledcache -o jsonpath="{range .items[?(@.spec.source==\"$(image_of request-info-b)\")]}{.metadata.name}{end}")"
 unsigned="$(rec "$sec_record" '{.status.compile.artifact}')"
@@ -455,7 +502,15 @@ for name in kubeswift-spin-cache-e2e-key cosign.key kubeswift-spin-cache-e2e-reg
   grep -q "$name" <<<"$specs" && fail "a sandbox spec names $name" || ok "no sandbox spec names $name"
 done
 sec_names="$($K get swiftsandbox -o jsonpath='{range .items[*]}{.metadata.name}:{range .spec.secretFiles[*]}{.secretName},{end}{range .spec.env[*]}{.valueFrom.secretKeyRef.name},{end}{"\n"}{end}')"
-if grep -q 'spin-compile-.*:[^,]' <<<"$sec_names"; then fail "a compiler sandbox references Secrets: $(grep spin-compile <<<"$sec_names")"; else ok "compiler sandboxes reference no Secret"; fi
+# A compiler may reference only the application's pull Secret (it pulls the
+# application as a replica does): never a key or a push credential.
+extra="$(grep 'spin-compile-' <<<"$sec_names" | sed 's/^[^:]*://' | tr ',' '\n' | grep -v -x -e '' ${PULL:+-e "$PULL"} || true)"
+if [[ -n "$extra" ]]; then fail "a compiler sandbox references Secrets: $(tr '\n' ' ' <<<"$extra")"; else ok "compiler sandboxes reference no Secret${PULL:+ but the application pull Secret $PULL}"; fi
+if [[ -n "$PRIV" ]] && grep -qF "$(cat "$PRIV/password")" <<<"$specs$($K get events -o json)"; then
+  fail "the registry password appears in a sandbox spec or an Event"
+elif [[ -n "$PRIV" ]]; then
+  ok "the registry password is in no sandbox spec or Event"
+fi
 
 forge "$sec_record" "$unsigned"
 refused cc-sec "$sec_record" "$unsigned" "unsigned export"
@@ -549,6 +604,115 @@ until_true "cc-restart: Ready after the restarts" has_reason cc-restart Compiled
 n="$($K get swiftsandbox -l spin.kubeswift.io/component=compiler -o name | grep -c . || true)"
 [[ "$n" -eq 0 ]] && ok "no compiler sandbox left" || fail "$n compiler sandboxes left"
 $K delete spinapp cc-restart --wait=true >/dev/null
+fi
+
+if want 5; then
+log "phase 5: fallback"
+guest() { jp "swiftsandbox/$1" '{.status.conditions[?(@.type=="GuestRunning")].reason}'; }
+cond() { jp "swiftsandbox/$1" "{.status.conditions[?(@.type==\"$2\")].status}"; }
+uid() { jp "swiftsandbox/$1" '{.metadata.uid}'; }
+workload_ready() { [[ "$(cond "$1" WorkloadReady)" == True ]]; }
+warm_slots() { [[ "$($K get swiftsandboxpool "$POOL" -o jsonpath='{.status.warmReplicas}')" -eq "$1" ]]; }
+min_warm() {
+  $K patch swiftsandboxpool "$POOL" --type merge -p "{\"spec\":{\"minWarm\":$1}}" >/dev/null
+  until_true "pool $POOL has $1 warm slots" warm_slots "$1"
+}
+not_held() { [[ "$(reason "$1" CompiledCache)" != DeliveryFailed ]]; }
+# skipped_ready checks that KubeSwift skipped replica $1's cache and the
+# replica became ready without it, with an accurate status.
+skipped_ready() {
+  local sb="$1" what="$2"
+  until_true "$what: KubeSwift decided the cache" artifact_decided "$sb"
+  if artifact_is "$sb" Skipped/; then ok "$what: the cache was skipped ($(artifact_state "$sb"))"; else fail "$what: $(artifact_state "$sb")"; fi
+  until_true "$what: the replica became ready without it" workload_ready "$sb"
+}
+# kept checks that replica $1 is still the same sandbox after the window the
+# v0.2.0 breaker waited, and that its SpinApp $2 started no hold.
+kept() {
+  local sb="$1" app="$2" u
+  u="$(uid "$sb")"
+  sleep 75
+  [[ "$(uid "$sb")" == "$u" ]] && ok "$sb was not replaced" || fail "$sb was replaced"
+  not_held "$app" && ok "$app: no DeliveryFailed hold ($(reason "$app" CompiledCache))" || fail "$app: DeliveryFailed after a skipped cache"
+}
+
+# A replica that boots cold (no warm slot) mounts the cache its node holds.
+app cc-cold hello-http 1 </dev/null
+until_true "cc-cold: CompiledCache=True/Ready" has_reason cc-cold CompiledCache Ready
+r="$(record_of cc-cold)"
+until_true "cc-cold: the cache is prepared on the pool's nodes" pool_prepared "$r"
+until_true "cc-cold: Available" ready_replicas cc-cold 1
+min_warm 0
+scale cc-cold 2
+until_true "cc-cold-1: KubeSwift decided the cache" artifact_decided cc-cold-1
+until_true "cc-cold-1: ready" workload_ready cc-cold-1
+[[ "$(guest cc-cold-1)" != CheckedOut ]] && ok "cc-cold-1 booted cold ($(guest cc-cold-1))" || fail "cc-cold-1 came from a warm slot"
+if artifact_is cc-cold-1 Mounted/Cached; then ok "cc-cold-1: a cold replica mounted the cache from its node with fetchTimeout 0s (Mounted/Cached)"
+else fail "cc-cold-1: $(artifact_state cc-cold-1)"; fi
+[[ "$(cond cc-cold-1 Resolved)" == True ]] && ok "cc-cold-1: Resolved=True" || fail "cc-cold-1: Resolved=$(cond cc-cold-1 Resolved)"
+until_true "cc-cold: 2 replicas ready" ready_replicas cc-cold 2
+body="$(http "http://$(pod_ip cc-cold-1):3000/hello")"
+[[ "$body" == *"Hello from Spin on KubeSwift"* ]] && ok "cc-cold-1 answers" || fail "cc-cold-1: $body"
+min_warm 3
+
+# A controller restart leaves running replicas alone.
+u0="$(uid cc-cold-0)" u1="$(uid cc-cold-1)"
+kubectl -n "$CTL_NS" delete pod -l app.kubernetes.io/name=kubeswift-spin --wait=false >/dev/null
+kubectl -n "$CTL_NS" rollout status deploy -l app.kubernetes.io/name=kubeswift-spin --timeout=180s >/dev/null 2>&1 || true
+sleep 20
+[[ "$(uid cc-cold-0)" == "$u0" && "$(uid cc-cold-1)" == "$u1" ]] && ok "the controller restart replaced no replica" || fail "replicas changed after the controller restart"
+until_true "cc-cold: Available after the controller restart" ready_replicas cc-cold 2
+
+# A placement the API server refuses: the SpinApp stays Available. Its
+# record is then made to claim a prepared pool (the cache manager stopped,
+# as a stale status could), so replicas carry a cache no node holds.
+$K create quota kss-cc-e2e-no-placements --hard=count/swiftartifactplacements.sandbox.kubeswift.io=0 >/dev/null
+app cc-miss hello-http-b 1 </dev/null
+until_true "cc-miss: Available without its cache" ready_replicas cc-miss 1
+until_true "cc-miss: CompiledCache=True/PlacementFailed (placement refused)" has_reason cc-miss CompiledCache PlacementFailed
+r="$(record_of cc-miss)"
+kubectl -n "$CTL_NS" scale "$CM" --replicas=0 >/dev/null
+kubectl -n "$CTL_NS" rollout status "$CM" --timeout=120s >/dev/null
+kubectl -n "$CTL_NS" patch spincompiledcache "$r" --subresource=status --type merge \
+  -p "{\"status\":{\"placements\":[{\"pool\":\"$POOL\",\"name\":\"forged\",\"prepared\":true,\"preparedNodes\":2,\"targetNodes\":2}]}}" >/dev/null
+scale cc-miss 2
+until_true "cc-miss-1 carries the cache" bash -c "[[ -n \"\$($K get swiftsandbox cc-miss-1 -o jsonpath='{.spec.artifacts[*].ref}')\" ]]"
+skipped_ready cc-miss-1 "warm replica, cache not on its node"
+[[ "$(guest cc-miss-1)" == CheckedOut ]] && ok "cc-miss-1 came from a warm slot" || fail "cc-miss-1: $(guest cc-miss-1)"
+until_true "cc-miss: 2 replicas ready" ready_replicas cc-miss 2
+kept cc-miss-1 cc-miss
+min_warm 0
+scale cc-miss 3
+skipped_ready cc-miss-2 "cold replica, cache not on its node"
+[[ "$(guest cc-miss-2)" != CheckedOut ]] && ok "cc-miss-2 booted cold" || fail "cc-miss-2 came from a warm slot"
+[[ "$(cond cc-miss-2 Resolved)" == True ]] && ok "cc-miss-2: Resolved=True" || fail "cc-miss-2: Resolved=$(cond cc-miss-2 Resolved)"
+until_true "cc-miss: 3 replicas ready" ready_replicas cc-miss 3
+min_warm 3
+
+# The cache pull Secret: missing (PullSecretInvalid), then a credential the
+# registry refuses. Either way the cache is skipped, never pulled
+# anonymously, and the replica becomes ready.
+if [[ -n "$CACHE_PULL" && -n "$PRIV" ]]; then
+  pull_broken=1
+  $K delete secret "$CACHE_PULL" >/dev/null
+  scale cc-cold 3
+  skipped_ready cc-cold-2 "cache pull Secret missing"
+  artifact_is cc-cold-2 Skipped/PullSecretInvalid && ok "cc-cold-2: PullSecretInvalid" || fail "cc-cold-2: $(artifact_state cc-cold-2)"
+  $K create secret docker-registry "$CACHE_PULL" --docker-server="$(cat "$PRIV/host")" --docker-username=e2e \
+    --docker-password="kss-cc-e2e-wrong-$RUN_ID" >/dev/null
+  scale cc-cold 4
+  skipped_ready cc-cold-3 "a cache credential the registry refuses"
+  until_true "cc-cold: 4 replicas ready" ready_replicas cc-cold 4
+  kept cc-cold-3 cc-cold
+  $K delete secret "$CACHE_PULL" >/dev/null
+  "$ROOT/test/e2e/private-registry.sh" secret "$NS" "$CACHE_PULL"
+  pull_broken=""
+fi
+
+kubectl -n "$CTL_NS" scale "$CM" --replicas="${CM_REPLICAS:-1}" >/dev/null
+kubectl -n "$CTL_NS" rollout status "$CM" --timeout=180s >/dev/null
+$K delete resourcequota kss-cc-e2e-no-placements >/dev/null
+$K delete spinapp cc-cold cc-miss --wait=true >/dev/null
 fi
 
 if want 4; then
