@@ -126,6 +126,8 @@ type harnessOpts struct {
 	compiledCache compiledcache.Settings
 	cacheManager  bool
 	delivery      compiledcache.Delivery
+	// cacheHold overrides the 30-minute compiled-cache hold.
+	cacheHold time.Duration
 	// noColdCache keeps the platform default, which gives SpinApps without a
 	// warm pool no cache; otherwise cold replicas get one (3s timeout).
 	noColdCache bool
@@ -148,7 +150,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 	}
 	if o.detector == nil {
 		// The real detector against the envtest API server, which serves
-		// the KubeSwift v0.19.1 CRDs: every optional feature is present.
+		// the KubeSwift v0.19.3 CRDs: every optional feature is present.
 		o.detector = &capabilities.OpenAPIDetector{Discovery: discovery.NewDiscoveryClientForConfigOrDie(testCfg), TTL: time.Minute}
 	}
 	if o.maxReplicas == 0 {
@@ -178,6 +180,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		CompiledCache:        o.compiledCache,
 		CompiledCachesServed: o.compiledCache.Configured(),
 		CacheDelivery:        o.delivery,
+		CacheHoldPeriod:      o.cacheHold,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := r.SetupWithManager(ctx, mgr); err != nil {

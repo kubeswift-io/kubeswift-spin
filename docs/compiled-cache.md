@@ -12,8 +12,8 @@ becomes `Available` exactly as without the feature.
 
 ## Status of this revision
 
-Compiled caches are new in kubeswift-spin v0.2.0 and need KubeSwift
-v0.19.1 or later.
+Compiled caches are new in kubeswift-spin v0.2.0. From v0.2.1 they need
+KubeSwift v0.19.3 or later (see [Requirements](#requirements)).
 
 | Stage | State |
 |---|---|
@@ -24,18 +24,33 @@ v0.19.1 or later.
 | Signing and verification policy | implemented |
 | Placement on warm-pool nodes and mounting in replicas | implemented |
 
-Validated on the amd64 KVM lab with KubeSwift v0.19.1
-([test/e2e](../test/e2e/README.md#compiled-caches),
+kubeswift-spin v0.2.0 was validated on the amd64 KVM lab with KubeSwift
+v0.19.1 ([test/e2e](../test/e2e/README.md#compiled-caches),
 [performance](performance.md#compiled-wasmtime-cache-kubeswift-v0191-2026-10-23)).
+[compatibility.md](compatibility.md) lists what has run since with
+KubeSwift v0.19.3.
 arm64 follows the same path but has not been run on arm64 hardware: do
 not rely on compiled caches there until it has.
 
 ## Requirements
 
-- KubeSwift v0.19.1 or later. kubeswift-spin detects optional,
-  platform-verified artifacts and sandbox outputs from the published schema
-  (present from v0.19.0; v0.19.1 is the tested baseline); without them
-  SpinApps report `CompiledCache=False/Unsupported`.
+- KubeSwift v0.19.3 or later. kubeswift-spin relies on its
+  optional-artifact contract: a cache KubeSwift cannot deliver is skipped
+  (`Skipped`), and the replica starts and becomes ready without it. v0.19.2
+  fixed a warm replica that never became ready after its cache was skipped
+  at the checkout (kubeswift-io/kubeswift#843) and a sandbox that failed
+  when its cache pull Secret could not be used (#844); v0.19.3 uses a cache
+  the node already holds for a replica that boots cold (#851). kubeswift-spin
+  v0.2.0 worked around the first two; v0.2.1 does not.
+  kubeswift-spin detects optional, platform-verified artifacts and sandbox
+  outputs from the published schema (present from v0.19.0); without them
+  SpinApps report `CompiledCache=False/Unsupported`. KubeSwift publishes no
+  version kubeswift-spin can read, and v0.19.0 to v0.19.3 have the same
+  schema, so it cannot tell v0.19.3 from an older release: upgrade KubeSwift
+  first (see [Upgrading](#upgrading)). On v0.19.1 a warm replica whose
+  cache is skipped after the checkout never becomes ready.
+  Running SpinApps without compiled caches needs no particular KubeSwift
+  v0.19 release: see [compatibility](compatibility.md#kubeswift-features).
 - The SwiftKernel `sandbox` in each enabled namespace on
   `kernels/sandbox:6.6.17` or later. Compilers export their cache as a
   KubeSwift output, which needs that kernel; on an older one KubeSwift
@@ -76,8 +91,8 @@ kubeswift-spin cannot check them:
   denies anonymous reads: compiled code reveals as much as the application.
 - The Secret named by `compiledCache.pullSecretName` exists in the
   namespace as a `kubernetes.io/dockerconfigjson` Secret before the label
-  is set. KubeSwift v0.19.1 fails a replica whose cache names a pull Secret
-  it cannot read (see [Fallback](#fallback)).
+  is set. Without it placements fail and replicas start without the cache
+  (see [Fallback](#fallback)).
 
 An administrator records that a namespace meets them with the label
 `spin.kubeswift.io/compiled-cache=enabled`. Only labelled namespaces get
@@ -334,7 +349,7 @@ Replicas created while the record is trusted get one more entry in
   mountPath: /opt/kubeswift-spin-cache
   layout: unpacked
   optional: true
-  fetchTimeout: 0s            # compiledCache.fetchTimeout for a cold replica, if set
+  fetchTimeout: 0s            # with a warm pool; compiledCache.fetchTimeout without one
   pullSecretRef: {name: cache-read}
   requirePlatformVerification: true
   claims:
@@ -347,36 +362,36 @@ Replicas created while the record is trusted get one more entry in
 
 They also get `KUBESWIFT_SPIN_CACHE_SOURCE`, `KUBESWIFT_SPIN_CACHE_RUNTIME`
 and `KUBESWIFT_SPIN_CACHE_ARCHITECTURE`, the identity the cache must have.
-A replica from a warm pool gets the cache only once the pool's placement
-reports every node prepared (lookup result `unplaced` until then), uses it
-only if its node holds it, and never waits.
+A replica of an executor with a warm pool gets the cache once the pool's
+placement reports every node prepared (lookup result `unplaced` until
+then), with `fetchTimeout: 0s`: it uses the cache only if its node already
+holds it, and never waits. The placement gate is an optimization, not a
+correctness rule. A replica that gets the cache on a node without it, or
+whose cache KubeSwift cannot use for any other reason, starts without it:
+KubeSwift skips the optional artifact (`status.artifacts[].state:
+Skipped`, with the reason), Spin compiles as usual, and the replica becomes
+ready. The gate only avoids handing replicas a cache their node cannot
+serve yet. A SpinApp can be `Available` while its cache is `Placing`,
+`PlacementFailed` or skipped.
 
-KubeSwift v0.19.1 does not accept the readiness of a warm replica whose
-optional artifact it skipped after the checkout
-([kubeswift-io/kubeswift#843](https://github.com/kubeswift-io/kubeswift/issues/843)).
-The placement gate avoids that case; for what remains (a node that loses
-its entry while the placement still reports it prepared) the controller
-replaces such a replica. It matches exactly that defect: the replica was
-checked out of a warm slot (`CheckedOut`), the cache was skipped after the
-claim (`NotOnNode` or `FetchTimeout`), and no readiness verdict was
-accepted (`Probing`) for a minute, or for the readiness check's initial
-delay, two periods and 15 seconds if that is longer. One replica is replaced per
-reconcile, and the SpinApp's new replicas start without the cache for up to
-30 minutes (`DeliveryFailed`). The hold is kept in memory: a controller
-restart ends it early. The replacement path has unit tests but has not run
-on the KVM lab, where the placement gate prevented the case.
+The same holds for a replica of such an executor that boots cold because
+no warm slot is free. With KubeSwift v0.19.3 it mounts the cache when its
+node already holds a verified entry and KubeSwift's authorization of the
+digest is fresh (`Mounted`, reason `Cached`), without asking the registry;
+otherwise it starts without the cache at once.
 
 A SpinApp whose executor has no sandbox pool reports `NoWarmPool` while
-`compiledCache.fetchTimeout` is `0s`, and no cache is built for it.
+`compiledCache.fetchTimeout` is `0s`, and no cache is built for it: no
+placement prepares its nodes, so its replicas would almost never find the
+cache there.
 
-A replica that does not come from a warm pool gets the cache only when
-`compiledCache.fetchTimeout` is above `0s` (the default is `0s`), and then
-waits at most that long. KubeSwift verifies the signature with the
-registry on every cold start and, on a node without the entry, fetches
-it, all within `fetchTimeout` counted from the sandbox's creation. On the
-KVM lab a first fetch did not finish within 3 seconds, and with 20
-seconds the cache was mounted; for small applications the verification
-costs more than the compilation it saves.
+With `compiledCache.fetchTimeout` above `0s`, replicas of an executor
+without a warm pool get the cache and wait at most that long for it.
+KubeSwift verifies the signature with the registry and, on a node without
+the entry, fetches it, all within `fetchTimeout` counted from the sandbox's
+creation. On the KVM lab a first fetch did not finish within 3 seconds,
+and with 20 seconds the cache was mounted; for small applications the
+verification costs more than the compilation it saves.
 
 The artifact and the variables are not part of the replica's revision: a
 cache that becomes available, or goes away, never replaces running
@@ -409,11 +424,10 @@ The cache never stops a replica:
 | Situation | Result |
 |---|---|
 | No record, compiling, failed, signing, rejected | No artifact; Spin compiles |
-| The node does not hold the cache in time; the registry refuses; verification or claims fail | KubeSwift skips the optional artifact (`status.artifacts` says why); Spin compiles |
+| The node does not hold the cache (`NotOnNode`, `FetchTimeout`); the pull Secret cannot be used (`PullSecretInvalid`); the registry refuses or is unavailable; verification, claims or a policy fail | KubeSwift skips the optional artifact (`status.artifacts` says why); Spin compiles; the replica becomes ready as without the feature |
 | Mount missing, writable, or with other metadata | The entrypoint starts Spin without it |
 | The pool's placement is not prepared on every node | Warm replicas get no cache (lookup `unplaced`) |
-| A warm checkout skipped the cache after the claim and no readiness verdict was accepted in the window (KubeSwift v0.19.1) | The replica is replaced; new replicas start without the cache for up to 30 minutes (`DeliveryFailed`) |
-| The cache pull Secret is missing or not a `kubernetes.io/dockerconfigjson` Secret | KubeSwift v0.19.1 fails the replica (`ArtifactResolveFailed`) although the artifact is optional. The controller then starts the SpinApp's new replicas without the cache for up to 30 minutes and reports `DeliveryFailed`; one replica start is lost each time ([kubeswift-io/kubeswift#844](https://github.com/kubeswift-io/kubeswift/issues/844)) |
+| KubeSwift fails a replica because of the cache: its artifact init container failed (for example a sandbox-materialize image of another KubeSwift version, which refuses `--authorized-until`), or its kernel cannot mount artifacts (`KernelUnsupported`) | The replica is replaced as any failed replica; the SpinApp's new replicas start without the cache for up to 30 minutes (`DeliveryFailed`), since each would fail the same way. The hold is kept in memory: a controller restart ends it early |
 | CPU features or Wasmtime version not in the cache | Wasmtime misses and compiles |
 
 ### Metrics
@@ -421,7 +435,6 @@ The cache never stops a replica:
 | Metric | Labels |
 |---|---|
 | `kubeswift_spin_compiled_cache_lookups_total` | `result`: `hit` (a signed cache was attached), `miss` (none yet), `unplaced` (a warm replica whose pool is not prepared yet), `cold` (a replica that boots cold, without a cold fetch timeout), `skipped` (the SpinApp cannot have one) |
-| `kubeswift_spin_sandbox_deletions_total` | `reason`: `compiled_cache_not_ready` for a replica replaced as above |
 | `kubeswift_spin_compiled_cache_attachments_total` | `result`: `mounted`, `skipped`; `reason`: KubeSwift's (`Cached`, `Fetched`, `FetchTimeout`, `PolicyDenied`, ...) |
 | `kubeswift_spin_compiled_cache_compilations_total` | `result`, `reason` |
 | `kubeswift_spin_compiled_cache_signatures_total` | `result` |
@@ -439,6 +452,43 @@ placement from the same settings (`compiledCache.pullSecretName`,
 checkout uses a prepared entry only when both name the same pull Secret,
 layout and claims: do not override these flags in only one of them with
 `extraArgs`.
+
+### Upgrading
+
+From kubeswift-spin v0.2.0 with compiled caches enabled:
+
+1. Upgrade KubeSwift to v0.19.3 or later. Its controller and its
+   sandbox-materialize image must come from the same release: the v0.19.3
+   controller passes sandbox-materialize a flag (`--authorized-until`)
+   that an older one refuses, which fails every replica that carries the
+   cache. The KubeSwift chart sets both; check only if you pin
+   `sandboxMaterialize.image.tag` separately. kubeswift-spin v0.2.0 keeps
+   working on v0.19.3.
+2. A warm replica that KubeSwift v0.19.1 left not ready before the
+   upgrade stays not ready (its readiness verdict was lost; see KubeSwift's
+   v0.19.2 upgrade notes). kubeswift-spin v0.2.0 replaces such replicas
+   within a minute or two; v0.2.1 does not. Before upgrading
+   kubeswift-spin, check that none is left: a SwiftSandbox of a SpinApp
+   with `spec.poolRef`, `status.artifacts` showing `wasmtime-cache`
+   `Skipped`, and `WorkloadReady=False` with reason `Probing`. Delete any
+   you find; the SpinApp replaces it.
+
+   ```bash
+   kubectl get swiftsandboxes -A -o jsonpath='{range .items[?(@.spec.poolRef)]}{.metadata.namespace}{"/"}{.metadata.name}{" "}{.status.artifacts[?(@.name=="wasmtime-cache")].state}{" "}{.status.conditions[?(@.type=="WorkloadReady")].reason}{"\n"}{end}'
+   ```
+
+3. Then upgrade kubeswift-spin to v0.2.1 with `--reset-then-reuse-values`,
+   as the [README](../README.md#upgrade) describes.
+
+kubeswift-spin cannot tell which KubeSwift release runs (v0.19.0 to
+v0.19.3 publish the same schema, and KubeSwift publishes no version), so it
+logs at startup that compiled caches assume v0.19.3.
+
+Do not run kubeswift-spin v0.2.1 with compiled caches on KubeSwift v0.19.1
+or v0.19.2: v0.2.1 no longer replaces a warm replica that KubeSwift v0.19.1
+never reports ready after skipping its cache, and v0.19.2 skips a cache
+that a replica booting cold could have used. With compiled caches
+disabled, v0.2.1 has the same KubeSwift requirements as v0.2.0.
 
 ### Turning it off or revoking a cache
 
@@ -458,7 +508,8 @@ stop using one:
 ## What a SpinApp reports
 
 The `CompiledCache` condition is separate from `Available` and
-`Progressing`:
+`Progressing`, which follow the replicas alone: a SpinApp can be
+`Available` with any `CompiledCache` reason.
 
 | Status | Reason | Meaning |
 |---|---|---|
@@ -472,8 +523,8 @@ The `CompiledCache` condition is separate from `Available` and
 | False | `Compiling`, `CompileFailed` | Compilation pending (including while waiting for a compiler slot), running, or failed (retried with backoff) |
 | False | `Signing`, `SignFailed` | Waiting for, or refused by, the signer |
 | True | `Placing`, `PlacementFailed` | The cache is trusted; new warm-pool replicas mount it once their pool's nodes are prepared, which is still in progress or failed |
-| False | `DeliveryFailed` | A replica failed while mounting the cache, or was replaced after KubeSwift skipped its cache at the checkout; new replicas start without it for up to 30 minutes |
-| True | `Ready` | New warm-pool replicas mount the cache (and replicas that boot cold, when `compiledCache.fetchTimeout` allows) |
+| False | `DeliveryFailed` | KubeSwift failed a replica because of the cache (see [Fallback](#fallback)); new replicas start without it for up to 30 minutes. A replica whose cache was skipped is not a failure and never causes it |
+| True | `Ready` | New warm-pool replicas get the cache (and replicas of an executor without a pool, when `compiledCache.fetchTimeout` allows) |
 
 Events: `CompiledCacheRequested`, `CompiledCacheReady`,
 `CompiledCacheFailed` (also for `DeliveryFailed`), `CompiledCacheSkipped`

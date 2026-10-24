@@ -51,7 +51,7 @@ change. See
 | `metrics.secure` | `false` | HTTPS with Kubernetes token authentication and authorization |
 | `metrics.serviceMonitor.enabled` | `false` | create a Prometheus Operator ServiceMonitor |
 | `podSecurityContext`, `securityContext` | hardened | non-root, read-only root filesystem, no capabilities, RuntimeDefault seccomp |
-| `compiledCache.enabled` | `false` | install the SpinCompiledCache CRD, the cache manager and the cache signer ([docs/compiled-cache.md](../../docs/compiled-cache.md)); needs KubeSwift v0.19.1 or later and `runtimeImage.digest` |
+| `compiledCache.enabled` | `false` | install the SpinCompiledCache CRD, the cache manager and the cache signer ([docs/compiled-cache.md](../../docs/compiled-cache.md)); needs KubeSwift v0.19.3 or later and `runtimeImage.digest` |
 | `compiledCache.repository` | `""` | base repository of compiled caches; each namespace's go to `<repository>/<namespace>/wasmtime-cache` |
 | `compiledCache.architecture` | `amd64` | architecture for executors whose node selector does not name `kubernetes.io/arch` |
 | `compiledCache.extraRuntimes` | `[]` | runtime images (`repository@sha256:...`), besides `runtimeImage`, that caches are built for |

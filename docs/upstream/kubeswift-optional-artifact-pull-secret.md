@@ -1,6 +1,6 @@
 # KubeSwift requirement: an optional artifact never fails its sandbox
 
-Status: filed as [kubeswift-io/kubeswift#844](https://github.com/kubeswift-io/kubeswift/issues/844). Found while implementing the compiled Wasmtime
+Status: fixed in KubeSwift v0.19.2 ([kubeswift-io/kubeswift#844](https://github.com/kubeswift-io/kubeswift/issues/844)), unusable verify key Secrets included; kubeswift-spin v0.2.1 removed its workaround. Found while implementing the compiled Wasmtime
 cache ([ADR 0014](../adr/0014-compiled-wasmtime-cache.md)) on KubeSwift
 v0.19.1.
 

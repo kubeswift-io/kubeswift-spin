@@ -110,8 +110,10 @@ warm-pool checkout (next list); the others still hold.
 - `spec.artifacts` mounts OCI artifacts read-only. kubeswift-spin uses it
   only for a signed compiled cache (optional, platform-verified, with
   claims); Spin 4.2.1 cannot run the application itself from a local OCI
-  layout. On v0.19.1 a sandbox whose optional artifact names a pull Secret
-  that cannot be read fails instead of skipping the artifact.
+  layout. An optional artifact KubeSwift cannot deliver is skipped and
+  never keeps the workload from starting or becoming ready (fixed in
+  v0.19.2 for warm checkouts and unusable pull Secrets; v0.19.3 also uses
+  a node's cached copy for a cold start).
 - Warm-pool checkout compares the full slot shape (image, network mode,
   egress, ports, verify key, rootfs mode, kernel, CPU, memory, node
   selector) and boots cold on a mismatch. Artifacts are not part of the
@@ -288,10 +290,6 @@ recreate. A rollout first adds one surge replica `<app>-<replicas>` at the
 new revision and deletes an available outdated replica only while
 `spec.replicas` other replicas are available ([ADR
 0013](adr/0013-surge-replacement.md)).
-
-A warm replica that KubeSwift v0.19.1 started without its compiled cache
-and never reports ready is deleted and recreated without the cache, one
-per reconcile ([compiled-cache.md](compiled-cache.md#replicas)).
 
 ## Networking
 

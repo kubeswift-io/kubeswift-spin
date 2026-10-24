@@ -86,6 +86,8 @@ func TestParseSandboxSchemaCompiledCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !s.TrustedArtifacts || !s.Outputs || !s.CompiledCache() {
+		// v0.19.1 to v0.19.3 publish the same schema: the fixes compiled
+		// caches need from v0.19.3 are behavior, not fields.
 		t.Fatalf("v0.19.1 schema not detected: %+v", s)
 	}
 	for name, doc := range map[string]string{"v0.16.3": v0163Schema, "v0.16.4": v0164Schema} {

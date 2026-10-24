@@ -162,7 +162,8 @@ KubeSwift export, verification and placement features:
 
 Requirements, on top of the [KVM e2e requirements](#requirements):
 
-- KubeSwift v0.19.1 or later, and a SwiftKernel `sandbox` in the namespace
+- KubeSwift v0.19.3 or later (v0.19.1 for kubeswift-spin v0.2.0), and a
+  SwiftKernel `sandbox` in the namespace
   on `kernels/sandbox:6.6.17` or later (outputs and warm mounts);
 - kubeswift-spin installed with `compiledCache.enabled=true`, a signing
   key and a registry credential for the signer, and the namespace labelled

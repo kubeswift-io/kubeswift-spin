@@ -14,7 +14,7 @@ the standard `controller_runtime_*`, `workqueue_*` and Go runtime metrics.
 | `kubeswift_spin_ready_replicas` | gauge | none | sum of `readyReplicas` |
 | `kubeswift_spin_desired_replicas` | gauge | none | sum of desired replicas |
 | `kubeswift_spin_sandbox_creations_total` | counter | none | SwiftSandboxes created |
-| `kubeswift_spin_sandbox_deletions_total` | counter | `reason` (`scale_down`, `rollout`, `failed`, `stale`, `executor_change`, `compiled_cache_not_ready`) | SwiftSandboxes deleted |
+| `kubeswift_spin_sandbox_deletions_total` | counter | `reason` (`scale_down`, `rollout`, `failed`, `stale`, `executor_change`; v0.2.0 also had `compiled_cache_not_ready`) | SwiftSandboxes deleted |
 | `kubeswift_spin_sandbox_failures_total` | counter | none | sandboxes observed `Completed` or `Failed` |
 | `kubeswift_spin_unsupported_configuration_total` | counter | `field` (a SpinApp spec field name) | SpinApp generations found to use unsupported configuration |
 

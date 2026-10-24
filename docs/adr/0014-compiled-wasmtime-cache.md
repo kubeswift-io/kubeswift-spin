@@ -256,10 +256,15 @@ another namespace, application, runtime or architecture.
   for replicas checked out of a warm pool (the placement prepares the
   nodes, so a replica uses the cache only if its node already holds it and
   never waits). A warm replica gets the artifact only once its pool's
-  placement reports every node prepared: KubeSwift v0.19.1 never accepts
-  the readiness of a warm replica whose optional artifact it skipped after
-  the checkout (kubeswift-io/kubeswift#843). Cold replicas get the cache
-  only when the platform sets a cold fetch timeout (default none):
+  placement reports every node prepared. This gate is an optimization:
+  KubeSwift skips an optional artifact a node does not hold, and the
+  replica becomes ready without it (v0.19.2 and later; on v0.19.1 such a
+  replica never became ready, kubeswift-io/kubeswift#843, which is why the
+  gate first appeared). A pool replica that boots cold for lack of a slot
+  keeps `fetchTimeout: 0s` and, on KubeSwift v0.19.3, mounts the cache
+  when its node already holds it. Replicas of an executor without a pool
+  get the cache only when the platform sets a cold fetch timeout (default
+  none):
   KubeSwift verifies the signature with the registry on every cold start
   and fetches the cache on a new node within that timeout, which on the
   lab took longer than 3 seconds and, for small applications, costs more
@@ -268,17 +273,16 @@ another namespace, application, runtime or architecture.
   expected source, runtime and architecture. SpinApps on an executor
   without a sandbox pool, while the cold fetch timeout is none, get no
   record (`NoWarmPool`).
-- Two KubeSwift v0.19.1 defects can still cost a replica: a warm replica
-  whose node lost its entry while the placement reports it prepared
-  (kubeswift-io/kubeswift#843), and a cache pull Secret KubeSwift cannot
-  read, which fails the sandbox although the artifact is optional
-  (kubeswift-io/kubeswift#844). The controller replaces a replica that
-  matches the first defect exactly (checked out, cache skipped after the
-  claim, no readiness verdict accepted for a minute, or for its readiness
-  check's initial delay, two periods and 15 seconds if longer), one per
-  reconcile, and after either defect starts the SpinApp's new replicas
-  without the cache for 30 minutes (`DeliveryFailed`). The hold is kept
-  in memory; a controller restart ends it early.
+- A replica whose cache KubeSwift skipped is healthy and is never replaced
+  for it. Only a replica KubeSwift failed because of the cache (an artifact
+  init container that failed, a kernel that cannot mount artifacts) starts
+  a hold: the SpinApp's new replicas go without the cache for 30 minutes
+  (`DeliveryFailed`), since each would fail the same way. The hold is kept
+  in memory; a controller restart ends it early. (v0.2.0 also replaced warm
+  replicas that KubeSwift v0.19.1 never reported ready after a skip,
+  kubeswift-io/kubeswift#843, and held the cache after a pull Secret
+  failure, #844; both were fixed in KubeSwift v0.19.2, and kubeswift-spin
+  v0.2.1 dropped those workarounds.)
 - The decoration is applied per replica outside the revision fingerprint:
   a cache becoming available, or going away, never rolls replicas.
 - The runtime entrypoint owns activation. It uses the cache only when the
@@ -360,8 +364,14 @@ not depend on them.
 
 ### Version detection
 
-The schema check finds the v0.19.0 fields; v0.19.1 is the tested and
-required baseline.
+The schema check finds the v0.19.0 fields. The required baseline is
+v0.19.3 (v0.19.1 for kubeswift-spin v0.2.0), whose optional-artifact
+behavior the schema does not show. KubeSwift publishes no version in its
+API or CRDs: its version is visible only in image tags and logs, which
+kubeswift-spin would need a Deployment name and pod or log access to read.
+kubeswift-spin does not add that RBAC or guess names to detect a patch
+release; the requirement is documented, and the upgrade order puts
+KubeSwift first.
 
 ## Alternatives considered
 
@@ -389,7 +399,7 @@ required baseline.
   administrator setup (export policy and credential, verification policy,
   signer key, cache repository, namespace labels).
 - The controller's RBAC grows only by read access to records.
-- Correctness depends on KubeSwift v0.19.1 behavior: optional artifacts,
+- Correctness depends on KubeSwift v0.19.3 behavior: optional artifacts,
   policy verification and claims, placement, output export and spec
   immutability. kubeswift-spin uses them only when the schema shows them.
 - Residual risks, documented in docs/security-model.md: a tenant's own
