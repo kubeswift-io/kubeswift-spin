@@ -198,10 +198,11 @@ compiledCache:
     # can read the exported caches and push their signatures (the same
     # repositories as the export policy).
     registryCredentialsSecret: ""
-    # PEM CA certificates the signer and cosign trust for the cache
-    # registry, on top of the system roots: set it for a registry behind a
-    # private CA, with the same bundle as KubeSwift's
-    # sandboxMaterialize.registryCABundle. Empty uses the system roots only.
+    # PEM CA certificates the signer and cosign trust, on top of the system
+    # roots, for all their TLS connections (the cache registry, and a KMS):
+    # set it for a registry behind a private CA, with the same bundle as
+    # KubeSwift's sandboxMaterialize.registryCABundle. Empty uses the system
+    # roots only.
     registryCABundle: ""
     # Extra environment, for example KMS credentials.
     extraEnv: []

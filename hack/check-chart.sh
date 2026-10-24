@@ -50,9 +50,17 @@ fi
 if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set compiledCache.signer.registryCABundle=x >/dev/null 2>&1; then
   echo "compiledCache.signer.registryCABundle rendered without PEM certificates" >&2; exit 1
 fi
-if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set 'compiledCache.signer.extraEnv[0].name=SSL_CERT_FILE' --set 'compiledCache.signer.extraEnv[0].value=/x' >/dev/null 2>&1; then
-  echo "the signer rendered with SSL_CERT_FILE in extraEnv" >&2; exit 1
+if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set-string "compiledCache.signer.registryCABundle=$(cat hack/testdata/registry-ca.pem)
+-----BEGIN EC PRIVATE KEY-----
+x
+-----END EC PRIVATE KEY-----" >/dev/null 2>&1; then
+  echo "compiledCache.signer.registryCABundle rendered with a private key" >&2; exit 1
 fi
+for var in SSL_CERT_FILE SSL_CERT_DIR; do
+  if render "${cc[@]}" --set compiledCache.signer.key.secretName=k --set "compiledCache.signer.extraEnv[0].name=$var" --set 'compiledCache.signer.extraEnv[0].value=/x' >/dev/null 2>&1; then
+    echo "the signer rendered with $var in extraEnv" >&2; exit 1
+  fi
+done
 # compiledCache.enabled needs a repository and a runtime image digest.
 if render --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/c >/dev/null 2>&1; then
   echo "compiledCache.enabled rendered without runtimeImage.digest" >&2; exit 1

@@ -284,9 +284,13 @@ compiledCache:
       -----END CERTIFICATE-----
 ```
 
-The chart mounts it into the signer as a file in `SSL_CERT_DIR`, so the
-signer and cosign trust it on top of the system roots, and rolls the
-signer when it changes. Without it, signing fails for such a registry
+The chart puts it in an immutable ConfigMap named after its content and
+mounts it into the signer as a file in `SSL_CERT_DIR`, so the signer and
+cosign trust it on top of the system roots for all their TLS connections,
+a KMS included; a new bundle rolls the signer. Whoever can create
+ConfigMaps in the release namespace and change the signer's Deployment
+controls its trust anchors, like its key: keep both to the chart's
+operators. Without it, signing fails for such a registry
 (`SignFailed`). TLS verification is never turned off. The controller and
 the cache manager do not contact registries. Replicas and compilers run
 the runtime image, whose Spin pulls the application itself: an application

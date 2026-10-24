@@ -21,24 +21,32 @@ release), so the signer is never given them. */}}
 {{- fail "compiledCache.signer.extraEnv: set compiledCache.signer.registryCABundle instead of SSL_CERT_DIR or SSL_CERT_FILE" }}
 {{- end }}
 {{- end }}
+{{- $caName := "" }}
 {{- if $s.registryCABundle }}
 {{- if not (contains "-----BEGIN CERTIFICATE-----" $s.registryCABundle) }}
 {{- fail "compiledCache.signer.registryCABundle must be PEM certificates" }}
 {{- end }}
+{{- if contains "PRIVATE KEY" $s.registryCABundle }}
+{{- fail "compiledCache.signer.registryCABundle must contain only certificates, not a private key" }}
+{{- end }}
+{{- /* Immutable, named after its content: a new bundle is a new ConfigMap,
+which rolls the signer, and an edit in place is refused. */}}
+{{- $caName = printf "%s-registry-ca-%s" $name (sha256sum (trim $s.registryCABundle) | trunc 10) }}
 ---
 # CA certificates, added to the system roots, that the signer and cosign
-# trust for the cache registry (compiledCache.signer.registryCABundle).
+# trust for all their TLS connections (compiledCache.signer.registryCABundle).
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $name }}-registry-ca
+  name: {{ $caName }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kubeswift-spin.labels" . | nindent 4 }}
     app.kubernetes.io/component: cache-signer
+immutable: true
 data:
   ca.crt: |
-    {{- $s.registryCABundle | nindent 4 }}
+    {{- trim $s.registryCABundle | nindent 4 }}
 ---
 {{- end }}
 # The compiled-cache signer (ADR 0014): the only holder of the signing key.
@@ -144,12 +152,6 @@ spec:
         app.kubernetes.io/name: {{ include "kubeswift-spin.name" . }}-cache-signer
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: cache-signer
-      {{- if $s.registryCABundle }}
-      annotations:
-        # The bundle is mounted with subPath, which a changed ConfigMap does
-        # not update: a new bundle rolls the signer.
-        spin.kubeswift.io/registry-ca-sha256: {{ sha256sum $s.registryCABundle }}
-      {{- end }}
     spec:
       serviceAccountName: {{ $name }}
       {{- with .Values.imagePullSecrets }}
@@ -266,7 +268,7 @@ spec:
         {{- if $s.registryCABundle }}
         - name: registry-ca
           configMap:
-            name: {{ $name }}-registry-ca
+            name: {{ $caName }}
             defaultMode: 0444
         {{- end }}
         {{- if $s.key.secretName }}
