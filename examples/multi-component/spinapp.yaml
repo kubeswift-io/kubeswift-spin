@@ -4,7 +4,7 @@ metadata:
   name: multi-component
 spec:
   # Pin the image by digest to get a compiled cache (docs/compiled-cache.md).
-  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/multi-component:v0.2.0
+  image: ghcr.io/kubeswift-io/kubeswift-spin-examples/multi-component:v0.2.1-rc1
   executor: kubeswift
   replicas: 1
   variables:

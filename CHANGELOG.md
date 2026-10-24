@@ -7,7 +7,12 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## Unreleased
+## v0.2.1-rc1 (2026-10-24)
+
+Release candidate of a hardening release for compiled caches: KubeSwift
+v0.19.3 becomes their baseline, and the workarounds for KubeSwift v0.19.1
+go. With compiled caches disabled it behaves as v0.2.0. The runtime image
+is unchanged (`spin-4.2.1-r3`), so upgrading replaces no replica.
 
 ### Added
 
@@ -16,6 +21,12 @@ running replicas on upgrade) say so under "Upgrade notes".
   cache registry behind a private CA (KubeSwift's
   `sandboxMaterialize.registryCABundle` covers the rest of the path).
   Without it the signer could not sign caches in such a registry.
+- `test/e2e/private-registry.sh`: a registry behind a private CA for the
+  end-to-end tests. KVM e2e phase 6 runs against it
+  (`E2E_PRIVATE_REGISTRY_DIR`) instead of pushing to a public scratch
+  registry, and `compiled-cache-e2e.sh` has a private-registry mode and a
+  fallback phase (cold replicas, skipped caches, refused placements,
+  controller restart, cache pull Secret failures).
 
 ### Changed
 
