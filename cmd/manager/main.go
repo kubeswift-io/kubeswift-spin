@@ -194,7 +194,7 @@ func run(o options) error {
 			return fmt.Errorf("discover %s: %w", capabilities.Placements.String(), err)
 		}
 		if !placementsServed {
-			return fmt.Errorf("the SwiftArtifactPlacement API (%s) is not installed; compiled caches need KubeSwift v0.19.1 or later", capabilities.Placements.String())
+			return fmt.Errorf("the SwiftArtifactPlacement API (%s) is not installed; compiled caches need KubeSwift v0.19.3 or later", capabilities.Placements.String())
 		}
 		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, cacheManagerBase(), cacheManagerChecks(settings)); err != nil {
 			return err
@@ -214,7 +214,7 @@ func run(o options) error {
 	setupLog.Info("SwiftSandbox features detected", "exposure", features.Exposure(), "secrets", features.Secrets(), "egress", features.Egress,
 		"readinessStartup", features.ReadinessStartup, "termination", features.Termination, "compiledCache", features.CompiledCache())
 	if settings.Configured() && !features.CompiledCache() {
-		setupLog.Info("compiled caches are configured, but the installed KubeSwift has no platform-verified optional artifacts or sandbox outputs (KubeSwift v0.19.1 or later); SpinApps run without them")
+		setupLog.Info("compiled caches are configured, but the installed KubeSwift has no platform-verified optional artifacts or sandbox outputs (compiled caches need KubeSwift v0.19.3 or later); SpinApps run without them")
 	}
 	if features.Exposure() && !features.Termination {
 		setupLog.Info("KubeSwift is older than v0.16.3 (no spec.termination): a deleted replica is not drained and loses its NetworkPolicy while it can still serve; upgrade KubeSwift to v0.16.3 or later")

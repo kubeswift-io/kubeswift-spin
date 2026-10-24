@@ -20,6 +20,7 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
+	"github.com/kubeswift-io/kubeswift-spin/internal/status"
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
 )
 
@@ -373,12 +374,13 @@ func TestCompiledCacheDecoratesNewReplicas(t *testing.T) {
 	}
 }
 
-// KubeSwift v0.19.1 fails a sandbox whose optional artifact names a pull
-// Secret it cannot read. The cache must not keep the SpinApp from
+// A sandbox whose artifact init container fails is failed by KubeSwift even
+// for an optional artifact (for example a sandbox-materialize image of
+// another KubeSwift version). The cache must not keep the SpinApp from
 // recovering: replacements start without it, and the condition says why.
 func TestCompiledCacheHoldAfterDeliveryFailure(t *testing.T) {
 	s := cacheSettings(t)
-	startManager(t, harnessOpts{compiledCache: s, delivery: compiledcache.Delivery{PullSecret: "missing", ColdFetchTimeout: time.Second}})
+	startManager(t, harnessOpts{compiledCache: s, delivery: compiledcache.Delivery{PullSecret: "cache-read", ColdFetchTimeout: time.Second}})
 	ns := enabledNamespace(t)
 	id := compiledcache.Identity{Namespace: ns, Source: ccAppRepo + "@" + ccDigestA, Runtime: ccRuntime, Architecture: "amd64",
 		Repository: s.NamespaceRepository(ns)}
@@ -395,7 +397,7 @@ func TestCompiledCacheHoldAfterDeliveryFailure(t *testing.T) {
 		t.Fatalf("the first replica got no cache: %+v", first.Spec.Artifacts)
 	}
 	setPhase(t, ns, "one-0", sandboxv1alpha1.SwiftSandboxFailed, metav1.Condition{Type: sandboxv1alpha1.SwiftSandboxConditionGuestRunning,
-		Status: metav1.ConditionFalse, Reason: "ArtifactResolveFailed", Message: "artifact wasmtime-cache: pull secret missing: not found"})
+		Status: metav1.ConditionFalse, Reason: "ArtifactMaterializeFailed", Message: "artifact wasmtime-cache: sandbox-materialize: unknown flag --authorized-until"})
 	expectCondition(t, ns, "one", compiledcache.TypeCompiledCache, metav1.ConditionFalse, compiledcache.ReasonDeliveryFailed)
 	expectEvent(t, ns, "one", EventCompiledCacheFailed)
 	eventually(t, "a replacement without the cache", func() error {
@@ -410,6 +412,80 @@ func TestCompiledCacheHoldAfterDeliveryFailure(t *testing.T) {
 		}
 		return fmt.Errorf("no replacement yet")
 	})
+}
+
+// A replica whose optional cache KubeSwift skipped (KubeSwift v0.19.3 never
+// fails a sandbox for that) is a healthy replica without a cache: it counts
+// as ready, the SpinApp is Available, the cache stays Ready for new
+// replicas, and nothing replaces the replica, however long it takes.
+func TestCompiledCacheSkippedReplicaIsReady(t *testing.T) {
+	s := cacheSettings(t)
+	startManager(t, harnessOpts{compiledCache: s, delivery: compiledcache.Delivery{PullSecret: "cache-read", ColdFetchTimeout: time.Second}})
+	ns := enabledNamespace(t)
+	id := compiledcache.Identity{Namespace: ns, Source: ccAppRepo + "@" + ccDigestA, Runtime: ccRuntime, Architecture: "amd64",
+		Repository: s.NamespaceRepository(ns)}
+	mustCreate(t, &cachev1alpha1.SpinCompiledCache{ObjectMeta: metav1.ObjectMeta{Namespace: s.Namespace, Name: id.RecordName()}, Spec: id.Spec()})
+	art := id.Repository + "@" + ccDigestB
+	patchRecordStatus(t, s.Namespace, id.RecordName(), map[string]any{
+		"compile":   map[string]any{"attempt": 1, "artifact": art},
+		"signature": map[string]any{"artifact": art, "keyID": "k1", "signedAt": time.Now().UTC().Format(time.RFC3339)},
+	})
+	mustCreate(t, cacheExecutor(ns, true), pinnedApp(ns, "one", ccDigestA))
+	expectSandboxes(t, ns, "one-0")
+	first := getSandbox(t, ns, "one-0")
+	if len(first.Spec.Artifacts) != 1 {
+		t.Fatalf("the replica got no cache: %+v", first.Spec.Artifacts)
+	}
+	setSkippedCache := func(reason string, ready metav1.ConditionStatus) {
+		// A merge patch: the CRD requires status.artifacts[].mountPath, which
+		// kubeswift-spin's API subset does not model.
+		body, err := json.Marshal(map[string]any{"status": map[string]any{
+			"phase": string(sandboxv1alpha1.SwiftSandboxRunning),
+			"artifacts": []map[string]any{{"name": compiledcache.ArtifactName, "mountPath": runtimecontract.CompiledCacheDir,
+				"state": string(sandboxv1alpha1.SandboxArtifactSkipped), "reason": reason}},
+			"conditions": []map[string]any{
+				{"type": sandboxv1alpha1.SwiftSandboxConditionGuestRunning, "status": "True", "reason": "CheckedOut", "message": "",
+					"lastTransitionTime": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)},
+				{"type": sandboxv1alpha1.SwiftSandboxConditionWorkloadReady, "status": string(ready), "reason": "Probing", "message": "",
+					"lastTransitionTime": time.Now().UTC().Format(time.RFC3339)},
+			},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "skip the cache of one-0", func() error {
+			return testClient.Status().Patch(context.Background(), getSandbox(t, ns, "one-0"), client.RawPatch(types.MergePatchType, body))
+		})
+	}
+	// As if checked out of a warm pool (the test has no pool, and nothing
+	// here depends on one), not ready an hour after the checkout: the
+	// breaker for KubeSwift v0.19.1 replaced exactly such a replica.
+	eventually(t, "give one-0 a pool", func() error {
+		return testClient.Patch(context.Background(), getSandbox(t, ns, "one-0"), client.RawPatch(types.MergePatchType, []byte(`{"spec":{"poolRef":{"name":"warm"}}}`)))
+	})
+	setSkippedCache("NotOnNode", metav1.ConditionFalse)
+	consistently(t, "the replica is kept", 3*time.Second, func() error {
+		if sb := getSandbox(t, ns, "one-0"); sb.UID != first.UID || !sb.DeletionTimestamp.IsZero() {
+			return fmt.Errorf("one-0 was replaced or is being deleted")
+		}
+		return nil
+	})
+	setSkippedCache("PullSecretInvalid", metav1.ConditionTrue)
+	expectCondition(t, ns, "one", status.TypeAvailable, metav1.ConditionTrue, status.ReasonApplicationReady)
+	eventually(t, "readyReplicas 1", func() error {
+		if r := getApp(t, ns, "one").Status.ReadyReplicas; r != 1 {
+			return fmt.Errorf("readyReplicas %d", r)
+		}
+		return nil
+	})
+	expectCondition(t, ns, "one", compiledcache.TypeCompiledCache, metav1.ConditionTrue, compiledcache.ReasonReady)
+
+	// New replicas still get the cache: a skip starts no hold.
+	updateApp(t, ns, "one", func(a *spinv1alpha1.SpinApp) { a.Spec.Replicas = 2 })
+	expectSandboxes(t, ns, "one-0", "one-1")
+	if second := getSandbox(t, ns, "one-1"); len(second.Spec.Artifacts) != 1 {
+		t.Fatalf("a new replica got no cache after a skip: %+v", second.Spec.Artifacts)
+	}
 }
 
 // With the platform default (no cache for replicas that boot cold), a

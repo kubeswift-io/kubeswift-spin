@@ -52,7 +52,7 @@ relying on it in production.
 - Egress allowlists, ingress restriction and warm pools, set per executor.
 - A configurable drain period for deleted replicas, so that long requests
   in flight can finish ([drain period](docs/executor-contract.md#drain-period)).
-- Optional compiled Wasmtime caches (v0.2.0, KubeSwift v0.19.1 or
+- Optional compiled Wasmtime caches (v0.2.0, KubeSwift v0.19.3 or
   later): compiled in an isolated sandbox, signed by a separate signer,
   verified by KubeSwift and mounted read-only in warm-pool replicas, so
   Spin starts serving without compiling the application first
@@ -89,7 +89,7 @@ Details: [architecture](docs/architecture.md) and
   sandbox never taking over the previous one's launcher. Older KubeSwift
   releases run with the limitations in
   [compatibility](docs/compatibility.md#kubeswift-features). Compiled
-  caches need KubeSwift v0.19.1 or later, and SwiftKernel 6.6.17 or later
+  caches need KubeSwift v0.19.3 or later, and SwiftKernel 6.6.17 or later
   in the namespaces that use them.
 - a node labelled `kubeswift.io/kernel-node=true`, and a Ready SwiftKernel
   named `sandbox` in every namespace that runs SpinApps (6.6.14 or later
@@ -202,9 +202,8 @@ and an experimental MCP server, are in [examples](examples/).
 - Startup figures in [performance](docs/performance.md) are lab
   measurements, not guarantees. Without compiled caches every sandbox
   starts with an empty Wasmtime cache. Compiled caches serve only replicas
-  from warm pools by default, have been run on linux/amd64 only, and
-  depend on two KubeSwift v0.19.1 workarounds
-  ([compiled caches](docs/compiled-cache.md#replicas)).
+  of executors with a warm pool by default, and have been run on
+  linux/amd64 only ([compiled caches](docs/compiled-cache.md#replicas)).
 - Any SpinApp author in a namespace can make that namespace's Secrets
   readable by their application, and registry credentials and
   Secret-backed values are readable by the Spin process in the guest; see

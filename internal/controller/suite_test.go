@@ -148,7 +148,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 	}
 	if o.detector == nil {
 		// The real detector against the envtest API server, which serves
-		// the KubeSwift v0.19.1 CRDs: every optional feature is present.
+		// the KubeSwift v0.19.3 CRDs: every optional feature is present.
 		o.detector = &capabilities.OpenAPIDetector{Discovery: discovery.NewDiscoveryClientForConfigOrDie(testCfg), TTL: time.Minute}
 	}
 	if o.maxReplicas == 0 {

@@ -7,6 +7,38 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## Unreleased
+
+### Changed
+
+- Compiled caches need KubeSwift v0.19.3 or later. v0.19.2 fixed a warm
+  replica that never became ready after its optional cache was skipped at
+  the checkout (kubeswift-io/kubeswift#843) and a sandbox that failed when
+  its cache pull Secret could not be used (#844); v0.19.3 uses a cache the
+  node already holds for a replica that boots cold (#851). KubeSwift
+  publishes no version kubeswift-spin can read, and v0.19.0 to v0.19.3
+  have the same schema, so the requirement is documented, not detected.
+  SpinApps without compiled caches keep the same KubeSwift requirements.
+- The controller no longer replaces a warm replica whose cache KubeSwift
+  skipped and that is not yet ready (the v0.2.0 workaround for #843), and a
+  skipped cache never starts the 30-minute `DeliveryFailed` hold. The hold
+  remains for a replica KubeSwift failed because of the cache, such as an
+  artifact init container that failed.
+- The placement gate (warm replicas get the cache once their pool's nodes
+  are prepared) is documented as an optimization: a replica whose cache is
+  skipped starts and becomes ready without it.
+- The KubeSwift test dependency is v0.19.3.
+
+### Upgrade notes
+
+- With compiled caches enabled, upgrade KubeSwift to v0.19.3 first (its
+  controller and sandbox-materialize from the same release), then
+  kubeswift-spin (docs/compiled-cache.md#upgrading). Do not run compiled
+  caches with this release on KubeSwift v0.19.1 or v0.19.2.
+- The deletion reason `compiled_cache_not_ready` of
+  `kubeswift_spin_sandbox_deletions_total` is gone; alerts on it can be
+  removed.
+
 ## v0.2.0 (2026-10-23)
 
 Adds trusted compiled Wasmtime caches (ADR 0014). With compiled caches

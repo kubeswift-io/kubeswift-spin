@@ -68,7 +68,7 @@ func (r *SpinAppReconciler) compiledCache(ctx context.Context, app *spinv1alpha1
 			Message: "executor " + p.ExecutorName + " enables " + executor.AnnCompiledCache + ", but the platform has not configured compiled caches (chart value compiledCache.enabled)"}
 	case !f.CompiledCache():
 		skip = &compiledcache.Skip{Reason: compiledcache.ReasonUnsupported,
-			Message: "the installed KubeSwift has no optional, platform-verified artifacts or sandbox outputs; compiled caches need KubeSwift v0.19.1 or later"}
+			Message: "the installed KubeSwift has no optional, platform-verified artifacts or sandbox outputs; compiled caches need KubeSwift v0.19.3 or later"}
 	default:
 		var ns corev1.Namespace
 		if err := r.Client.Get(ctx, types.NamespacedName{Name: app.Namespace}, &ns); err != nil {
@@ -115,13 +115,9 @@ func (r *SpinAppReconciler) compiledCache(ctx context.Context, app *spinv1alpha1
 		// A replica that carried this cache failed because of it: new
 		// replicas start without it for a while, so the cache cannot keep a
 		// SpinApp from scaling or recovering.
-		msg := fmt.Sprintf("replica %s failed while mounting the compiled cache (%s); new replicas start without it until %s. "+
-			"Check that the cache pull Secret (chart value compiledCache.pullSecretName) exists in namespace %s as a kubernetes.io/dockerconfigjson Secret",
-			h.sandbox, h.reason, h.until.UTC().Format(time.RFC3339), app.Namespace)
-		if h.reason == reasonNotReadyAfterSkip {
-			msg = fmt.Sprintf("replica %s did not become ready after KubeSwift skipped its compiled cache at the warm checkout, and was replaced; "+
-				"new replicas start without the cache until %s", h.sandbox, h.until.UTC().Format(time.RFC3339))
-		}
+		msg := fmt.Sprintf("replica %s failed while KubeSwift delivered the compiled cache (%s); new replicas start without it until %s. "+
+			"Check the KubeSwift sandbox's status and Events: a failure here is a platform problem, such as a sandbox-materialize image of another KubeSwift version or a kernel that cannot mount artifacts",
+			h.sandbox, h.reason, h.until.UTC().Format(time.RFC3339))
 		c = metav1.Condition{Type: compiledcache.TypeCompiledCache, Status: metav1.ConditionFalse, Reason: compiledcache.ReasonDeliveryFailed, Message: msg}
 		return cacheView{known: true, cond: &c, id: id, holdUntil: &h.until}
 	}
@@ -210,11 +206,11 @@ func (r *SpinAppReconciler) decorateCache(sb *sandboxv1alpha1.SwiftSandbox, cv c
 	case !r.CacheDelivery.Delivers(sb):
 		return "cold"
 	case sb.Spec.PoolRef != nil && !cv.preparedPools[sb.Spec.PoolRef.Name]:
-		// KubeSwift v0.19.1 re-dispatches a warm checkout whose optional
-		// artifact is not on the node under a new workload id, and then
-		// ignores that workload's readiness: the replica would never become
-		// ready. A warm replica gets the cache only from a pool whose nodes
-		// all hold it.
+		// An optimization, not a correctness rule: a warm replica gets the
+		// cache once its pool's placement has prepared every node, where a
+		// checkout finds the entry. KubeSwift skips an optional artifact a
+		// node does not hold, and the replica starts and becomes ready
+		// without it, but it would pay for a fetch it cannot use.
 		return "unplaced"
 	}
 	r.CacheDelivery.Decorate(sb, *cv.id, cv.artifact)
@@ -222,9 +218,12 @@ func (r *SpinAppReconciler) decorateCache(sb *sandboxv1alpha1.SwiftSandbox, cv c
 }
 
 // cacheHoldPeriod is how long a SpinApp's new replicas go without a cache
-// after a replica failed because of it. KubeSwift v0.19.1 fails a sandbox
-// whose optional artifact names a pull Secret it cannot read, instead of
-// skipping the artifact.
+// after a replica failed because of it. KubeSwift skips an optional
+// artifact it cannot deliver, so a replica that merely ran without its cache
+// never starts a hold; one that failed did so because the platform could not
+// deliver artifacts at all (an artifact init container that failed, a kernel
+// without artifact support), and every new replica with the cache would
+// fail the same way.
 const cacheHoldPeriod = 30 * time.Minute
 
 type cacheHold struct {
@@ -233,7 +232,8 @@ type cacheHold struct {
 }
 
 // cacheFailure reports why a replica that carried the compiled cache failed
-// because of an artifact, or "".
+// because of an artifact, or "". Only a failed replica qualifies: one whose
+// cache KubeSwift skipped is a healthy replica without a cache.
 func cacheFailure(sb *sandboxv1alpha1.SwiftSandbox) string {
 	carried := false
 	for _, a := range sb.Spec.Artifacts {
@@ -256,81 +256,6 @@ func cacheFailure(sb *sandboxv1alpha1.SwiftSandbox) string {
 	return ""
 }
 
-// cacheStuckAfter is the least time a warm replica whose cache KubeSwift
-// skipped after the checkout may stay not ready before it is replaced.
-const cacheStuckAfter = time.Minute
-
-// reasonNotReadyAfterSkip is the hold reason of a replaced stuck replica.
-const reasonNotReadyAfterSkip = "NotReadyAfterSkip"
-
-// KubeSwift v0.19.1 strings the stuck check matches: the GuestRunning reason
-// of a warm checkout, the artifact skip reasons that lead to a re-dispatch
-// after the checkout, and the WorkloadReady reason before any verdict.
-const (
-	reasonCheckedOut   = "CheckedOut"
-	reasonNotOnNode    = "NotOnNode"
-	reasonFetchTimeout = "FetchTimeout"
-	reasonProbing      = "Probing"
-)
-
-// cacheStuckWindow is how long a replica of app may wait for its first
-// readiness verdict: at least cacheStuckAfter, and past the readiness check's
-// initial delay and two periods.
-func cacheStuckWindow(app *spinv1alpha1.SpinApp) time.Duration {
-	w := cacheStuckAfter
-	if app.Spec.Checks.Readiness != nil {
-		r := app.Spec.Checks.Readiness
-		d := time.Duration(r.InitialDelaySeconds)*time.Second + 2*time.Duration(max(r.PeriodSeconds, 1))*time.Second + 15*time.Second
-		w = max(w, d)
-	}
-	return w
-}
-
-// cacheStuckRecheck returns when the next replica that could become stuck
-// reaches the window, so the reconcile looks again then: a stuck replica
-// produces no further events. Zero means none.
-func cacheStuckRecheck(owned []sandboxv1alpha1.SwiftSandbox, now time.Time, window time.Duration) time.Duration {
-	var wait time.Duration
-	for i := range owned {
-		sb := &owned[i]
-		if cacheStuck(sb, now.Add(window), window) && !cacheStuck(sb, now, window) {
-			running := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionGuestRunning)
-			if d := running.LastTransitionTime.Add(window).Sub(now) + time.Second; wait == 0 || d < wait {
-				wait = d
-			}
-		}
-	}
-	return wait
-}
-
-// cacheStuck reports whether a replica shows exactly the KubeSwift v0.19.1
-// re-dispatch defect (docs/upstream/kubeswift-redispatch-readiness.md): it was
-// checked out of a warm slot, KubeSwift skipped its cache after the checkout
-// (not on the node, or the fetch deadline passed) and dispatched the workload
-// again, and no readiness verdict has been accepted for the window since
-// the checkout. A replica that boots cold, had the cache skipped before the
-// claim, or became ready and later failed a probe does not match.
-func cacheStuck(sb *sandboxv1alpha1.SwiftSandbox, now time.Time, window time.Duration) bool {
-	if sb.Spec.PoolRef == nil || sb.Status.Phase != sandboxv1alpha1.SwiftSandboxRunning || !sb.DeletionTimestamp.IsZero() {
-		return false
-	}
-	skipped := false
-	for _, a := range sb.Status.Artifacts {
-		if a.Name == compiledcache.ArtifactName && a.State == sandboxv1alpha1.SandboxArtifactSkipped &&
-			(a.Reason == reasonNotOnNode || a.Reason == reasonFetchTimeout) {
-			skipped = true
-		}
-	}
-	if !skipped {
-		return false
-	}
-	ready := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionWorkloadReady)
-	running := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionGuestRunning)
-	return ready != nil && ready.Status != metav1.ConditionTrue && ready.Reason == reasonProbing &&
-		running != nil && running.Status == metav1.ConditionTrue && running.Reason == reasonCheckedOut &&
-		now.Sub(running.LastTransitionTime.Time) >= window
-}
-
 // cacheHold returns the hold on artifact for a SpinApp, if one is active.
 func (r *SpinAppReconciler) cacheHold(key, artifact string) (cacheHold, bool) {
 	r.attachMu.Lock()
@@ -345,14 +270,14 @@ func (r *SpinAppReconciler) cacheHold(key, artifact string) (cacheHold, bool) {
 // countAttachments counts, once per replica, what KubeSwift did with the
 // compiled cache of a replica that carried one: mounted (reason Cached or
 // Fetched) or skipped (and why). Replicas created before this process
-// started are not counted, so a restart does not count them again.
-func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1.SwiftSandbox, window time.Duration) (stuck []*sandboxv1alpha1.SwiftSandbox) {
+// started are not counted, so a restart does not count them again. A
+// replica that failed because of the cache starts a hold.
+func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1.SwiftSandbox) {
 	r.attachMu.Lock()
 	defer r.attachMu.Unlock()
 	if r.attached == nil {
 		r.attached = map[types.UID]string{}
 		r.holds = map[string]cacheHold{}
-		r.stuckDeleted = map[types.UID]string{}
 	}
 	if r.startedAt.IsZero() {
 		// Only the leader reconciles: count replicas from the moment this
@@ -361,18 +286,6 @@ func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1
 	}
 	for i := range owned {
 		sb := &owned[i]
-		if cacheStuck(sb, r.Now(), window) {
-			if _, done := r.stuckDeleted[sb.UID]; !done {
-				// A deletion this process already started is not repeated,
-				// even before the informer shows it.
-				stuck = append(stuck, sb)
-			}
-			for _, a := range sb.Spec.Artifacts {
-				if h, ok := r.holds[key]; a.Name == compiledcache.ArtifactName && (!ok || h.artifact != a.Ref || !r.Now().Before(h.until)) {
-					r.holds[key] = cacheHold{artifact: a.Ref, sandbox: sb.Name, reason: reasonNotReadyAfterSkip, until: r.Now().Add(cacheHoldPeriod)}
-				}
-			}
-		}
 		if reason := cacheFailure(sb); reason != "" {
 			for _, a := range sb.Spec.Artifacts {
 				if a.Name != compiledcache.ArtifactName {
@@ -411,12 +324,6 @@ func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1
 			delete(r.attached, uid)
 		}
 	}
-	for uid, k := range r.stuckDeleted {
-		if k == key && !live[uid] {
-			delete(r.stuckDeleted, uid)
-		}
-	}
-	return stuck
 }
 
 // forgetAttachments drops what countAttachments remembers of a SpinApp.
@@ -429,11 +336,6 @@ func (r *SpinAppReconciler) forgetAttachments(key string) {
 		}
 	}
 	delete(r.holds, key)
-	for uid, k := range r.stuckDeleted {
-		if k == key {
-			delete(r.stuckDeleted, uid)
-		}
-	}
 }
 
 // recordViewChanged lets a record update through only when something a
@@ -463,11 +365,4 @@ func conditionsEqual(a, b []metav1.Condition) bool {
 		}
 	}
 	return true
-}
-
-// noteStuckDeleted records that this process deleted a stuck replica.
-func (r *SpinAppReconciler) noteStuckDeleted(key string, uid types.UID) {
-	r.attachMu.Lock()
-	defer r.attachMu.Unlock()
-	r.stuckDeleted[uid] = key
 }
