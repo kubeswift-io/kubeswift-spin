@@ -18,7 +18,7 @@ It has passed all nine phases on the KVM lab cluster; see
 | 3 serverless-ai | an OpenAI-compatible mock (`examples/tools/upstream`, requiring a token it reads from the Secret `e2e-llm-token`) runs as Pod and Service `upstream`; executor `kubeswift-e2e-egress` allows that Service on port 8090. SpinApp `ai-e2e` on that executor, with the token as a Secret-backed runtime-config option, gets a completion; SpinApp `ai-blocked-e2e` on `$EXECUTOR` without the allowlist must not (HTTP 502 or a client timeout); leak scan for the token |
 | 4 warm pool | a SwiftSandboxPool `spin-e2e-warm` with the controller's runtime image, 1 CPU, 512Mi, `restricted` and port `http-app` 3000 gets a warm slot; SpinApp `warm-e2e` on executor `kubeswift-e2e-warm` becomes `Available`, the time is printed, a `CheckedOut` Event exists for `warm-e2e-0`, and HTTP through the Service works |
 | 5 loadFromSecret | SpinApp `lfs-e2e` (serverless-ai) with `runtimeConfig.loadFromSecret` naming a Secret whose `runtime-config.toml` holds the mock's URL and token; the sandbox has a `secretFiles` entry for it; a completion succeeds, which needs the token; leak scan for the token |
-| 6 private registry | an in-cluster registry with TLS (a CA created for the run) and htpasswd (a password created for the run) refuses anonymous pulls; a Job copies the hello-http artifact into it with the docker-registry Secret `e2e-registry-auth`. The test builds a runtime image that also trusts the run's CA from the configured runtime image and pushes it to `E2E_SCRATCH_REGISTRY`, because Spin speaks only HTTPS to registries and kubeswift-spin has no CA option. SpinApp `private-e2e` with `imagePullSecrets` on executor `kubeswift-e2e-private` (that runtime image, egress to the registry) becomes `Available` and serves HTTP; its sandbox has a `secretFiles` entry for the Secret; SpinApp `private-noauth-e2e` without `imagePullSecrets` fails (`SandboxFailed`) and never becomes ready; leak scan for the password and the base64 `auth` value |
+| 6 private registry | an in-cluster registry with TLS (a CA created for the run) and htpasswd (a password created for the run) refuses anonymous pulls; a Job copies the hello-http artifact into it with the docker-registry Secret `e2e-registry-auth`. The test builds a runtime image that also trusts the run's CA from the configured runtime image and pushes it to `E2E_SCRATCH_REGISTRY`, because Spin speaks only HTTPS to registries and kubeswift-spin has no CA option. With `E2E_PRIVATE_REGISTRY_DIR`, the registry, its CA and the Secret come from [`private-registry.sh`](#a-registry-behind-a-private-ca) instead, and the runtime image is built inside the cluster and pulled from that registry by KubeSwift, which trusts the CA. SpinApp `private-e2e` with `imagePullSecrets` on executor `kubeswift-e2e-private` (that runtime image, egress to the registry) becomes `Available` and serves HTTP; its sandbox has a `secretFiles` entry for the Secret; SpinApp `private-noauth-e2e` without `imagePullSecrets` fails (`SandboxFailed`) and never becomes ready; leak scan for the password and the base64 `auth` value |
 | 7 ingress-from | executor `kubeswift-e2e-ingress` with `spin.kubeswift.io/ingress-from` admitting pods labelled `e2e-role=allowed`; SpinApp `ingress-e2e` becomes `Available`; KubeSwift's NetworkPolicy `ingress-e2e-0-restricted` has that peer; a labelled client gets HTTP 200 through the Service, the unlabelled client gets no connection; the unlabelled client is admitted after it gets the label and blocked again after it loses it |
 | 8 liveness | SpinApp `live-e2e` (outbound-http) whose liveness check calls `/fetch`, which returns 502 when its in-cluster target (a busybox httpd) stops serving a file. After the file is removed: the sandbox becomes `Failed` (`LivenessProbeFailed`), `readyReplicas` drops to 0, kubeswift-spin replaces the sandbox, the replacement fails too while the target is broken, the file is restored, the next replacement (after a longer backoff) becomes `Available` and serves requests, one sandbox and one sandbox NetworkPolicy remain, nothing changes for 90 seconds, and the controller logged no error. Timings are printed |
 | 9 teardown | deleting the SpinApps removes them, their sandboxes, their Services and the sandbox NetworkPolicies |
@@ -81,7 +81,10 @@ make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-sp
   `registry:2`, `gcr.io/go-containerregistry/crane:v0.22.1` and
   `busybox:1.37.0` (all pinned by digest in the script)
 - a Calico or other CNI that enforces NetworkPolicy, for phase 7
-- for phase 6: `docker`, `openssl` and Python 3 with `bcrypt` where the
+- for phase 6, either a registry behind a private CA from
+  [`private-registry.sh`](#a-registry-behind-a-private-ca)
+  (`E2E_PRIVATE_REGISTRY_DIR`, which also needs `E2E_CONTEXT`), or
+  `docker`, `openssl` and Python 3 with `bcrypt` where the
   script runs, and `E2E_SCRATCH_REGISTRY`, a registry that the script can
   push to and the nodes can pull from without credentials. The image pushed
   there is the configured runtime image plus the run's public CA
@@ -100,7 +103,8 @@ make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 | `TIMEOUT` | `300` | seconds to wait for each step |
 | `E2E_PHASES` | `1 2 3 5 7 8 9` | phases to run; when set, `E2E_WARM_POOL` and `E2E_SCRATCH_REGISTRY` add no phases |
 | `E2E_WARM_POOL` | unset | `1` also runs phase 4 |
-| `E2E_SCRATCH_REGISTRY` | unset | registry for the phase 6 test runtime image; setting it also runs phase 6, and phase 6 stops the script if it is unset |
+| `E2E_SCRATCH_REGISTRY` | unset | registry for the phase 6 test runtime image; setting it also runs phase 6, and phase 6 stops the script if neither it nor `E2E_PRIVATE_REGISTRY_DIR` is set |
+| `E2E_PRIVATE_REGISTRY_DIR` | unset | state directory of a registry from `private-registry.sh`: phase 6 uses it and builds its runtime image inside the cluster; setting it also runs phase 6 |
 | `KUBESWIFT_NAMESPACE` | `kubeswift-system` | namespace of the KubeSwift pods whose logs the leak scan reads |
 | `KEEP` | unset | `1` keeps the test objects afterwards |
 
@@ -113,6 +117,36 @@ E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.2.0 E2E_WARM_POOL=1 E2E_SCRATCH
 ```
 
 `make e2e` runs the same script and passes these variables through.
+
+## A registry behind a private CA
+
+`private-registry.sh` starts a registry like an organization's private
+one in the test namespace: TLS from a CA created for the run, htpasswd
+authentication, the docker-registry Secret `e2e-registry-auth`. It writes
+the CA certificate and the credentials to a local state directory (mode
+0700) and deletes the CA key once the server certificate is signed. It
+pushes nothing from the machine that runs it: `copy` and `runtime` run in
+a tool pod. Use it only on a test cluster.
+
+```bash
+E2E_CONTEXT=<test cluster context> PRIVATE_REGISTRY_DIR=/tmp/kss-private test/e2e/private-registry.sh up
+```
+
+KubeSwift then has to trust the CA: an administrator sets KubeSwift's chart
+value `sandboxMaterialize.registryCABundle` to
+`$PRIVATE_REGISTRY_DIR/ca.crt` (and, for compiled caches, kubeswift-spin's
+`compiledCache.signer.registryCABundle`). Pods created before that, warm
+slots included, do not trust it. Afterwards, restore KubeSwift's values and
+remove the registry:
+
+```bash
+E2E_CONTEXT=<test cluster context> PRIVATE_REGISTRY_DIR=/tmp/kss-private test/e2e/private-registry.sh down
+```
+
+`private-registry.sh secret <namespace> <name> [<label>=<value>]` creates
+a docker-registry Secret for the registry in another namespace (for
+example the export credential, labelled `kubeswift.io/export-credentials=true`,
+in the KubeSwift namespace); `down` removes those too.
 
 ## Lab result
 
@@ -156,9 +190,10 @@ KubeSwift export, verification and placement features:
 | Phase | Checks |
 |---|---|
 | 1 functional | hello-http, multi-component, request-info, outbound-http, key-value, serverless-ai and the MCP example on the warm pool `kss-cc-e2e`: each SpinApp is `Available` before its cache exists; its record becomes Ready (compiled, exported, signed, placed); the second replica mounts the cache from its prepared node (`Mounted/Cached`); the application answers through its Service |
-| 2 boundaries | a tenant (SpinApps only) cannot create or patch records, placements or sandbox status, or read the release namespace's Secrets; no sandbox spec names the signing key or a registry credential, and compiler sandboxes reference no Secret; records forged as a compromised status writer could (an unsigned export, another application's signed artifact, an artifact outside the cache repository and, with `CC_WRONG_KEY_JOB`, an export signed with another key) are refused by KubeSwift's platform verification or not attached at all, and the SpinApp stays `Available` |
+| 2 boundaries | a tenant (SpinApps only) cannot create or patch records, placements or sandbox status, or read the release namespace's Secrets; no sandbox spec names the signing key or a registry credential, and compiler sandboxes reference no Secret but the application's pull Secret; with the signer stopped, a SpinApp whose cache waits for a signature is `Available`; records forged as a compromised status writer could (an unsigned export, another application's signed artifact, an artifact outside the cache repository and, with `CC_WRONG_KEY_JOB`, an export signed with another key) are refused by KubeSwift's platform verification or not attached at all, and the SpinApp stays `Available` |
 | 3 restart | deleting the cache manager and signer pods during a compilation keeps the one compiler (attempt 1), trusts nothing before the export is signed, and ends Ready |
-| 4 teardown | the pool's placements go with their consumers |
+| 5 fallback | a replica that boots cold (the pool at `minWarm: 0`) mounts the cache its node already holds (`Mounted/Cached`, `Resolved=True`) and answers; a controller restart replaces no replica; a placement the API server refuses (a quota) leaves the SpinApp `Available` with `CompiledCache=True/PlacementFailed`; with the cache manager stopped and the record claiming a prepared pool, a warm and a cold replica carry a cache no node holds, KubeSwift skips it (`NotOnNode`, ...), the replicas become ready, the warm one is not replaced and the SpinApp starts no `DeliveryFailed` hold; with `CC_CACHE_PULL_SECRET`, a missing cache pull Secret (`PullSecretInvalid`) and one the registry refuses: skipped, ready, no anonymous pull |
+| 4 teardown | the pool's placements go with their consumers (runs last) |
 
 Requirements, on top of the [KVM e2e requirements](#requirements):
 
@@ -172,13 +207,15 @@ Requirements, on top of the [KVM e2e requirements](#requirements):
   [docs/compiled-cache.md](../../docs/compiled-cache.md), with the export
   credential Secret in the KubeSwift namespace;
 - the example artifacts pushed to a registry the sandboxes and KubeSwift
-  can read, pinned by digest in a file:
+  can read, pinned by digest in a file (with `private-registry.sh copy`
+  for a registry behind a private CA):
 
 ```text
 hello-http registry.example.com/kubeswift-spin-examples/hello-http@sha256:...
 multi-component registry.example.com/kubeswift-spin-examples/multi-component@sha256:...
 request-info registry.example.com/kubeswift-spin-examples/request-info@sha256:...
 request-info-b registry.example.com/kubeswift-spin-examples/request-info-b@sha256:...
+hello-http-b registry.example.com/kubeswift-spin-examples/hello-http-b@sha256:...
 outbound-http registry.example.com/kubeswift-spin-examples/outbound-http@sha256:...
 key-value registry.example.com/kubeswift-spin-examples/key-value@sha256:...
 serverless-ai registry.example.com/kubeswift-spin-examples/serverless-ai@sha256:...
@@ -186,17 +223,33 @@ mcp-tools registry.example.com/kubeswift-spin-examples/mcp-tools@sha256:...
 ```
 
 `request-info-b` is the request-info artifact pushed under another
-repository name, a second identity for phases 2 and 3.
+repository name, a second identity for phases 2 and 3; `hello-http-b`
+likewise, a cache identity that phase 5 compiles but never places.
 
 ```bash
 E2E_CONTEXT=<test cluster context> CC_IMAGES=cc-images.txt test/e2e/compiled-cache-e2e.sh
 ```
 
-`E2E_CONTEXT` must name the current kubectl context. `CC_WRONG_KEY_JOB`
+For a registry behind a private CA, start it with `private-registry.sh`,
+make KubeSwift and the signer trust its CA, copy the examples and a runtime
+image into it (the runtime image listed in `compiledCache.extraRuntimes`),
+create the cache pull Secret named by `compiledCache.pullSecretName` with
+`private-registry.sh secret`, and run:
+
+```bash
+E2E_CONTEXT=<test cluster context> CC_IMAGES=cc-images.txt CC_PRIVATE_REGISTRY_DIR=/tmp/kss-private CC_RUNTIME_IMAGE=<runtime in the registry> CC_CACHE_PULL_SECRET=<pull Secret> test/e2e/compiled-cache-e2e.sh
+```
+
+In that mode the pool, the executor and every SpinApp pull with
+`e2e-registry-auth` and reach the registry through the egress allowlist,
+and phase 2 also checks that the registry password is in no sandbox spec
+or Event. `E2E_CONTEXT` must name the current kubectl context. `CC_WRONG_KEY_JOB`
 names a push credential for the cache repository in the test namespace;
 create it for the run only and delete it afterwards. Even with `KEEP=1`,
-the script restores the signer's replica count and deletes a record whose
-status it forged.
+the script restores the signer's and the cache manager's replica counts,
+removes its quota, restores the cache pull Secret and deletes a record
+whose status it forged.
 
-Phase 2 scales the signer to zero while it runs and forges record status;
-run it only on a test cluster.
+Phase 2 scales the signer to zero while it runs and forges record status,
+and phase 5 stops the cache manager and forges a record's placements; run
+them only on a test cluster.
