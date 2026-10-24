@@ -216,6 +216,11 @@ func run(o options) error {
 	if settings.Configured() && !features.CompiledCache() {
 		setupLog.Info("compiled caches are configured, but the installed KubeSwift has no platform-verified optional artifacts or sandbox outputs (compiled caches need KubeSwift v0.19.3 or later); SpinApps run without them")
 	}
+	if settings.Configured() && features.CompiledCache() {
+		// v0.19.0 to v0.19.3 publish the same schema, and KubeSwift
+		// publishes no version kubeswift-spin can read.
+		setupLog.Info("compiled caches assume KubeSwift v0.19.3 or later, which kubeswift-spin cannot verify: on v0.19.1 a warm replica whose cache is skipped at the checkout never becomes ready (see docs/compiled-cache.md#upgrading)")
+	}
 	if features.Exposure() && !features.Termination {
 		setupLog.Info("KubeSwift is older than v0.16.3 (no spec.termination): a deleted replica is not drained and loses its NetworkPolicy while it can still serve; upgrade KubeSwift to v0.16.3 or later")
 	}

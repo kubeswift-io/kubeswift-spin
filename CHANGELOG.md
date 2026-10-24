@@ -23,7 +23,9 @@ running replicas on upgrade) say so under "Upgrade notes".
   skipped and that is not yet ready (the v0.2.0 workaround for #843), and a
   skipped cache never starts the 30-minute `DeliveryFailed` hold. The hold
   remains for a replica KubeSwift failed because of the cache, such as an
-  artifact init container that failed.
+  artifact init container that failed, or a kernel without artifact
+  mounts (a `KernelUnsupported` for another kernel feature no longer starts
+  one). A hold now also ends on time when a reconcile is blocked.
 - The placement gate (warm replicas get the cache once their pool's nodes
   are prepared) is documented as an optimization: a replica whose cache is
   skipped starts and becomes ready without it.
@@ -34,7 +36,10 @@ running replicas on upgrade) say so under "Upgrade notes".
 - With compiled caches enabled, upgrade KubeSwift to v0.19.3 first (its
   controller and sandbox-materialize from the same release), then
   kubeswift-spin (docs/compiled-cache.md#upgrading). Do not run compiled
-  caches with this release on KubeSwift v0.19.1 or v0.19.2.
+  caches with this release on KubeSwift v0.19.1 or v0.19.2. Before
+  upgrading kubeswift-spin, delete any warm replica KubeSwift v0.19.1 left
+  not ready after skipping its cache (the upgrade guide shows how to find
+  them): this release no longer replaces them.
 - The deletion reason `compiled_cache_not_ready` of
   `kubeswift_spin_sandbox_deletions_total` is gone; alerts on it can be
   removed.

@@ -380,7 +380,8 @@ func TestCompiledCacheDecoratesNewReplicas(t *testing.T) {
 // recovering: replacements start without it, and the condition says why.
 func TestCompiledCacheHoldAfterDeliveryFailure(t *testing.T) {
 	s := cacheSettings(t)
-	startManager(t, harnessOpts{compiledCache: s, delivery: compiledcache.Delivery{PullSecret: "cache-read", ColdFetchTimeout: time.Second}})
+	startManager(t, harnessOpts{compiledCache: s, delivery: compiledcache.Delivery{PullSecret: "cache-read", ColdFetchTimeout: time.Second},
+		cacheHold: 6 * time.Second})
 	ns := enabledNamespace(t)
 	id := compiledcache.Identity{Namespace: ns, Source: ccAppRepo + "@" + ccDigestA, Runtime: ccRuntime, Architecture: "amd64",
 		Repository: s.NamespaceRepository(ns)}
@@ -411,6 +412,22 @@ func TestCompiledCacheHoldAfterDeliveryFailure(t *testing.T) {
 			}
 		}
 		return fmt.Errorf("no replacement yet")
+	})
+
+	// The hold ends by itself, with no other event: the condition returns to
+	// Ready and new replicas get the cache again.
+	expectCondition(t, ns, "one", compiledcache.TypeCompiledCache, metav1.ConditionTrue, compiledcache.ReasonReady)
+	updateApp(t, ns, "one", func(a *spinv1alpha1.SpinApp) { a.Spec.Replicas = 2 })
+	eventually(t, "a new replica with the cache after the hold", func() error {
+		for _, sb := range listSandboxes(t, ns) {
+			if sb.Name == "one-1" && sb.DeletionTimestamp.IsZero() {
+				if len(sb.Spec.Artifacts) != 1 {
+					return fmt.Errorf("one-1 carries no cache")
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("no one-1 yet")
 	})
 }
 

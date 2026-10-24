@@ -47,6 +47,17 @@ func TestCacheFailure(t *testing.T) {
 	if cacheFailure(plain) != "" {
 		t.Fatal("a replica without the cache blamed on it")
 	}
+	// swiftletd's KernelUnsupported names the bridge feature: only one for
+	// artifacts is the cache's.
+	sb.Status.Conditions[0].Reason = "KernelUnsupported"
+	sb.Status.Conditions[0].Message = "the sandbox kernel's bridge does not support secret files (feature 'files'); needs kernels/sandbox 6.6.14"
+	if r := cacheFailure(&sb); r != "" {
+		t.Fatalf("a secret-files kernel failure blamed on the cache: %q", r)
+	}
+	sb.Status.Conditions[0].Message = "the sandbox kernel's bridge does not support artifact mounts (feature 'mounts'); needs kernels/sandbox 6.6.14"
+	if cacheFailure(&sb) == "" {
+		t.Fatal("an artifact-mount kernel failure not blamed on the cache")
+	}
 }
 
 func TestCountAttachmentsOncePerReplica(t *testing.T) {
@@ -89,7 +100,13 @@ func TestCacheHoldExpires(t *testing.T) {
 	if _, held := r.cacheHold("ns/app", "r@sha256:2"); held {
 		t.Fatal("a hold applied to another artifact")
 	}
+	if d := r.holdRecheck("ns/app"); d != cacheHoldPeriod+time.Second {
+		t.Fatalf("recheck in %s, want the end of the hold and a second", d)
+	}
 	now = now.Add(cacheHoldPeriod + time.Second)
+	if d := r.holdRecheck("ns/app"); d != 0 {
+		t.Fatalf("recheck in %s after the hold ended", d)
+	}
 	if _, held := r.cacheHold("ns/app", "r@sha256:1"); held {
 		t.Fatal("the hold did not expire")
 	}

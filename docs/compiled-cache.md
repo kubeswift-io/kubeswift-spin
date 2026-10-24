@@ -24,9 +24,11 @@ KubeSwift v0.19.3 or later (see [Requirements](#requirements)).
 | Signing and verification policy | implemented |
 | Placement on warm-pool nodes and mounting in replicas | implemented |
 
-Validated on the amd64 KVM lab with KubeSwift v0.19.1
-([test/e2e](../test/e2e/README.md#compiled-caches),
+kubeswift-spin v0.2.0 was validated on the amd64 KVM lab with KubeSwift
+v0.19.1 ([test/e2e](../test/e2e/README.md#compiled-caches),
 [performance](performance.md#compiled-wasmtime-cache-kubeswift-v0191-2026-10-23)).
+[compatibility.md](compatibility.md) lists what has run since with
+KubeSwift v0.19.3.
 arm64 follows the same path but has not been run on arm64 hardware: do
 not rely on compiled caches there until it has.
 
@@ -462,8 +464,25 @@ From kubeswift-spin v0.2.0 with compiled caches enabled:
    cache. The KubeSwift chart sets both; check only if you pin
    `sandboxMaterialize.image.tag` separately. kubeswift-spin v0.2.0 keeps
    working on v0.19.3.
-2. Then upgrade kubeswift-spin to v0.2.1 with `--reset-then-reuse-values`,
+2. A warm replica that KubeSwift v0.19.1 left not ready before the
+   upgrade stays not ready (its readiness verdict was lost; see KubeSwift's
+   v0.19.2 upgrade notes). kubeswift-spin v0.2.0 replaces such replicas
+   within a minute or two; v0.2.1 does not. Before upgrading
+   kubeswift-spin, check that none is left: a SwiftSandbox of a SpinApp
+   with `spec.poolRef`, `status.artifacts` showing `wasmtime-cache`
+   `Skipped`, and `WorkloadReady=False` with reason `Probing`. Delete any
+   you find; the SpinApp replaces it.
+
+   ```bash
+   kubectl get swiftsandboxes -A -o jsonpath='{range .items[?(@.spec.poolRef)]}{.metadata.namespace}{"/"}{.metadata.name}{" "}{.status.artifacts[?(@.name=="wasmtime-cache")].state}{" "}{.status.conditions[?(@.type=="WorkloadReady")].reason}{"\n"}{end}'
+   ```
+
+3. Then upgrade kubeswift-spin to v0.2.1 with `--reset-then-reuse-values`,
    as the [README](../README.md#upgrade) describes.
+
+kubeswift-spin cannot tell which KubeSwift release runs (v0.19.0 to
+v0.19.3 publish the same schema, and KubeSwift publishes no version), so it
+logs at startup that compiled caches assume v0.19.3.
 
 Do not run kubeswift-spin v0.2.1 with compiled caches on KubeSwift v0.19.1
 or v0.19.2: v0.2.1 no longer replaces a warm replica that KubeSwift v0.19.1

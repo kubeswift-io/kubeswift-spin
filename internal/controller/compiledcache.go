@@ -47,9 +47,6 @@ type cacheView struct {
 	// artifact is the signed artifact new replicas mount, "" for none.
 	artifact string
 	id       *compiledcache.Identity
-	// holdUntil is set while new replicas go without the cache after one
-	// failed because of it.
-	holdUntil *time.Time
 	// preparedPools are the warm pools whose placement of the artifact is
 	// Prepared on every node.
 	preparedPools map[string]bool
@@ -119,7 +116,7 @@ func (r *SpinAppReconciler) compiledCache(ctx context.Context, app *spinv1alpha1
 			"Check the KubeSwift sandbox's status and Events: a failure here is a platform problem, such as a sandbox-materialize image of another KubeSwift version or a kernel that cannot mount artifacts",
 			h.sandbox, h.reason, h.until.UTC().Format(time.RFC3339))
 		c = metav1.Condition{Type: compiledcache.TypeCompiledCache, Status: metav1.ConditionFalse, Reason: compiledcache.ReasonDeliveryFailed, Message: msg}
-		return cacheView{known: true, cond: &c, id: id, holdUntil: &h.until}
+		return cacheView{known: true, cond: &c, id: id}
 	}
 	prepared := map[string]bool{}
 	for _, p := range rec.Status.Placements {
@@ -226,6 +223,14 @@ func (r *SpinAppReconciler) decorateCache(sb *sandboxv1alpha1.SwiftSandbox, cv c
 // fail the same way.
 const cacheHoldPeriod = 30 * time.Minute
 
+// holdPeriod is cacheHoldPeriod, or CacheHoldPeriod when set (tests).
+func (r *SpinAppReconciler) holdPeriod() time.Duration {
+	if r.CacheHoldPeriod > 0 {
+		return r.CacheHoldPeriod
+	}
+	return cacheHoldPeriod
+}
+
 type cacheHold struct {
 	artifact, sandbox, reason string
 	until                     time.Time
@@ -233,7 +238,11 @@ type cacheHold struct {
 
 // cacheFailure reports why a replica that carried the compiled cache failed
 // because of an artifact, or "". Only a failed replica qualifies: one whose
-// cache KubeSwift skipped is a healthy replica without a cache.
+// cache KubeSwift skipped is a healthy replica without a cache. KubeSwift
+// fails a sandbox for an optional artifact only when its delivery itself
+// fails (an Artifact* reason) or when the kernel cannot mount artifacts;
+// KernelUnsupported for anything else (secret files, outputs) is not the
+// cache's.
 func cacheFailure(sb *sandboxv1alpha1.SwiftSandbox) string {
 	carried := false
 	for _, a := range sb.Spec.Artifacts {
@@ -244,16 +253,29 @@ func cacheFailure(sb *sandboxv1alpha1.SwiftSandbox) string {
 	if !carried || sb.Status.Phase != sandboxv1alpha1.SwiftSandboxFailed {
 		return ""
 	}
-	for _, a := range sb.Status.Artifacts {
-		if a.Name == compiledcache.ArtifactName && a.State == sandboxv1alpha1.SandboxArtifactFailed {
-			return metrics.Reason(a.Reason)
-		}
-	}
-	if c := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionGuestRunning); c != nil &&
-		(strings.HasPrefix(c.Reason, "Artifact") || c.Reason == "KernelUnsupported") {
+	c := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionGuestRunning)
+	switch {
+	case c == nil:
+		return ""
+	case strings.HasPrefix(c.Reason, "Artifact"):
+		return metrics.Reason(c.Reason)
+	case c.Reason == "KernelUnsupported" && strings.Contains(c.Message, "artifact"):
 		return metrics.Reason(c.Reason)
 	}
 	return ""
+}
+
+// holdRecheck returns how long until a SpinApp's active hold ends, plus a
+// second, or zero without one: the reconcile looks again then, whichever
+// path it takes.
+func (r *SpinAppReconciler) holdRecheck(key string) time.Duration {
+	r.attachMu.Lock()
+	defer r.attachMu.Unlock()
+	h, ok := r.holds[key]
+	if !ok || !r.Now().Before(h.until) {
+		return 0
+	}
+	return h.until.Sub(r.Now()) + time.Second
 }
 
 // cacheHold returns the hold on artifact for a SpinApp, if one is active.
@@ -292,7 +314,7 @@ func (r *SpinAppReconciler) countAttachments(key string, owned []sandboxv1alpha1
 					continue
 				}
 				if h, ok := r.holds[key]; !ok || h.artifact != a.Ref || !r.Now().Before(h.until) {
-					r.holds[key] = cacheHold{artifact: a.Ref, sandbox: sb.Name, reason: reason, until: r.Now().Add(cacheHoldPeriod)}
+					r.holds[key] = cacheHold{artifact: a.Ref, sandbox: sb.Name, reason: reason, until: r.Now().Add(r.holdPeriod())}
 				}
 			}
 		}

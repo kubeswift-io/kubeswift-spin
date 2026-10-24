@@ -127,6 +127,9 @@ type SpinAppReconciler struct {
 	attached  map[types.UID]string
 	holds     map[string]cacheHold
 	startedAt time.Time
+	// CacheHoldPeriod overrides how long new replicas go without a
+	// compiled cache after one failed because of it (tests).
+	CacheHoldPeriod time.Duration
 }
 
 // SetupWithManager registers the controller, its watches and the field index.
@@ -268,6 +271,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (re
 	// A replica that failed because of its compiled cache sets a hold now,
 	// so this reconcile already gives new replicas no cache.
 	r.countAttachments(key, owned)
+	cacheRecheck = r.holdRecheck(key)
 
 	var exec spinv1alpha1.SpinAppExecutor
 	var execErr error = apierrors.NewNotFound(spinv1alpha1.GroupVersion.WithResource("spinappexecutors").GroupResource(), app.Spec.Executor)
@@ -349,11 +353,6 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (re
 	}
 
 	cache := r.compiledCache(ctx, &app, profile, features)
-	if cache.holdUntil != nil {
-		if d := cache.holdUntil.Sub(r.Now()) + time.Second; cacheRecheck == 0 || d < cacheRecheck {
-			cacheRecheck = d
-		}
-	}
 
 	tmpl, err := translate.BuildTemplate(&app, profile, r.Options.Resources, features)
 	if err != nil {
