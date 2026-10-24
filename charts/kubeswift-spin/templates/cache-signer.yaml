@@ -17,6 +17,29 @@ release), so the signer is never given them. */}}
 {{- if hasPrefix "AZURE_" .name }}
 {{- fail "compiledCache.signer.extraEnv: AZURE_* variables are not supported until cosign fixes GO-2026-6225" }}
 {{- end }}
+{{- if or (eq .name "SSL_CERT_DIR") (eq .name "SSL_CERT_FILE") }}
+{{- fail "compiledCache.signer.extraEnv: set compiledCache.signer.registryCABundle instead of SSL_CERT_DIR or SSL_CERT_FILE" }}
+{{- end }}
+{{- end }}
+{{- if $s.registryCABundle }}
+{{- if not (contains "-----BEGIN CERTIFICATE-----" $s.registryCABundle) }}
+{{- fail "compiledCache.signer.registryCABundle must be PEM certificates" }}
+{{- end }}
+---
+# CA certificates, added to the system roots, that the signer and cosign
+# trust for the cache registry (compiledCache.signer.registryCABundle).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-registry-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache-signer
+data:
+  ca.crt: |
+    {{- $s.registryCABundle | nindent 4 }}
+---
 {{- end }}
 # The compiled-cache signer (ADR 0014): the only holder of the signing key.
 # It reads records and compiler sandboxes and writes only status.signature.
@@ -121,6 +144,12 @@ spec:
         app.kubernetes.io/name: {{ include "kubeswift-spin.name" . }}-cache-signer
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: cache-signer
+      {{- if $s.registryCABundle }}
+      annotations:
+        # The bundle is mounted with subPath, which a changed ConfigMap does
+        # not update: a new bundle rolls the signer.
+        spin.kubeswift.io/registry-ca-sha256: {{ sha256sum $s.registryCABundle }}
+      {{- end }}
     spec:
       serviceAccountName: {{ $name }}
       {{- with .Values.imagePullSecrets }}
@@ -163,6 +192,12 @@ spec:
               value: /tmp
             - name: DOCKER_CONFIG
               value: /var/run/kubeswift-spin-signer/docker
+            {{- if $s.registryCABundle }}
+            # Go loads the system bundle file and every certificate file in
+            # SSL_CERT_DIR; cosign inherits the variable.
+            - name: SSL_CERT_DIR
+              value: /var/run/kubeswift-spin-signer/ca
+            {{- end }}
             {{- if $s.key.secretName }}
             - name: COSIGN_PASSWORD
               valueFrom:
@@ -204,6 +239,14 @@ spec:
             - name: registry
               mountPath: /var/run/kubeswift-spin-signer/docker
               readOnly: true
+            {{- if $s.registryCABundle }}
+            # subPath: Go skips the symbolic links a ConfigMap volume
+            # consists of when it reads a certificate directory.
+            - name: registry-ca
+              mountPath: /var/run/kubeswift-spin-signer/ca/ca.crt
+              subPath: ca.crt
+              readOnly: true
+            {{- end }}
             {{- if $s.key.secretName }}
             - name: key
               mountPath: /var/run/kubeswift-spin-signer/key
@@ -220,6 +263,12 @@ spec:
             items:
               - key: .dockerconfigjson
                 path: config.json
+        {{- if $s.registryCABundle }}
+        - name: registry-ca
+          configMap:
+            name: {{ $name }}-registry-ca
+            defaultMode: 0444
+        {{- end }}
         {{- if $s.key.secretName }}
         - name: key
           secret:

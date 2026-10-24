@@ -489,6 +489,10 @@
             "registryCredentialsSecret": {
               "type": "string"
             },
+            "registryCABundle": {
+              "type": "string",
+              "description": "PEM CA certificates the signer and cosign trust for the cache registry, on top of the system roots (a registry behind a private CA). Empty uses the system roots only."
+            },
             "extraEnv": {
               "type": "array",
               "items": {

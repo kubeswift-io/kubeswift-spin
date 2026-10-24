@@ -62,6 +62,7 @@ change. See
 | `compiledCache.signer.image.*` | `ghcr.io/kubeswift-io/kubeswift-spin-cache-signer`, chart appVersion | cache signer image (the released chart sets the digest) |
 | `compiledCache.signer.key.secretName` / `kmsRef` | `""` | the signing key: a Secret in the release namespace with `cosign.key` and `cosign.password`, or a KMS reference |
 | `compiledCache.signer.registryCredentialsSecret` | `""` | `kubernetes.io/dockerconfigjson` Secret in the release namespace that reads exported caches and pushes signatures |
+| `compiledCache.signer.registryCABundle` | `""` | PEM CA certificates the signer and cosign trust for the cache registry, on top of the system roots; use KubeSwift's `sandboxMaterialize.registryCABundle` for a registry behind a private CA |
 
 Other values: `controller.extraArgs`, `serviceAccount.create`,
 `serviceAccount.name`, `serviceAccount.annotations`, `podAnnotations`,

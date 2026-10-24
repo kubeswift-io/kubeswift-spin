@@ -268,6 +268,31 @@ compiledCache:
     registryCredentialsSecret: kubeswift-spin-cache-signer-registry
 ```
 
+#### A cache registry behind a private CA
+
+KubeSwift trusts a private CA for sandbox registries through its chart
+value `sandboxMaterialize.registryCABundle` (KubeSwift v0.19.1 and later):
+digest resolution, artifact and placement pulls, output exports and
+cosign verification. Give the signer the same PEM bundle:
+
+```yaml
+compiledCache:
+  signer:
+    registryCABundle: |
+      -----BEGIN CERTIFICATE-----
+      ...
+      -----END CERTIFICATE-----
+```
+
+The chart mounts it into the signer as a file in `SSL_CERT_DIR`, so the
+signer and cosign trust it on top of the system roots, and rolls the
+signer when it changes. Without it, signing fails for such a registry
+(`SignFailed`). TLS verification is never turned off. The controller and
+the cache manager do not contact registries. Replicas and compilers run
+the runtime image, whose Spin pulls the application itself: an application
+in a registry behind a private CA needs a runtime image that trusts that
+CA, as without compiled caches.
+
 ### Verification policy
 
 Replicas mount a cache only through KubeSwift, which refuses it unless a

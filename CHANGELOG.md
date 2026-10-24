@@ -9,6 +9,14 @@ running replicas on upgrade) say so under "Upgrade notes".
 
 ## Unreleased
 
+### Added
+
+- Chart value `compiledCache.signer.registryCABundle`: PEM CA certificates
+  the cache signer and cosign trust, on top of the system roots, for a
+  cache registry behind a private CA (KubeSwift's
+  `sandboxMaterialize.registryCABundle` covers the rest of the path).
+  Without it the signer could not sign caches in such a registry.
+
 ### Changed
 
 - Compiled caches need KubeSwift v0.19.3 or later. v0.19.2 fixed a warm
