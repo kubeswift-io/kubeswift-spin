@@ -1,0 +1,17 @@
+mode,metric,n,min_ms,p50_ms,p90_ms,p95_ms,max_ms,mean_ms,stdev_ms
+warm,sandbox_created,30,22.5,30.8,50.4,60.5,70.1,35.3,12.7
+warm,direct_http,30,781.3,852.9,1313.0,1413.3,1559.7,965.4,220.6
+warm,service_http,30,2196.0,2548.5,3315.3,3316.6,3333.0,2566.5,413.6
+warm,available,30,1109.1,1150.4,3147.1,3155.0,3162.6,1549.7,814.0
+warm,pod_ready,30,1120.5,1154.1,3142.5,3154.9,3160.3,1550.2,811.6
+warm,endpointslice_ready,30,1126.7,1162.8,3150.2,3164.1,3166.4,1559.1,811.5
+warm,slot_claim,30,32.8,50.4,59.6,61.3,72.2,51.4,7.6
+warm,create_to_claim,30,57.5,83.9,103.1,116.0,121.7,86.7,15.6
+warm,claim_to_dispatch,30,-27.7,-10.8,-4.6,-4.2,-3.0,-11.6,5.0
+warm,claim_to_direct_http,30,691.7,773.9,1236.1,1309.2,1465.6,878.7,218.5
+warm,dispatch_to_direct_http,30,703.3,785.0,1244.6,1320.1,1484.0,890.2,219.4
+warm,sandbox_workload_ready,30,1067.2,1105.7,3098.3,3108.1,3115.2,1502.2,812.3
+warm,direct_to_available,30,34.3,335.5,1753.1,1868.7,1959.2,584.3,621.5
+warm,available_to_pod_ready,30,-13.3,-2.5,9.2,11.7,23.2,0.5,7.8
+warm,pod_ready_to_endpointslice,30,4.5,8.3,12.2,13.6,15.3,8.9,2.8
+warm,endpointslice_to_service_http,30,144.9,1064.9,1398.0,1401.6,1420.4,1007.4,458.9

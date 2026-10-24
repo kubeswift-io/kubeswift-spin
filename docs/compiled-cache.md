@@ -24,11 +24,12 @@ KubeSwift v0.19.3 or later (see [Requirements](#requirements)).
 | Signing and verification policy | implemented |
 | Placement on warm-pool nodes and mounting in replicas | implemented |
 
-kubeswift-spin v0.2.0 was validated on the amd64 KVM lab with KubeSwift
-v0.19.1 ([test/e2e](../test/e2e/README.md#compiled-caches),
-[performance](performance.md#compiled-wasmtime-cache-kubeswift-v0191-2026-10-23)).
-[compatibility.md](compatibility.md) lists what has run since with
-KubeSwift v0.19.3.
+The kubeswift-spin v0.2.1 release candidate was validated on the amd64 KVM
+lab with KubeSwift v0.19.3, with the cache repository and the
+applications in a registry behind a private CA ([compatibility](compatibility.md#validation-of-v021-rc1),
+[test/e2e](../test/e2e/README.md#compiled-caches),
+[performance](performance.md#compiled-wasmtime-cache-kubeswift-v0193-2026-10-24));
+v0.2.0 on KubeSwift v0.19.1.
 arm64 follows the same path but has not been run on arm64 hardware: do
 not rely on compiled caches there until it has.
 

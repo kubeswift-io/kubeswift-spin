@@ -58,7 +58,7 @@ seconds. Startup latency is measured with `make perf-startup` (see
 - the hello-http, request-info, serverless-ai and outbound-http artifacts
   under one registry prefix the sandboxes can pull from without
   credentials. The defaults (`EXAMPLES`, `EXAMPLES_TAG`) name the artifacts
-  published by the v0.2.0 release. To test other builds, push them to
+  published by the v0.2.1 release. To test other builds, push them to
   your registry and set `EXAMPLES` and `EXAMPLES_TAG`, for example:
 
 ```bash
@@ -98,7 +98,7 @@ make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 |---|---|---|
 | `E2E_NAMESPACE` | `kubeswift-spin-e2e` | namespace with the executor and the SwiftKernel |
 | `EXAMPLES` | `ghcr.io/kubeswift-io/kubeswift-spin-examples` | registry prefix of the example artifacts |
-| `EXAMPLES_TAG` | `v0.2.0` | tag of the example artifacts |
+| `EXAMPLES_TAG` | `v0.2.1` | tag of the example artifacts |
 | `EXECUTOR` | `kubeswift` | executor for phases 1 to 3 |
 | `TIMEOUT` | `300` | seconds to wait for each step |
 | `E2E_PHASES` | `1 2 3 5 7 8 9` | phases to run; when set, `E2E_WARM_POOL` and `E2E_SCRATCH_REGISTRY` add no phases |
@@ -113,7 +113,7 @@ make example-push EXAMPLE=outbound-http EXAMPLE_REGISTRY=<registry>/kubeswift-sp
 The script uses the current kubeconfig context. From the repository root:
 
 ```bash
-E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.2.0 E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh test/e2e/kvm-e2e.sh
+E2E_NAMESPACE=kubeswift-spin-e2e EXAMPLES_TAG=v0.2.1 E2E_WARM_POOL=1 E2E_SCRATCH_REGISTRY=ttl.sh test/e2e/kvm-e2e.sh
 ```
 
 `make e2e` runs the same script and passes these variables through.
@@ -154,7 +154,11 @@ The script passed every check of all nine phases on the KVM lab cluster
 described in
 [compatibility.md](../../docs/compatibility.md#validation-of-v010), with
 KubeSwift v0.16.3 and the v0.1.0 source. Earlier builds also passed it on
-KubeSwift v0.16.0, v0.16.1 and v0.16.2. The v0.2.0-rc1 release artifacts
+KubeSwift v0.16.0, v0.16.1 and v0.16.2. The v0.2.1-rc1 release artifacts
+passed all nine phases on KubeSwift v0.19.3, phase 6 against
+`private-registry.sh`, and `compiled-cache-e2e.sh` in private mode (see
+[compatibility.md](../../docs/compatibility.md#validation-of-v021-rc1)).
+The v0.2.0-rc1 release artifacts
 passed phases 1 to 5 and 7 to 9 on KubeSwift v0.19.1, and
 `compiled-cache-e2e.sh` (see
 [compatibility.md](../../docs/compatibility.md#validation-of-v020-rc1)).
