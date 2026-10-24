@@ -20,9 +20,10 @@
 #       is signed.
 #   test/e2e/private-registry.sh secret <namespace> <name> [<label>=<value>]
 #       Create a docker-registry Secret for the registry in a namespace.
-#   test/e2e/private-registry.sh copy <source> <repository path>
-#       Copy an image or artifact into the registry; prints repo@digest.
-#   test/e2e/private-registry.sh runtime <source> <repository path>
+#   test/e2e/private-registry.sh copy <source> <repository path>:<tag>
+#       Copy an image or artifact into the registry; prints repo@digest
+#       (without the tag, as kubeswift-spin records references).
+#   test/e2e/private-registry.sh runtime <source> <repository path>:<tag>
 #       Copy a runtime image into the registry with the CA appended to its
 #       /etc/ssl/certs/ca-certificates.crt (Spin trusts only that bundle);
 #       prints repo@digest. linux/amd64.
@@ -168,7 +169,7 @@ secret() {
 copy() {
   local src="$1" dst="$host/$2"
   tool /tmp/crane copy --platform linux/amd64 "$src" "$dst" >/dev/null
-  printf '%s@%s\n' "$dst" "$(tool /tmp/crane digest "$dst")"
+  printf '%s@%s\n' "${dst%:*}" "$(tool /tmp/crane digest "$dst")"
 }
 
 runtime() {
@@ -180,7 +181,7 @@ runtime() {
     tar -c -C /tmp/rt -f /tmp/layer.tar etc
     /tmp/crane append --platform linux/amd64 -b "$1" -f /tmp/layer.tar -t "$2" >/dev/null
     rm -rf /tmp/rt /tmp/layer.tar' sh "$src" "$dst"
-  printf '%s@%s\n' "$dst" "$(tool /tmp/crane digest "$dst")"
+  printf '%s@%s\n' "${dst%:*}" "$(tool /tmp/crane digest "$dst")"
 }
 
 down() {
@@ -195,8 +196,8 @@ down() {
 case "${1:-}" in
   up) up ;;
   secret) shift; [[ $# -ge 2 ]] || die "usage: $0 secret <namespace> <name> [<label>=<value>]"; secret "$@" ;;
-  copy) shift; [[ $# -eq 2 ]] || die "usage: $0 copy <source> <repository path>"; copy "$@" ;;
-  runtime) shift; [[ $# -eq 2 ]] || die "usage: $0 runtime <source> <repository path>"; runtime "$@" ;;
+  copy) shift; [[ $# -eq 2 && "$2" =~ ^[a-z0-9._/-]+:[A-Za-z0-9._-]+$ ]] || die "usage: $0 copy <source> <repository path>:<tag>"; copy "$@" ;;
+  runtime) shift; [[ $# -eq 2 && "$2" =~ ^[a-z0-9._/-]+:[A-Za-z0-9._-]+$ ]] || die "usage: $0 runtime <source> <repository path>:<tag>"; runtime "$@" ;;
   down) down ;;
   *) die "usage: $0 up|secret|copy|runtime|down" ;;
 esac

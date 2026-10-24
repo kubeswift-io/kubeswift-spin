@@ -158,7 +158,7 @@ cleanup() {
   $K delete resourcequota kss-cc-e2e-no-placements --ignore-not-found >/dev/null 2>&1 || true
   if [[ -n "$pull_broken" ]]; then
     $K delete secret "$CACHE_PULL" --ignore-not-found >/dev/null 2>&1 || true
-    "$ROOT/test/e2e/private-registry.sh" secret "$NS" "$CACHE_PULL" >/dev/null 2>&1 || true
+    PRIVATE_REGISTRY_DIR="$PRIV" "$ROOT/test/e2e/private-registry.sh" secret "$NS" "$CACHE_PULL" >/dev/null 2>&1 || true
   fi
   if [[ -n "$sec_record" ]]; then
     kubectl -n "$CTL_NS" delete spincompiledcache "$sec_record" --ignore-not-found >/dev/null 2>&1 || true
@@ -553,10 +553,12 @@ spec:
             - {name: COSIGN_PASSWORD, value: ""}
             - {name: DOCKER_CONFIG, value: /work/docker}
             - {name: HOME, value: /tmp}
+${PRIV:+            - {name: SSL_CERT_DIR, value: /work/ca\}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
             - {name: docker, mountPath: /work/docker, readOnly: true}
+${PRIV:+            - {name: ca, mountPath: /work/ca/ca.crt, subPath: ca.crt, readOnly: true\}}
       initContainers:
         - name: key
           image: $signer_image
@@ -568,6 +570,7 @@ spec:
         - {name: tmp, emptyDir: {}}
         - name: docker
           secret: {secretName: $CC_WRONG_KEY_JOB, items: [{key: .dockerconfigjson, path: config.json}]}
+${PRIV:+        - {name: ca, secret: {secretName: e2e-registry-files, items: [{key: ca.crt, path: ca.crt\}]\}\}}
 YAML
   if $K wait --for=condition=complete job/kss-cc-e2e-wrong-key --timeout=300s >/dev/null 2>&1; then
     forge "$sec_record" "$unsigned"
@@ -680,13 +683,24 @@ until_true "cc-miss-1 carries the cache" bash -c "[[ -n \"\$($K get swiftsandbox
 skipped_ready cc-miss-1 "warm replica, cache not on its node"
 [[ "$(guest cc-miss-1)" == CheckedOut ]] && ok "cc-miss-1 came from a warm slot" || fail "cc-miss-1: $(guest cc-miss-1)"
 until_true "cc-miss: 2 replicas ready" ready_replicas cc-miss 2
-kept cc-miss-1 cc-miss
-min_warm 0
+# The first checkout may skip the cache before the claim while KubeSwift
+# resolves the new digest (ResolvePending). Once resolved, a checkout claims
+# the slot, finds the cache not on the node (NotOnNode) and dispatches the
+# workload again without it: the path KubeSwift v0.19.1 left not ready.
 scale cc-miss 3
-skipped_ready cc-miss-2 "cold replica, cache not on its node"
-[[ "$(guest cc-miss-2)" != CheckedOut ]] && ok "cc-miss-2 booted cold" || fail "cc-miss-2 came from a warm slot"
-[[ "$(cond cc-miss-2 Resolved)" == True ]] && ok "cc-miss-2: Resolved=True" || fail "cc-miss-2: Resolved=$(cond cc-miss-2 Resolved)"
+until_true "cc-miss-2 carries the cache" bash -c "[[ -n \"\$($K get swiftsandbox cc-miss-2 -o jsonpath='{.spec.artifacts[*].ref}')\" ]]"
+skipped_ready cc-miss-2 "warm replica after the digest resolved, cache not on its node"
+artifact_is cc-miss-2 Skipped/NotOnNode && ok "cc-miss-2: Skipped/NotOnNode after the claim" || fail "cc-miss-2: $(artifact_state cc-miss-2), want Skipped/NotOnNode"
+[[ "$(guest cc-miss-2)" == CheckedOut ]] && ok "cc-miss-2 came from a warm slot" || fail "cc-miss-2: $(guest cc-miss-2)"
 until_true "cc-miss: 3 replicas ready" ready_replicas cc-miss 3
+kept cc-miss-1 cc-miss
+kept cc-miss-2 cc-miss
+min_warm 0
+scale cc-miss 4
+skipped_ready cc-miss-3 "cold replica, cache not on its node"
+[[ "$(guest cc-miss-3)" != CheckedOut ]] && ok "cc-miss-3 booted cold" || fail "cc-miss-3 came from a warm slot"
+[[ "$(cond cc-miss-3 Resolved)" == True ]] && ok "cc-miss-3: Resolved=True" || fail "cc-miss-3: Resolved=$(cond cc-miss-3 Resolved)"
+until_true "cc-miss: 4 replicas ready" ready_replicas cc-miss 4
 min_warm 3
 
 # The cache pull Secret: missing (PullSecretInvalid), then a credential the
@@ -705,7 +719,7 @@ if [[ -n "$CACHE_PULL" && -n "$PRIV" ]]; then
   until_true "cc-cold: 4 replicas ready" ready_replicas cc-cold 4
   kept cc-cold-3 cc-cold
   $K delete secret "$CACHE_PULL" >/dev/null
-  "$ROOT/test/e2e/private-registry.sh" secret "$NS" "$CACHE_PULL"
+  PRIVATE_REGISTRY_DIR="$PRIV" "$ROOT/test/e2e/private-registry.sh" secret "$NS" "$CACHE_PULL"
   pull_broken=""
 fi
 
