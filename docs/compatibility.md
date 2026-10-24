@@ -7,11 +7,11 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.2.0, v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); v0.2.0 differs from v0.2.0-rc1 only in documentation and version strings |
+| kubeswift-spin | v0.2.1, v0.2.1-rc1, v0.2.0, v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); v0.2.0 differs from v0.2.0-rc1 only in documentation and version strings; v0.2.1-rc1 passed every KVM e2e phase and the compiled-cache e2e on KubeSwift v0.19.3 (see [Validation of v0.2.1-rc1](#validation-of-v021-rc1)), and v0.2.1 differs from it only in documentation, version strings and test scripts |
 | Spin | v4.2.1 | runtime image (`make runtime-test`), examples (`make example-test`), KVM e2e |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
-| KubeSwift | v0.19.3 | contract test of `internal/sandboxapi` against the v0.19.3 Go types and CRDs; v0.19.3 sandbox and placement CRDs in envtest. The required version for compiled caches from kubeswift-spin v0.2.1. Not yet run on the KVM lab with kubeswift-spin v0.2.1 |
+| KubeSwift | v0.19.3 | contract test of `internal/sandboxapi` against the v0.19.3 Go types and CRDs; v0.19.3 sandbox and placement CRDs in envtest. The required version for compiled caches from kubeswift-spin v0.2.1. With kubeswift-spin v0.2.1-rc1 on the lab cluster: every KVM e2e phase including the private registry, the compiled-cache e2e against a registry behind a private CA, and the startup benchmark (see [Validation of v0.2.1-rc1](#validation-of-v021-rc1)) |
 | KubeSwift | v0.19.1 | compiled caches: the compiled-cache end-to-end test (seven examples, trust boundaries, restarts, teardown) and the compiled-cache startup benchmark on the lab cluster with a development build of v0.2.0-rc1 (see [Compiled caches on KubeSwift v0.19.1](#compiled-caches-on-kubeswift-v0191)); the KVM e2e (all phases but 6) and the compiled-cache e2e with the v0.2.0-rc1 release artifacts (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); contract test of `internal/sandboxapi` against the v0.19.1 Go types and CRDs; v0.19.1 sandbox and placement CRDs in envtest, in kubeswift-spin v0.2.0. The required version for compiled caches in kubeswift-spin v0.2.0; v0.2.1 requires v0.19.3 |
 | KubeSwift | v0.16.4 | drain period: default, `0s`, `10s` and a request longer than the drain, through rolling updates, scale-down and a broken replacement under traffic, `ingress-from` through a 10-second drain, invalid values; warm-pool checkout and refill on the lab cluster (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); contract test of `internal/sandboxapi` against the v0.16.4 Go types and CRDs and v0.16.4 sandbox CRDs in envtest, in kubeswift-spin v0.1.1 (now v0.19.3). The recommended baseline without compiled caches |
 | KubeSwift | v0.16.3 | KVM e2e, rolling updates under traffic, termination and `ingress-from` through deletion, re-creation under the same name, readiness startup and the startup benchmark on the lab cluster; contract test against the v0.16.3 Go types and CRDs in kubeswift-spin v0.1.0 (now v0.16.4). The minimum for the termination behavior kubeswift-spin relies on |
@@ -169,6 +169,65 @@ old replica's deletion; "withdrawn" is its endpoint turning not ready.
   occurred. SpinApp creation to `Available` was 1.88 and 1.98 seconds
   without a readiness check and 3.38 and 3.40 seconds with the example's
   check (client side, including the apply).
+
+### Validation of v0.2.1-rc1
+
+Environment: the lab cluster above with KubeSwift v0.19.3 and Spin
+Operator v0.6.1, using the artifacts the release workflow published for the
+tag v0.2.1-rc1. For the private registry tests, `test/e2e/private-registry.sh`
+ran a registry with TLS from a CA created for the run and htpasswd
+authentication, and KubeSwift's `sandboxMaterialize.registryCABundle` and
+the signer's `compiledCache.signer.registryCABundle` held that CA. Lab
+nodes are linux/amd64.
+
+- Release artifacts: the files of the draft release matched `SHA256SUMS`;
+  cosign v3.1.3 verified the controller and cache signer images, the chart
+  and the seven example artifacts against the workflow identity of the
+  tag, and the reused runtime image (`spin-4.2.1-r3`) against the release
+  workflow identity; the chart pins the digests in `images.txt`.
+- Upgrade and rollback: from v0.2.0 with `helm upgrade
+  --reset-then-reuse-values`; the controller started as v0.2.1-rc1 and
+  logged that compiled caches assume KubeSwift v0.19.3. `helm rollback` to
+  v0.2.0 afterwards worked.
+- `test/e2e/kvm-e2e.sh` with the v0.2.1-rc1 example artifacts passed every
+  check (74) of all nine phases, the warm pool and the private registry
+  (phase 6, against the registry behind the private CA, with the runtime
+  image built inside the cluster) included. hello-http was `Available` 11.4
+  seconds after creation from a cold start and 1.8 seconds from a warm
+  slot.
+- `test/e2e/compiled-cache-e2e.sh` in private mode (applications, the
+  CA-trusting runtime image and the cache repository in that registry; the
+  cache manager, signer and replicas pulling with credentials) passed every
+  phase, over three runs (94 checks in phases 1 and 2, 50 in phases 3, 5
+  and 4, 52 in phase 5 again after the checks below were tightened):
+  - the seven examples compiled, exported, signed and placed, and their
+    warm replicas mounted the caches (`Mounted/Cached`);
+  - the trust boundaries of v0.2.0 held (`VerificationFailed` for an
+    unsigned export and a signature with another key, `ClaimMismatch`,
+    no attachment outside the cache repository), compilers referenced no
+    Secret but the application's pull Secret, the registry password
+    appeared in no sandbox spec or Event, and a SpinApp was `Available`
+    while the signer was stopped;
+  - restarts of the cache manager and signer during a compilation, and of
+    the controller, replaced nothing and trusted nothing early;
+  - a replica that booted cold (no free warm slot, `fetchTimeout: 0s`)
+    mounted the cache its node held (`Mounted/Cached`, `Resolved=True`);
+  - on a placement the API server refused (a quota), the SpinApp stayed
+    `Available` with `CompiledCache=True/PlacementFailed`; with the record
+    then claiming a prepared pool, a warm replica's cache was skipped
+    before the claim (`ResolvePending`), the next one's after the claim
+    (`NotOnNode`, the workload dispatched again), and a cold replica's at
+    once (`FetchTimeout`, `Resolved=True`); all became ready, none was
+    replaced, and no `DeliveryFailed` hold started;
+  - a missing cache pull Secret (`PullSecretInvalid`) and a credential the
+    registry refused (`ResolveRefused`): skipped, never pulled
+    anonymously, and the replicas became ready.
+- Startup benchmark: see
+  [performance.md](performance.md#compiled-wasmtime-cache-kubeswift-v0193-2026-10-24).
+- Not run: arm64 (no arm64 KVM hardware), a second cluster, a cold replica
+  whose launcher pod starts late but within KubeSwift's authorization
+  window, and `VerifyKeyInvalid` (kubeswift-spin never sets a per-artifact
+  verify key Secret; caches are verified by the platform's policy).
 
 ### Validation of v0.2.0-rc1
 

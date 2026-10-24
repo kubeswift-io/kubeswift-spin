@@ -33,7 +33,7 @@ set -euo pipefail
 
 NS="${E2E_NAMESPACE:-kubeswift-spin-e2e}"
 EXAMPLES="${EXAMPLES:-ghcr.io/kubeswift-io/kubeswift-spin-examples}"
-TAG="${EXAMPLES_TAG:-v0.2.0}"
+TAG="${EXAMPLES_TAG:-v0.2.1}"
 EXECUTOR="${EXECUTOR:-kubeswift}"
 TIMEOUT="${TIMEOUT:-300}"
 SCRATCH="${E2E_SCRATCH_REGISTRY:-}"
@@ -545,7 +545,7 @@ if [[ -n "$PRIV" ]]; then
 reg_host="$(cat "$PRIV/host")"
 REG_USER="$(cat "$PRIV/user")"
 REG_PASS="$(cat "$PRIV/password")"
-"$ROOT/test/e2e/private-registry.sh" copy "$EXAMPLES/hello-http:$TAG" private/hello-http:e2e >/dev/null \
+PRIVATE_REGISTRY_DIR="$PRIV" "$ROOT/test/e2e/private-registry.sh" copy "$EXAMPLES/hello-http:$TAG" private/hello-http:e2e >/dev/null \
   && ok "hello-http copied into the private registry" || fail "seeding the private registry"
 else
 reg_host="e2e-registry.$NS.svc.cluster.local:5000"
@@ -634,7 +634,7 @@ code="$(code_from e2e-client 10 -k "https://$reg_host/v2/private/hello-http/mani
 
 base="$(runtime_image)"
 if [[ -n "$PRIV" ]]; then
-test_image="$("$ROOT/test/e2e/private-registry.sh" runtime "$base" private/kubeswift-spin-runtime:e2e)"
+test_image="$(PRIVATE_REGISTRY_DIR="$PRIV" "$ROOT/test/e2e/private-registry.sh" runtime "$base" private/kubeswift-spin-runtime:e2e)"
 else
 docker pull -q "$base" >/dev/null
 cid="$(docker create "$base")"

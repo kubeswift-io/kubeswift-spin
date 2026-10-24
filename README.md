@@ -20,13 +20,14 @@ SpinKube is the better choice.
 
 ## Status
 
-The current release is v0.2.0, which adds optional compiled Wasmtime
-caches ([CHANGELOG](CHANGELOG.md)). Its release candidate passed the
-end-to-end test suite (except the private registry phase), the
-compiled-cache end-to-end test and the startup benchmark on a KVM lab
-cluster: Kubernetes 1.34 (k0s) with the Calico CNI on linux/amd64 nodes,
-Spin Operator v0.6.1 and KubeSwift v0.19.1. Earlier releases were
-validated on the same cluster with KubeSwift v0.16.3 (v0.1.0: the
+The current release is v0.2.1, a hardening release for compiled caches,
+which now need KubeSwift v0.19.3 ([CHANGELOG](CHANGELOG.md)). Its release
+candidate passed the whole end-to-end test suite, including the private
+registry phase, the compiled-cache end-to-end test against a registry
+behind a private CA, and the startup benchmark on a KVM lab cluster:
+Kubernetes 1.34 (k0s) with the Calico CNI on linux/amd64 nodes, Spin
+Operator v0.6.1 and KubeSwift v0.19.3. Earlier releases were validated on
+the same cluster with KubeSwift v0.19.1 (v0.2.0), v0.16.3 (v0.1.0: the
 end-to-end test suite, rolling updates, scaling and deletion under
 continuous traffic, network isolation during termination, warm pools) and
 v0.16.4 (v0.1.1: the drain period, rolling updates under traffic, warm
@@ -108,16 +109,15 @@ The images, chart and example artifacts are published on
 ([verification](docs/releasing.md#verifying-a-release)). The chart pins the
 controller, runtime and cache signer images by digest.
 
-The commands below install the v0.2.1-rc1 pre-release; for the current
-release, use `--version 0.2.0`. The SpinApp namespace (`demo` here) must
-exist before the chart creates an executor in it:
+The SpinApp namespace (`demo` here) must exist before the chart creates an
+executor in it:
 
 ```bash
 kubectl create namespace demo
 ```
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1-rc1 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -135,7 +135,7 @@ your values and takes everything else, including the image digests, from
 the new chart:
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1-rc1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1 \
   --namespace kubeswift-spin-system --reset-then-reuse-values
 ```
 
@@ -152,7 +152,7 @@ helm get values kubeswift-spin --namespace kubeswift-spin-system --output yaml >
 ```
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1-rc1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1 \
   --namespace kubeswift-spin-system --values kubeswift-spin-values.yaml
 ```
 
@@ -167,7 +167,7 @@ Building from source: [CONTRIBUTING.md](CONTRIBUTING.md#build-from-source).
 ## Quick start
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.2.1-rc1/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.2.1/examples/hello-http/spinapp.yaml
 ```
 
 ```bash

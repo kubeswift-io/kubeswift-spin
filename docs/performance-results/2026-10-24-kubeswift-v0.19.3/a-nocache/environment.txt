@@ -1,0 +1,22 @@
+date: 2026-10-24T11:05:45Z
+commit: baa92fa9ef04dab99dd317d9cfd2a2d7bbf6dfe1
+node: one KVM node
+kubelet: v1.34.3+k0s
+kernel: 6.8.0-137-generic
+os: Ubuntu 24.04.4 LTS
+runtime: containerd://1.7.30
+cpu: 8
+memory: 65616956Ki
+controller images:
+  kubeswift-spin-system/kubeswift-spin ghcr.io/kubeswift-io/kubeswift-spin@sha256:6187c90efe6d9accece6a8f16cd0d723a6a7254ca78b23a68d90fcfec19fa539
+  kubeswift-spin-system/kubeswift-spin-cache-manager ghcr.io/kubeswift-io/kubeswift-spin@sha256:6187c90efe6d9accece6a8f16cd0d723a6a7254ca78b23a68d90fcfec19fa539
+  kubeswift-system/controller-manager ghcr.io/kubeswift-io/kubeswift/controller-manager:v0.19.3
+  spin-operator/spin-operator-controller-manager ghcr.io/spinframework/spin-operator:v0.6.1
+runtime image: ghcr.io/kubeswift-io/kubeswift-spin-runtime@sha256:ac7c923975ee8b23d1408ff2b66f2268c1e15705a4c8809f83d9746be20fa8a0
+readiness startup: auto (default)
+probe interval: 50ms
+startupbench image: built from test/perf/startupbench at the commit above, held in a lab registry
+manifest: examples/hello-http/spinapp.yaml (sha256 7197b75926d9b35c38076929a17ffd1c85f49a3e0d257555652216bcf7decd42)
+app image override: the hello-http v0.2.1-rc1 artifact (sha256:12f334d6683296dcd76b52de505230d09cf99ef63ec464abb4999792c2db71f2) copied into a lab registry next to the cluster
+runs per mode: 30; modes: warm; pool: 1 vCPU, 256Mi
+launcher logs: 1

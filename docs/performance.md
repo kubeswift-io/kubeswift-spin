@@ -62,6 +62,10 @@ Spin's own tracing; that build is not part of the repository.
 
 ## Current results
 
+The v0.2.1 release-time comparison and its compiled-cache measurements on
+KubeSwift v0.19.3 are in
+[Compiled Wasmtime cache (KubeSwift v0.19.3)](#compiled-wasmtime-cache-kubeswift-v0193-2026-10-24).
+
 ### Release-time benchmark of v0.2.0 (KubeSwift v0.19.1, 2026-10-23)
 
 The lab cluster with KubeSwift v0.19.1 and Spin Operator v0.6.1, one KVM
@@ -370,6 +374,65 @@ With `never`, a fast replica was ready 0.46 seconds after it first
 answered, at its periodic probe. No replica received Service traffic
 before its endpoint was ready.
 
+## Compiled Wasmtime cache (KubeSwift v0.19.3, 2026-10-24)
+
+This repeats the v0.2.0 measurements of the next section for v0.2.1, with
+the v0.2.1-rc1 release artifacts on KubeSwift v0.19.3. Setup: hello-http
+(its v0.2.1-rc1 artifact, copied into a lab registry next to the cluster, and
+the shipped manifest's readiness check, `initialDelaySeconds: 1` and
+`periodSeconds: 2`), 30 warm starts per case on one node with
+`make perf-startup` (`PERF_LAUNCHER_LOGS=1`, `PERF_COMPILED_CACHE=1` for
+B and C), the cache in a registry behind a private CA:
+
+- A: no cache;
+- B: the cache is trusted but its placement is not prepared (refused by a
+  quota), so warm replicas get no cache (none of 30 carried it);
+- C: the placement is prepared; 29 of 30 replicas mounted the cache
+  (`Mounted/Cached`). For the other, the record reported its placement
+  `Placing` for a few seconds while KubeSwift checked it again, and the
+  placement gate gave that replica no cache; it started without it.
+
+| Milliseconds, p50 / p95 | A | B | C | v0.2.0, p50 (A / B / C) |
+|---|---:|---:|---:|---:|
+| SpinApp create to slot claim | 84 / 116 | 90 / 117 | 90 / 143 | 73 / 77 / 85 |
+| claim to artifact decision | | | 23 / 37 | 19 |
+| dispatch to first direct response | 785 / 1320 | 850 / 1374 | 379 / 916 | 775 / 870 / 471 |
+| create to first direct response | 853 / 1413 | 941 / 1437 | 483 / 985 | 848 / 940 / 538 |
+| create to `Available` | 1150 / 3155 | 1175 / 3170 | 1157 / 1272 | 1144 / 1154 / 1146 |
+| create to first Service response | 2548 / 3317 | 2554 / 3319 | 2401 / 2586 | 2213 / 2550 / 2555 |
+
+The cache removes 406 ms (52%) at p50 of the time from dispatch to the
+first response (v0.2.0: about 300 ms, 39%). B takes A's path; the
+difference is within the run-to-run variation (A's p90 from dispatch to
+first response was 1245 ms).
+`Available` follows the readiness check's schedule, as in v0.2.0.
+
+**The tail.** In A and C alike, the p95 from dispatch to first direct
+response is about 535 ms above its p50, so the slow runs lose that time
+after the dispatch: inside the guest. In the slow runs, slot claim and
+the artifact decision stay in the tens of milliseconds; the slow runs are
+spread over the run order, and the pool's refill does not overlap them (refill microVMs started 4 to 6.6
+seconds after each dispatch, after the first response). The application's
+registry matters: with the artifact on ghcr.io, A's dispatch to first
+response was 1443 ms at p50, since Spin fetches the application at every
+start. The phases inside the guest are not visible without exec into the
+launcher pod; [kubeswift-io/kubeswift-spin#49](https://github.com/kubeswift-io/kubeswift-spin/issues/49) tracks it.
+
+**Release-time comparison.** With the application on ghcr.io, as in the
+v0.2.0 release-time benchmark, warm A was compared with v0.2.0-rc1's
+results (on KubeSwift v0.19.1): `startupbench summarize -baseline` flagged
+nothing (first direct response p50 1516 ms against 1588, `Available` 3157
+against 3143).
+
+Compiling stays off the startup path: for the seven examples, from the
+start of compilation to the export took 24 to 28 seconds and to the
+signature 28 to 32, against the registry behind the private CA.
+
+Results:
+[performance-results/2026-10-24-kubeswift-v0.19.3](performance-results/2026-10-24-kubeswift-v0.19.3/)
+(`a-nocache`, `b-notplaced`, `c-placed`, and `a-ghcr` with the application
+on ghcr.io).
+
 ## Compiled Wasmtime cache (KubeSwift v0.19.1, 2026-10-23)
 
 Spin compiles the application's WebAssembly with Wasmtime at every start
@@ -523,6 +586,8 @@ make perf-startup PERF_NODE=<node> PERF_REGISTRY=<registry> PERF_BASELINE=docs/p
   pass one of them as `PERF_BASELINE`, for example
   `docs/performance-results/2026-10-11-kubeswift-v0.16.2/shipped`.
 
+The v0.2.1 results (KubeSwift v0.19.3) are in
+[performance-results/2026-10-24-kubeswift-v0.19.3](performance-results/2026-10-24-kubeswift-v0.19.3/).
 The v0.2.0 release-time results (v0.1.1 and v0.2.0-rc1 on KubeSwift
 v0.19.1) are in
 [performance-results/2026-10-23-kubeswift-v0.19.1](performance-results/2026-10-23-kubeswift-v0.19.1/).

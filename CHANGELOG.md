@@ -7,12 +7,22 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## v0.2.1-rc1 (2026-10-24)
+## v0.2.1 (2026-10-24)
 
-Release candidate of a hardening release for compiled caches: KubeSwift
-v0.19.3 becomes their baseline, and the workarounds for KubeSwift v0.19.1
-go. With compiled caches disabled it behaves as v0.2.0. The runtime image
-is unchanged (`spin-4.2.1-r3`), so upgrading replaces no replica.
+A hardening release for compiled caches: KubeSwift v0.19.3 becomes their
+baseline, and the workarounds for KubeSwift v0.19.1 go. With compiled
+caches disabled it behaves as v0.2.0. The runtime image is unchanged
+(`spin-4.2.1-r3`), so upgrading replaces no replica.
+
+The v0.2.1-rc1 release artifacts, which v0.2.1 matches except for
+documentation, version strings and test scripts, were validated on the KVM
+lab with KubeSwift v0.19.3 (docs/compatibility.md): the upgrade from
+v0.2.0 and the rollback to it, every phase of the KVM end-to-end test
+including the private registry phase, the compiled-cache end-to-end test
+against a registry behind a private CA (including cold replicas, skipped
+caches and failed placements), and the startup benchmark, which showed no
+regression (docs/performance.md). Compiled caches have run on
+linux/amd64 only.
 
 ### Added
 
@@ -27,6 +37,11 @@ is unchanged (`spin-4.2.1-r3`), so upgrading replaces no replica.
   registry, and `compiled-cache-e2e.sh` has a private-registry mode and a
   fallback phase (cold replicas, skipped caches, refused placements,
   controller restart, cache pull Secret failures).
+- `private-registry.sh copy` and `runtime` print `repository@digest` and
+  take a `path:tag`; the e2e scripts pass it the registry's state
+  directory; in private mode the wrong-key signing Job trusts the
+  registry's CA, and phase 5 requires a warm replica to be skipped with
+  `NotOnNode` after the claim (fixes from running them on v0.2.1-rc1).
 
 ### Changed
 
