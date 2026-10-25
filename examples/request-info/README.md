@@ -43,7 +43,7 @@ To deploy a copy pushed to your own registry instead (see
 [examples](../README.md#publish-and-deploy)):
 
 ```bash
-make example-deploy EXAMPLE=request-info EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.2.1 NAMESPACE=<namespace>
+make example-deploy EXAMPLE=request-info EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.3.0-rc1 NAMESPACE=<namespace>
 ```
 
 The SpinApp requests two replicas, so kubeswift-spin creates

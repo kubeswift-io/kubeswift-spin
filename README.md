@@ -115,15 +115,16 @@ The images, chart and example artifacts are published on
 ([verification](docs/releasing.md#verifying-a-release)). The chart pins the
 controller, runtime and cache signer images by digest.
 
-The SpinApp namespace (`demo` here) must exist before the chart creates an
-executor in it:
+The commands below install the v0.3.0-rc1 pre-release; for the current
+release, use `--version 0.2.1`. The SpinApp namespace (`demo` here) must
+exist before the chart creates an executor in it:
 
 ```bash
 kubectl create namespace demo
 ```
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0-rc1 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -141,7 +142,7 @@ your values and takes everything else, including the image digests, from
 the new chart:
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0-rc1 \
   --namespace kubeswift-spin-system --reset-then-reuse-values
 ```
 
@@ -158,7 +159,7 @@ helm get values kubeswift-spin --namespace kubeswift-spin-system --output yaml >
 ```
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0-rc1 \
   --namespace kubeswift-spin-system --values kubeswift-spin-values.yaml
 ```
 
@@ -173,7 +174,7 @@ Building from source: [CONTRIBUTING.md](CONTRIBUTING.md#build-from-source).
 ## Quick start
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.2.1/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.3.0-rc1/examples/hello-http/spinapp.yaml
 ```
 
 ```bash
