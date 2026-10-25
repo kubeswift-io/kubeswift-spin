@@ -16,9 +16,9 @@
 #   3 binding      (private registry) the same digest under another
 #                  repository the SpinApp has no credentials for is never
 #                  prepared or mounted, although the node holds the digest
-#   4 credentials  (private registry) with an invalid pull Secret, new
-#                  replicas do not mount the application; the Secret is
-#                  restored
+#   4 credentials  (private registry) with an invalid pull Secret, and then
+#                  with the Secret removed, new replicas do not mount the
+#                  application; the Secret is restored
 #   5 fallback     a tag reference and a component selection are not
 #                  eligible: the condition says why and the replica serves
 #                  from the registry; a registry KubeSwift would reach over
@@ -360,7 +360,14 @@ if want 4; then
   until_true "la-creds-2: the application decided" bash -c "[[ -n \"\$($K get swiftsandbox la-creds-2 -o jsonpath='{.status.artifacts[?(@.name==\"application\")].state}' 2>/dev/null)\" ]] || ! $K get swiftsandbox la-creds-2 -o jsonpath='{.spec.artifacts[*].name}' | grep -q application"
   [[ "$(artifact_state la-creds-2)" != Mounted/* ]] && ok "la-creds-2 did not mount the application with invalid credentials ($(artifact_state la-creds-2))" \
     || fail "la-creds-2 mounted the application with invalid credentials"
+  # The pull Secret removed: new replicas do not mount the application.
   $K delete secret "$PULL" >/dev/null
+  warm
+  scale la-creds 4
+  until_true "la-creds-3 created" bash -c "$K get swiftsandbox la-creds-3 >/dev/null"
+  until_true "la-creds-3: the application decided" bash -c "[[ -n \"\$($K get swiftsandbox la-creds-3 -o jsonpath='{.status.artifacts[?(@.name==\"application\")].state}' 2>/dev/null)\" ]] || ! $K get swiftsandbox la-creds-3 -o jsonpath='{.spec.artifacts[*].name}' | grep -q application"
+  [[ "$(artifact_state la-creds-3)" != Mounted/* ]] && ok "la-creds-3 did not mount the application without its pull Secret ($(artifact_state la-creds-3))" \
+    || fail "la-creds-3 mounted the application without its pull Secret"
   PRIVATE_REGISTRY_DIR="$PRIV" "$ROOT/test/e2e/private-registry.sh" secret "$NS" "$PULL" >/dev/null
   secret_broken=""
   $K delete spinapp la-creds --wait=false >/dev/null

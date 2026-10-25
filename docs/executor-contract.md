@@ -167,7 +167,7 @@ signed compiled cache ([compiled-cache.md](compiled-cache.md#replicas)),
 and `application`, the replica's own application artifact as a read-only
 OCI image layout for a warm replica of an eligible SpinApp
 ([ADR 0015](adr/0015-local-application-delivery.md)): `ref` is
-`spec.image` without its tag, `layout: oci`, mount path
+`spec.image` in canonical form (without a tag; `docker.io` written `index.docker.io`), `layout: oci`, mount path
 `/opt/kubeswift-spin-app`, `fetchTimeout: 0s`, `pullSecretRef` the
 SpinApp's image pull Secret if it has one, no claims. Without it, or when
 the runtime cannot use it, Spin pulls the application in the guest as
@@ -743,7 +743,7 @@ The image is compared as an exact string. The released chart passes the
 runtime image to the controller by digest
 (`ghcr.io/kubeswift-io/kubeswift-spin-runtime@sha256:...`, listed in the
 release's `images.txt` and in the chart's `runtimeImage.digest` value), so
-a pool must use that same reference, not the `spin-4.2.1-r3` tag. The
+a pool must use that same reference, not the `spin-4.2.5-r1` tag. The
 controller's reference is in its arguments:
 
 ```bash
@@ -843,8 +843,8 @@ Events are recorded on the SpinApp with the `events.k8s.io/v1` API:
 `CompiledCacheSkipped` and `CompiledCachePlacementFailed` (once per change
 of the `CompiledCache` reason), and for local applications
 `LocalApplicationReady`, `LocalApplicationSkipped` and
-`LocalApplicationFailed` (once per change of the `LocalApplication`
-reason). Configuration Events fire once per
+`LocalApplicationFailed` (when the `LocalApplication` reason changes;
+`Placing` has no Event). Configuration Events fire once per
 SpinApp generation, when a `spin.kubeswift.io/` annotation of the SpinApp
 changes, or when the message changes.
 

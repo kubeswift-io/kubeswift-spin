@@ -16,4 +16,4 @@
 | [0012](0012-feature-detection.md) | Use KubeSwift features only when the published schema shows them |
 | [0013](0013-surge-replacement.md) | Replace replicas with one surge replica, so rollouts keep `spec.replicas` replicas available (updated for KubeSwift v0.16.3) |
 | [0014](0014-compiled-wasmtime-cache.md) | Trusted compiled Wasmtime cache delivered as a KubeSwift artifact |
-| [0015](0015-local-application-delivery.md) | Run warm replicas from a KubeSwift-mounted copy of the application artifact (accepted for v0.3.0) |
+| [0015](0015-local-application-delivery.md) | Run warm replicas from a KubeSwift-mounted copy of the application artifact (v0.3.0) |

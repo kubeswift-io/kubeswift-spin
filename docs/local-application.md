@@ -14,19 +14,11 @@ SpinApp becomes `Available` the same way either way.
 
 ## Status of this revision
 
-Local applications are new in kubeswift-spin v0.3.0 and need KubeSwift
-v0.19.3 or later.
-
-| Stage | State |
-|---|---|
-| Opt-in (chart, namespace label, executor and SpinApp annotations) | implemented |
-| Eligibility and the `LocalApplication` condition and Events | implemented |
-| Application placements on warm pools (cache manager) | implemented |
-| Artifact on new warm replicas, failure hold | implemented |
-| Runtime verification, copy and `spin trigger http` start | implemented |
-
-Validated on the amd64 KVM lab only. arm64 follows the same path but has
-not been run on arm64 hardware.
+Local applications are new in kubeswift-spin v0.3.0 (unreleased) and need
+KubeSwift v0.19.3 or later. The KVM e2e passed on the amd64 lab with
+KubeSwift v0.20.0 (see
+[test/e2e/README.md](../test/e2e/README.md#local-applications)). arm64
+follows the same path but is untested.
 
 ## What changes for a replica
 
@@ -58,8 +50,24 @@ kubeswift-spin-entrypoint: local application used from /opt/kubeswift-spin-app
 kubeswift-spin-entrypoint: local application not used: <reason>
 ```
 
-Read it with `kubectl logs <launcher pod> -c console` (KubeSwift chart
-value `sandboxMaterialize.console=true`).
+When KubeSwift skipped the artifact, for example because the node does not
+hold it, the reason is `no application is mounted`.
+
+On KubeSwift v0.20.0 or later the line is in the console container of the
+replica's launcher pod (KubeSwift chart value `sandboxMaterialize.console`,
+default `true`). A warm replica's line appears while Spin runs only with
+SwiftKernel `kernels/sandbox:6.6.18` or later; with an older kernel it
+appears when Spin exits. Find the launcher pod:
+
+```bash
+kubectl -n <namespace> get swiftsandbox <replica> -o jsonpath='{.status.podRef}'
+```
+
+Then read its console:
+
+```bash
+kubectl -n <namespace> logs <launcher pod> -c console
+```
 
 The runtime supports applications whose triggers are all `http`, without
 component dependencies, with component sources and static files from the
@@ -72,7 +80,8 @@ artifact's layers. Anything else falls back.
   node does not hold the artifact (kubeswift-io/kubeswift#843, #844).
   kubeswift-spin detects the fields it needs from the published schema, but
   cannot tell v0.19.3 from an older v0.19 release: upgrade KubeSwift first.
-  Without the fields, SpinApps report `LocalApplication=False/Unsupported`.
+  Without the fields or the SwiftArtifactPlacement API, SpinApps report
+  `LocalApplication=False/Unsupported`.
 - KubeSwift's node artifact cache bounded: KubeSwift chart value
   `sandboxMaterialize.artifactCache.maxBytes` or `maxPercent`. Tenants'
   application artifacts are placed on every node of a pool, in a disk all
@@ -123,14 +132,19 @@ Other chart values:
 | Value | Default | Meaning |
 |---|---|---|
 | `localApplication.extraRuntimes` | `[]` | runtime images, besides `runtimeImage`, allowed to run local applications (`repository@sha256:...`) |
-| `localApplication.registries` | `[]` | when set, the only registry hosts eligible; empty allows any registry KubeSwift reaches over HTTPS |
+| `localApplication.registries` | `[]` | when set, the only registry hosts eligible, written as images normalize them (Docker Hub is `index.docker.io`; `docker.io` is refused at startup); empty allows any registry KubeSwift reaches over HTTPS |
 | `localApplication.maxPlacementsPerNamespace` | `8` | application placements per namespace, retained ones included |
 | `localApplication.maxNewPerHour` | `10` | placements a namespace may have created in the last hour |
 | `localApplication.retention` | `24h` | how long a placement no SpinApp wants is kept, so that a rollback finds it |
 
-With `localApplication.registries` empty, KubeSwift's control plane
-contacts the registry hosts tenants name in `spec.image`. Set it where that
-is not acceptable.
+With `localApplication.registries` empty, KubeSwift's control plane and
+its fetch pods contact the registry hosts tenants name in `spec.image`,
+over HTTPS, with the tenant's pull Secret. That includes in-cluster names
+such as `<service>.<namespace>.svc.cluster.local` in other namespaces, so
+tenants can make KubeSwift send registry requests to hosts their own
+egress rules would not reach, and learn from the placement's reason
+whether a host answers like a registry. Set `registries` to the registries
+tenants should use wherever that matters.
 
 ## Eligibility
 
@@ -139,13 +153,16 @@ A SpinApp's new replicas get the artifact only when:
 - `spec.image` is pinned by digest (`repository@sha256:...`). A tag gets
   no artifact (`ImageNotPinned`): the controller has no registry
   credentials to resolve it, and a tag can move.
-- The registry is one KubeSwift reaches over HTTPS. `localhost`, names
-  under `.localhost`, and loopback or private-range IP addresses are
-  fetched over plain HTTP by KubeSwift and are never eligible
-  (`RegistryNotEligible`); in-cluster names such as
-  `registry.ns.svc.cluster.local` are fetched over HTTPS and stay eligible.
-- The SpinApp has at most one image pull Secret, and none when the executor
-  sets a runtime image pull Secret (`PullSecrets`).
+- The registry is one KubeSwift reaches over HTTPS. Registries KubeSwift
+  may reach over plain HTTP, and other local addresses, are never eligible
+  (`RegistryNotEligible`): `localhost`, names under `.localhost`, and
+  loopback, private-range, link-local or unspecified IP addresses.
+  In-cluster names such as `registry.ns.svc.cluster.local` are fetched over
+  HTTPS and stay eligible.
+- The SpinApp names at most one image pull Secret, and exactly one when the
+  executor sets `spin.kubeswift.io/runtime-image-pull-secret`; otherwise
+  KubeSwift would fetch the application with the runtime credential
+  (`PullSecrets`).
 - The SpinApp selects no components (`ComponentsSelected`).
 - The executor's runtime image is allowed (`RuntimeNotAllowed`).
 - The pool's application placement reports every node prepared
@@ -163,14 +180,24 @@ artifact once per node with the SpinApp's pull Secret and keeps it in its
 node artifact cache.
 
 The controller attaches the artifact to new replicas only once the
-placement reports `Prepared` for its current generation. A placement it did
-not create, or whose spec does not match the key, is never trusted or
-modified (`PlacementBlocked`).
+placement reports `Prepared` for its current generation. It trusts only a
+placement whose labels, key annotation, name and key fields match the
+SpinApp's key; anything else at that name is never trusted or modified
+(`PlacementBlocked`).
 
 A placement no SpinApp wants any more is kept for
 `localApplication.retention` and then deleted. At the per-namespace limit,
-retained placements are deleted first; SpinApps beyond either limit report
-`PlacementLimit` and start from the registry.
+retained placements are deleted first, but a placement created within the
+last hour is kept for that hour, so a namespace creates at most
+`maxPlacementsPerNamespace` (or `maxNewPerHour`, if smaller) placements per
+hour. SpinApps that already have a placement keep it; a SpinApp that starts
+wanting one at the limit reports `PlacementLimit` and starts from the
+registry.
+
+A placement that is still missing two minutes after the controller first
+expected it makes the SpinApp report `PlacementBlocked` with a Warning
+Event. The cache manager logs why (an API server refusal, such as a quota,
+or another object at the placement's name).
 
 ## Credentials and revocation
 
@@ -206,17 +233,21 @@ executor enables the feature and that did not opt out. It never affects
 | False | `DeliveryFailed` | a replica that carried the artifact failed; new replicas start from the registry for 30 minutes |
 
 `True/Attached` says what new replicas carry, not that Spin used the copy;
-the replica's console says that. Events `LocalApplicationReady`,
-`LocalApplicationSkipped` and `LocalApplicationFailed` fire once per change
-of the reason. Metrics are listed in [observability.md](observability.md).
+the replica's console says that. When the reason changes, the controller
+records `LocalApplicationReady` (Normal, `Attached`),
+`LocalApplicationFailed` (Warning: `PlacementFailed`, `PlacementBlocked`,
+`DeliveryFailed`) or `LocalApplicationSkipped` (Normal: the other reasons
+except `Placing`, which has no Event). Metrics are listed in
+[observability.md](observability.md).
 
 ## Failure hold
 
 A replica that carried the artifact and failed before KubeSwift reported it
 `WorkloadReady` (other than for its runtime image), or that KubeSwift
 failed for an artifact reason, starts a 30-minute hold for its SpinApp: new replicas get no artifact. The hold is
-kept in the controller's memory and ends on its own or when the controller
-restarts.
+kept in the controller's memory. It ends on its own or when the controller
+restarts; after a restart, a failed replica that carried the artifact and
+still exists starts it again.
 
 ## Rollouts
 
@@ -231,13 +262,17 @@ is created; otherwise it starts from the registry.
 - Upgrade KubeSwift to v0.19.3 or later before kubeswift-spin.
 - Remove `spin.kubeswift.io/local-application` from executors before
   rolling the controller back below v0.3.0: older controllers reject
-  unknown `spin.kubeswift.io/` executor annotations.
+  unknown `spin.kubeswift.io/` executor annotations. They also keep the
+  `LocalApplication` condition as it was, and leave application placements
+  in place (delete them as below).
 - A runtime image older than v0.3.0 ignores the artifact and starts from
   the registry.
 - Setting `localApplication.enabled=false`, removing the namespace label or
   the executor annotation stops new replicas from carrying the artifact.
-  The cache manager stops managing application placements when the feature
-  is off; delete leftover placements with:
+  With the namespace label or the executor annotation removed, the cache
+  manager deletes the unwanted placements after
+  `localApplication.retention`. With `localApplication.enabled=false` it no
+  longer manages them; delete them with:
 
   ```bash
   kubectl delete swiftartifactplacements -A -l spin.kubeswift.io/component=application-placement

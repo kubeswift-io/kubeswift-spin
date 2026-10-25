@@ -46,7 +46,7 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 | Wasm components | untrusted | Application code, possibly third-party or generated. |
 | Executor authors | trusted like SwiftSandbox creators | Whoever can create or update a SpinAppExecutor in a namespace decides, through the controller, the runtime image, node selector, kernel profile, network mode (`open` removes the cloud metadata block), egress allowlist and warm pool of every sandbox for that namespace. That is the power of creating SwiftSandboxes there. kubeswift-spin has no administrator policy that limits executor profiles; grant executor write access only to platform operators. |
 | SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to, and can make any Secret in that namespace available to their application (see [Secrets](#secrets)). Their `spec.podLabels` become launcher pod labels, so they can match pod-label based NetworkPolicy peers and Services in their namespace (see [Network isolation](#network-isolation)). |
-| Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest. |
+| Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest, or, for local applications, fetched by KubeSwift onto the pool's nodes and verified by the entrypoint from the digest. |
 | kubeswift-spin cache signer | trusted, holds the signing key | Only with compiled caches enabled. Its own ServiceAccount and image: gets compiler SwiftSandboxes, reads and patches the status of records in the release namespace. The signing key (or KMS access) and a registry credential that writes signatures are volumes of its pod; it has no Secret RBAC and never runs tenant code. It parses exported artifacts with size and entry limits. Prefer a KMS key, so a compromise of the pod does not reveal key material. An optional CA bundle (`compiledCache.signer.registryCABundle`) is an immutable ConfigMap volume trusted for all its TLS connections: who can replace ConfigMaps and the signer's Deployment in the release namespace controls its trust anchors, so limit that to the chart's operators. |
 | kubeswift-spin cache manager | trusted control plane component | Only with compiled caches or local applications enabled. Its own ServiceAccount: reads SpinApps, executors, pools and Namespaces. With compiled caches it writes `SpinCompiledCache` records in the release namespace and creates compiler SwiftSandboxes with SpinApps' pull Secrets, and SwiftArtifactPlacements that name the cache pull Secret, in any namespace, so, like the controller, treat its credentials like a cluster-wide Secret reader. With local applications it creates SwiftArtifactPlacements that name a SpinApp's own image pull Secret and reference, in that SpinApp's namespace ([ADR 0015](adr/0015-local-application-delivery.md)); with only local applications enabled it has no SwiftSandbox or record access. It changes or deletes only placements it owns: a record's labels and UID for compiled caches; the labels, the key annotation, the key's name and the key fields of the spec for local applications. See [compiled-cache.md](compiled-cache.md). |
 
@@ -690,8 +690,10 @@ Residual risks:
 Residual risks of local applications:
 
 - KubeSwift's control plane fetches tenant-named artifacts onto every node
-  of a pool and contacts the registry hosts tenants name, unless
-  `localApplication.registries` restricts them. The node artifact cache
+  of a pool and contacts the registry hosts tenants name, including
+  in-cluster Service names, unless `localApplication.registries` restricts
+  them; a placement's reason tells the tenant whether a host answered like
+  a registry. The node artifact cache
   bound and the placement limits cap the disk used, not the hosts
   contacted.
 - After a pull Secret is removed or access is revoked, new replicas can
