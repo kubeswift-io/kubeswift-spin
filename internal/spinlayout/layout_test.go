@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -255,6 +256,19 @@ func TestPrepareRefuses(t *testing.T) {
 		{"trigger dependencies", setLock(func(l map[string]any) { comp(l)["trigger_dependencies"] = map[string]any{"x": []any{}} }), nil, ReasonComponent},
 		{"component id with slash", setLock(func(l map[string]any) { comp(l)["id"] = "../x" }), nil, ReasonComponent},
 		{"component id dotdot", setLock(func(l map[string]any) { comp(l)["id"] = ".." }), nil, ReasonComponent},
+		{"component id encoded slashes", setLock(func(l map[string]any) { comp(l)["id"] = "..%2F..%2F..%2F.." }), nil, ReasonComponent},
+		{"component id encoded dot segment", setLock(func(l map[string]any) { comp(l)["id"] = "%2e%2e" }), nil, ReasonComponent},
+		{"component id query", setLock(func(l map[string]any) { comp(l)["id"] = "a?b" }), nil, ReasonComponent},
+		{"component id fragment", setLock(func(l map[string]any) { comp(l)["id"] = "a#b" }), nil, ReasonComponent},
+		{"component id percent", setLock(func(l map[string]any) { comp(l)["id"] = "a%41" }), nil, ReasonComponent},
+		{"component id backslash", setLock(func(l map[string]any) { comp(l)["id"] = "a\\b" }), nil, ReasonComponent},
+		{"component id space", setLock(func(l map[string]any) { comp(l)["id"] = "a b" }), nil, ReasonComponent},
+		{"component id leading digit", setLock(func(l map[string]any) { comp(l)["id"] = "1abc" }), nil, ReasonComponent},
+		{"component id dot", setLock(func(l map[string]any) { comp(l)["id"] = "a.b" }), nil, ReasonComponent},
+		{"component id underscore", setLock(func(l map[string]any) { comp(l)["id"] = "a_b" }), nil, ReasonComponent},
+		{"component id empty word", setLock(func(l map[string]any) { comp(l)["id"] = "a--b" }), nil, ReasonComponent},
+		{"component id trailing dash", setLock(func(l map[string]any) { comp(l)["id"] = "a-" }), nil, ReasonComponent},
+		{"component id empty", setLock(func(l map[string]any) { comp(l)["id"] = "" }), nil, ReasonComponent},
 		{"duplicate component", setLock(func(l map[string]any) { l["components"] = append(l["components"].([]any), comp(l)) }), nil, ReasonComponent},
 		{"source without digest", setLock(func(l map[string]any) { delete(comp(l)["source"].(map[string]any), "digest") }), nil, ReasonComponent},
 		{"files not an array", setLock(func(l map[string]any) { comp(l)["files"] = map[string]any{} }), nil, ReasonFile},
@@ -438,4 +452,135 @@ func FuzzDecodeStrict(f *testing.F) {
 			t.Fatalf("not stable: %s vs %s", b, b2)
 		}
 	})
+}
+
+// spinDecodedPath decodes a file:// URL as Spin 4.2.5 does (url crate:
+// WHATWG parsing, then percent-decoding each path segment), refusing what
+// would not be a plain path.
+func spinDecodedPath(t *testing.T, s string) string {
+	t.Helper()
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "file" || u.Host != "" || u.RawQuery != "" || u.Fragment != "" {
+		t.Fatalf("emitted URL %q is not a plain file URL", s)
+	}
+	var segs []string
+	for _, seg := range strings.Split(strings.TrimPrefix(u.EscapedPath(), "/"), "/") {
+		lower := strings.ToLower(seg)
+		if lower == "." || lower == ".." || lower == "%2e" || lower == "%2e%2e" || lower == ".%2e" || lower == "%2e." {
+			t.Fatalf("emitted URL %q has a dot segment", s)
+		}
+		d, err := url.PathUnescape(seg)
+		if err != nil || strings.ContainsAny(d, "/\\\x00") {
+			t.Fatalf("emitted URL %q decodes a segment to %q", s, d)
+		}
+		segs = append(segs, d)
+	}
+	return "/" + strings.Join(segs, "/")
+}
+
+// emittedSources returns every file:// source in a converted lock.
+func emittedSources(t *testing.T, lockPath string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lock map[string]any
+	if err := json.Unmarshal(raw, &lock); err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, cv := range lock["components"].([]any) {
+		c := cv.(map[string]any)
+		out = append(out, c["source"].(map[string]any)["source"].(string))
+		if fs, ok := c["files"].([]any); ok {
+			for _, f := range fs {
+				out = append(out, f.(map[string]any)["source"].(string))
+			}
+		}
+	}
+	return out
+}
+
+// FuzzComponentID: whatever the component id, the conversion is refused or
+// every emitted file:// source decodes, as Spin decodes it, to a path
+// beneath the output root.
+func FuzzComponentID(f *testing.F) {
+	for _, s := range []string{"hello", "a-b", "..%2F..%2Fx", "%2e%2e", "a?b", "a#b", "A-B2", "x%00", "é"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, id string) {
+		l, _ := app(t, func(lock map[string]any) { lock["components"].([]any)[0].(map[string]any)["id"] = id })
+		d := l.finish(nil)
+		r, out, err := prepare(t, l, d)
+		if err != nil {
+			return
+		}
+		defer removeTree(out)
+		for _, s := range emittedSources(t, r.LockPath) {
+			if p := spinDecodedPath(t, s); !strings.HasPrefix(p, out+"/") {
+				t.Fatalf("id %q: source %q decodes to %q, outside %q", id, s, p, out)
+			}
+		}
+	})
+}
+
+func TestEmittedSourcesStayBeneathOutput(t *testing.T) {
+	l, _ := app(t, nil)
+	d := l.finish(nil)
+	r, out, err := prepare(t, l, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer removeTree(out)
+	srcs := emittedSources(t, r.LockPath)
+	if len(srcs) < 2 {
+		t.Fatalf("sources %v", srcs)
+	}
+	for _, s := range srcs {
+		if p := spinDecodedPath(t, s); !strings.HasPrefix(p, out+"/") {
+			t.Fatalf("source %q decodes to %q", s, p)
+		}
+	}
+}
+
+// Archive entries that are not regular files are skipped, but their
+// decompressed bytes count against the total limit.
+func TestPrepareArchiveInflateLimit(t *testing.T) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	big := bytes.Repeat([]byte{0}, 1<<20)
+	if err := tw.WriteHeader(&tar.Header{Name: "skipped", Mode: 0o644, Size: int64(len(big)), Typeflag: 'Z'}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = tw.Write(big)
+	if err := tw.WriteHeader(&tar.Header{Name: "x/arch.txt", Mode: 0o644, Size: 8, Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = tw.Write([]byte("archived"))
+	_ = tw.Close()
+	_ = zw.Close()
+	l := newLayout(t)
+	wasm := l.layer(mediaWasm, []byte("\x00asm component"))
+	l.layer(MediaArchive, buf.Bytes())
+	l.layer(MediaLockedApp, mustJSON(t, map[string]any{
+		"spin_lock_version": 0,
+		"triggers":          []any{map[string]any{"id": "t", "trigger_type": "http", "trigger_config": map[string]any{"component": "c", "route": "/..."}}},
+		"components": []any{map[string]any{"id": "c",
+			"source": map[string]any{"content_type": "application/wasm", "digest": wasm},
+			"files":  []any{map[string]any{"digest": digestOf([]byte("archived")), "path": "a.txt"}}}},
+	}))
+	d := l.finish(nil)
+	small := DefaultLimits
+	small.Total = 256 << 10
+	if _, err := Prepare(context.Background(), l.dir, filepath.Join(t.TempDir(), "a"), d, testRepo+"@"+d, small); reason(err) != ReasonLimit {
+		t.Fatalf("inflate limit: %v", err)
+	}
+	r, out, err := prepare(t, l, d)
+	if err != nil {
+		t.Fatalf("default limits: %v", err)
+	}
+	_ = r
+	removeTree(out)
 }

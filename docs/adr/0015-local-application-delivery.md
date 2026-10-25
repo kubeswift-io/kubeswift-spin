@@ -399,8 +399,10 @@ byte-for-byte the plan with the feature off.
    files only to other non-lock layers, archive-layer members or inline
    content; never to the config or the manifest.
 8. Everything is bounded: 512 MiB per blob, 2 GiB per application in total,
-   10,000 files, a decompression ratio for archive layers, and a deadline
-   for the whole step (default 5 seconds), after which it falls back.
+   10,000 files, every decompressed byte of all archive layers (entries
+   that are not regular files included) counted against the 2 GiB total,
+   and a deadline for the whole step (default 5 seconds), after which it
+   falls back.
 
 The verification and copy run as root before the privilege drop, as the
 compiled-cache check does, streaming (no blob is held in memory whole). Go
@@ -422,7 +424,9 @@ lock uses is copied into `<tmpfs>/app/blobs/` while it is hashed (one read;
 on any fallback after copying started, the entrypoint removes
 `<tmpfs>/app` before `spin up` starts, so the fallback runs with the same
 memory and filesystem as with the feature off), in root-owned directories of
-mode 0555 and files of mode 0444, so Spin's user cannot change them. Files
+mode 0555 and files of mode 0444, so Spin's user cannot change them in
+place. (`<tmpfs>` itself belongs to Spin's user, which could rename the
+tree there; code running as that user gains nothing from it.) Files
 are materialized under `<tmpfs>/app/assets/<component id>/` the same way.
 Content replaced on the node after the check therefore never reaches Spin.
 The copy costs guest memory comparable to what `spin up` writes into its
@@ -438,7 +442,13 @@ application before the trigger starts, and nothing else:
   falls back;
 - `files`, when present, must be an array and are replaced wholesale by one
   directory mount at `/`; each file path must have only normal components
-  (Spin's rule), and the component id must be a single normal name;
+  (Spin's rule), and the component id must match Spin's manifest id
+  grammar (`-`-separated words of ASCII letters and digits, each starting
+  with a letter): Spin percent-decodes the `file://` URL that names
+  `assets/<component id>`, so an id such as `..%2F..` would otherwise turn
+  the files mount into another directory of the guest. Every emitted
+  `file://` URL is built with URL escaping and checked to decode, as Spin
+  decodes it, to the intended path beneath the output root;
 - a component with a `dependencies` or `trigger_dependencies` key holding
   anything but an empty object falls back (v0.3.0; Spin resolves them, the
   golden test needs fixtures first);

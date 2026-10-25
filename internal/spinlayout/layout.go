@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"net/url"
+	"path"
 	"regexp"
 	"strings"
 
@@ -92,9 +94,12 @@ type Result struct {
 
 var (
 	digestRE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
-	// A component id or path element Spin's is_safe_to_join accepts and
-	// that is a single name: no separators, not "." or "..", no NUL.
-	nameRE = regexp.MustCompile(`^[^/\x00]+$`)
+	// A component id as Spin's manifest allows it (spin-serde Id<'-'>):
+	// '-'-separated words of ASCII letters and digits, each starting with a
+	// letter. The id names a directory in a file:// URL that Spin
+	// percent-decodes, so nothing else (no '%', '?', '#', '.', '/' or '\\')
+	// is accepted; such a lock falls back to the registry path.
+	idRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*(-[A-Za-z][A-Za-z0-9]*)*$`)
 )
 
 type desc struct {
@@ -130,10 +135,12 @@ type prep struct {
 	out     *outRoot
 	lim     Limits
 	written int64
-	files   int
-	layers  map[string]desc   // manifest layers by digest
-	copied  map[string]string // digest -> path below out of a verified copy
-	members map[string]string // archive member digest -> path below out
+	// inflated counts decompressed archive bytes.
+	inflated int64
+	files    int
+	layers   map[string]desc   // manifest layers by digest
+	copied   map[string]string // digest -> path below out of a verified copy
+	members  map[string]string // archive member digest -> path below out
 }
 
 // Prepare verifies the OCI image layout at mount for the manifest digest
@@ -499,13 +506,34 @@ func (p *prep) unpackArchives() error {
 	return nil
 }
 
+var errInflateLimit = errors.New("archive layers decompress to more than the total limit")
+
+// inflateLimit counts decompressed archive bytes against Limits.Total.
+type inflateLimit struct {
+	r io.Reader
+	p *prep
+}
+
+func (l *inflateLimit) Read(b []byte) (int, error) {
+	n, err := l.r.Read(b)
+	l.p.inflated += int64(n)
+	if l.p.inflated > l.p.lim.Total {
+		return n, errInflateLimit
+	}
+	return n, err
+}
+
 func (p *prep) unpackOne(f io.Reader, d desc) error {
 	layerHash := sha256.New()
 	raw := io.TeeReader(&ctxReader{ctx: p.ctx, r: io.LimitReader(f, d.size+1)}, layerHash)
-	zr, err := gzip.NewReader(raw)
+	gz, err := gzip.NewReader(raw)
 	if err != nil {
 		return refuse(ReasonBlob)
 	}
+	// Every decompressed byte counts, also those of entries that are not
+	// regular files and of the trailer: all archive layers together
+	// decompress to at most Limits.Total.
+	zr := &inflateLimit{r: gz, p: p}
 	// A truncated stream is refused: Spin 4.2.5 refuses it too ("failed to
 	// iterate over archive"), and the local path must not run what `spin
 	// up` cannot.
@@ -514,6 +542,9 @@ func (p *prep) unpackOne(f io.Reader, d desc) error {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
+		}
+		if errors.Is(err, errInflateLimit) {
+			return refuse(ReasonLimit)
 		}
 		if err != nil {
 			return refuse(ReasonBlob)
@@ -544,10 +575,10 @@ func (p *prep) unpackOne(f io.Reader, d desc) error {
 	}
 	// Drain the decompressed stream, then the rest of the compressed bytes,
 	// and verify the layer itself.
-	if n, err := io.CopyN(io.Discard, zr, p.lim.Total+1); err != nil && !errors.Is(err, io.EOF) {
-		return refuse(ReasonBlob)
-	} else if n > p.lim.Total {
+	if _, err := io.Copy(io.Discard, zr); errors.Is(err, errInflateLimit) {
 		return refuse(ReasonLimit)
+	} else if err != nil {
+		return refuse(ReasonBlob)
 	}
 	if _, err := io.Copy(io.Discard, raw); err != nil {
 		return refuse(ReasonBlob)
@@ -597,7 +628,7 @@ func (p *prep) convertComponents(lock map[string]any) error {
 			return refuse(ReasonLock)
 		}
 		id, ok, err := str(c, "id")
-		if err != nil || !ok || !nameRE.MatchString(id) || id == "." || id == ".." || seen[id] {
+		if err != nil || !ok || len(id) > 255 || !idRE.MatchString(id) || seen[id] {
 			return refuse(ReasonComponent)
 		}
 		seen[id] = true
@@ -643,8 +674,33 @@ func (p *prep) convertSource(c map[string]any) error {
 	if err != nil {
 		return err
 	}
-	c["source"] = map[string]any{"content_type": ct, "source": "file://" + p.out.path + "/" + rel}
+	u, err := p.fileURL(rel)
+	if err != nil {
+		return err
+	}
+	c["source"] = map[string]any{"content_type": ct, "source": u}
 	return nil
+}
+
+// fileURL returns the file:// URL of rel under the output root, escaped
+// with net/url, and checks that it decodes back to exactly that path the
+// way Spin's url crate does (percent-decoding each segment): a URL that
+// would name anything else is refused.
+func (p *prep) fileURL(rel string) (string, error) {
+	want := p.out.path + "/" + rel
+	if path.Clean(want) != want || !strings.HasPrefix(want, p.out.path+"/") {
+		return "", refuse(ReasonOutput)
+	}
+	s := (&url.URL{Scheme: "file", Path: want}).String()
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "file" || u.Host != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return "", refuse(ReasonOutput)
+	}
+	got, err := url.PathUnescape(u.EscapedPath())
+	if err != nil || got != want {
+		return "", refuse(ReasonOutput)
+	}
+	return s, nil
 }
 
 // convertFiles materializes the component's files under
@@ -694,7 +750,11 @@ func (p *prep) convertFiles(c map[string]any, id string) error {
 			return err
 		}
 	}
-	c["files"] = []any{map[string]any{"source": "file://" + p.out.path + "/" + base, "path": "/"}}
+	u, err := p.fileURL(base)
+	if err != nil {
+		return err
+	}
+	c["files"] = []any{map[string]any{"source": u, "path": "/"}}
 	if err := p.out.mkdirAll(base); err != nil {
 		return refuse(ReasonOutput)
 	}
