@@ -51,6 +51,23 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 - --compiled-cache-runtimes={{ join "," (prepend .Values.compiledCache.extraRuntimes (printf "%s@%s" .Values.runtimeImage.repository .Values.runtimeImage.digest)) }}
 {{- end -}}
 
+{{/* Local application flags shared by the controller and the cache manager
+(ADR 0015). */}}
+{{- define "kubeswift-spin.localApplicationArgs" -}}
+{{- $_ := required "localApplication.enabled needs runtimeImage.digest: only digest-pinned runtime images run local applications" .Values.runtimeImage.digest -}}
+{{- if not .Values.localApplication.nodeCacheBounded -}}
+{{- fail "localApplication.enabled needs localApplication.nodeCacheBounded=true: bound KubeSwift's node artifact cache first (KubeSwift chart artifactCache.maxBytes or maxPercent); see docs/adr/0015-local-application-delivery.md" -}}
+{{- end }}
+- --local-application
+- --local-application-runtimes={{ join "," (prepend .Values.localApplication.extraRuntimes (printf "%s@%s" .Values.runtimeImage.repository .Values.runtimeImage.digest)) }}
+{{- with .Values.localApplication.registries }}
+- --local-application-registries={{ join "," . }}
+{{- end }}
+- --local-application-max-placements-per-namespace={{ .Values.localApplication.maxPlacementsPerNamespace }}
+- --local-application-max-new-per-hour={{ .Values.localApplication.maxNewPerHour }}
+- --local-application-retention={{ .Values.localApplication.retention }}
+{{- end -}}
+
 {{/* How replicas and placements read signed caches: the controller and the
 cache manager build the same artifact from these. */}}
 {{- define "kubeswift-spin.compiledCacheDeliveryArgs" -}}

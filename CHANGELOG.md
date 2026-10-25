@@ -30,6 +30,11 @@ running replicas on upgrade) say so under "Upgrade notes".
   `disabled`) and the SpinApp opt-out with the same annotation, validated
   but not yet acted on; `internal/localapp` holds the eligibility rules,
   placement key and limits of ADR 0015.
+- The cache manager keeps the application placements of local applications
+  (chart values `localApplication.*`, which require
+  `localApplication.nodeCacheBounded=true` and `runtimeImage.digest`). It
+  runs when compiled caches or local applications are enabled; with only
+  local applications its RBAC has no SwiftSandbox or record access.
 
 ### Changed (runtime image)
 

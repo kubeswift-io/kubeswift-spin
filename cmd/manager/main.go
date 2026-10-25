@@ -33,6 +33,7 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
 	"github.com/kubeswift-io/kubeswift-spin/internal/controller"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
+	"github.com/kubeswift-io/kubeswift-spin/internal/localapp"
 	"github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 	"github.com/kubeswift-io/kubeswift-spin/internal/scheme"
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
@@ -70,15 +71,22 @@ type options struct {
 	cacheRetention    time.Duration
 	cachePullSecret   string
 	cacheFetchTimeout time.Duration
-	cacheRuntimes     string
-	cacheMaxRecords   int
-	compilerCPU       int
-	compilerMemory    string
-	compilerTimeout   time.Duration
-	cacheMaxSize      string
-	cacheMaxEntries   int64
-	maxCompilers      int
-	maxCompilersPerNS int
+
+	localApp              bool
+	localAppRuntimes      string
+	localAppRegistries    string
+	localAppMaxPlacements int
+	localAppMaxNewPerHour int
+	localAppRetention     time.Duration
+	cacheRuntimes         string
+	cacheMaxRecords       int
+	compilerCPU           int
+	compilerMemory        string
+	compilerTimeout       time.Duration
+	cacheMaxSize          string
+	cacheMaxEntries       int64
+	maxCompilers          int
+	maxCompilersPerNS     int
 }
 
 // Modes of the manager binary.
@@ -121,6 +129,12 @@ func main() {
 	flag.DurationVar(&o.cacheRetention, "compiled-cache-retention", 24*time.Hour, "How long the cache manager keeps a SpinCompiledCache that no SpinApp uses (the most recently replaced one of each SpinApp is always kept).")
 	flag.StringVar(&o.cachePullSecret, "compiled-cache-pull-secret", "", "Name of a docker-registry Secret, in every enabled namespace, that reads that namespace's cache repository. Empty uses the runtime image pull Secret for replicas and anonymous reads for placements.")
 	flag.DurationVar(&o.cacheFetchTimeout, "compiled-cache-fetch-timeout", compiledcache.DefaultColdFetchTimeout, "How long a replica that does not come from a warm pool may wait for its compiled cache before it starts without it (0s to 5m); 0s gives such replicas no cache. Warm-pool replicas never wait.")
+	flag.BoolVar(&o.localApp, "local-application", false, "Let warm replicas start Spin from a KubeSwift-mounted copy of their own application artifact (ADR 0015).")
+	flag.StringVar(&o.localAppRuntimes, "local-application-runtimes", "", "Comma-separated runtime images, repository@sha256:<digest>, allowed to run local applications.")
+	flag.StringVar(&o.localAppRegistries, "local-application-registries", "", "Comma-separated registry hosts eligible for local applications. Empty allows any registry reached over HTTPS.")
+	flag.IntVar(&o.localAppMaxPlacements, "local-application-max-placements-per-namespace", localapp.DefaultMaxPlacements, "Most application placements per namespace, retained ones included.")
+	flag.IntVar(&o.localAppMaxNewPerHour, "local-application-max-new-per-hour", localapp.DefaultMaxNewPerHour, "How many of a namespace's application placements may have been created in the last hour.")
+	flag.DurationVar(&o.localAppRetention, "local-application-retention", localapp.DefaultRetention, "How long an application placement no SpinApp wants is kept, for rollbacks.")
 	zapOpts := zap.Options{}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -170,6 +184,11 @@ func run(o options) error {
 	if errs := validation.IsDNS1123Subdomain(o.cachePullSecret); o.cachePullSecret != "" && len(errs) > 0 {
 		return fmt.Errorf("--compiled-cache-pull-secret %q is not a Secret name: %s", o.cachePullSecret, strings.Join(errs, "; "))
 	}
+	localSettings := localapp.Settings{Enabled: o.localApp, Runtimes: splitList(o.localAppRuntimes), Registries: splitList(o.localAppRegistries),
+		MaxPlacements: o.localAppMaxPlacements, MaxNewPerHour: o.localAppMaxNewPerHour, Retention: o.localAppRetention}
+	if err := localSettings.Validate(); err != nil {
+		return fmt.Errorf("--local-application-*: %w", err)
+	}
 	cachesServed := false
 	if settings.Configured() {
 		if cachesServed, err = capabilities.Served(cs.Discovery(), capabilities.CompiledCaches); err != nil {
@@ -186,17 +205,17 @@ func run(o options) error {
 			return err
 		}
 	case modeCacheManager:
-		if !settings.Configured() {
-			return fmt.Errorf("--mode=%s needs --compiled-cache-repository and --compiled-cache-namespace", modeCacheManager)
+		if !settings.Configured() && !localSettings.Enabled {
+			return fmt.Errorf("--mode=%s needs compiled caches (--compiled-cache-repository and --compiled-cache-namespace) or --local-application", modeCacheManager)
 		}
 		placementsServed, err := capabilities.Served(cs.Discovery(), capabilities.Placements)
 		if err != nil {
 			return fmt.Errorf("discover %s: %w", capabilities.Placements.String(), err)
 		}
 		if !placementsServed {
-			return fmt.Errorf("the SwiftArtifactPlacement API (%s) is not installed; compiled caches need KubeSwift v0.19.3 or later", capabilities.Placements.String())
+			return fmt.Errorf("the SwiftArtifactPlacement API (%s) is not installed; compiled caches and local applications need KubeSwift v0.19.3 or later", capabilities.Placements.String())
 		}
-		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, cacheManagerBase(), cacheManagerChecks(settings)); err != nil {
+		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, cacheManagerBase(settings.Configured()), cacheManagerChecks(settings, firstNonEmpty(o.leaderElectNS, os.Getenv("POD_NAMESPACE")))); err != nil {
 			return err
 		}
 	default:
@@ -235,8 +254,13 @@ func run(o options) error {
 		// SpinApps' replicas.
 		cacheOpts.ByObject[&sandboxapi.SwiftSandbox{}] = cache.ByObject{Label: labels.SelectorFromSet(labels.Set{
 			translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: compiledcache.ComponentCompiler})}
-		cacheOpts.ByObject[&sandboxapi.SwiftArtifactPlacement{}] = cache.ByObject{Label: labels.SelectorFromSet(labels.Set{
-			translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: compiledcache.ComponentPlacement})}
+		// Its own placements: compiled caches' and local applications'.
+		placementSel, err := labels.Parse(fmt.Sprintf("%s=%s,%s in (%s,%s)", translate.LabelManagedBy, translate.ManagedByValue,
+			compiledcache.LabelComponent, compiledcache.ComponentPlacement, localapp.ComponentPlacement))
+		if err != nil {
+			return err
+		}
+		cacheOpts.ByObject[&sandboxapi.SwiftArtifactPlacement{}] = cache.ByObject{Label: placementSel}
 	}
 
 	metricsOpts := metricsserver.Options{BindAddress: o.metricsAddr, SecureServing: o.metricsSecure}
@@ -260,7 +284,21 @@ func run(o options) error {
 	}
 
 	ctx := ctrl.SetupSignalHandler()
-	if o.mode == modeCacheManager {
+	if o.mode == modeCacheManager && localSettings.Enabled {
+		app := &cachemanager.ApplicationReconciler{
+			Client:           mgr.GetClient(),
+			Defaults:         defaults,
+			Options:          compatibility.Options{MaxReplicas: int32(o.maxReplicas), Resources: policy}, //nolint:gosec // bounded in policy()
+			Settings:         localSettings,
+			Detector:         detector,
+			PlacementsServed: true,
+			Recorder:         mgr.GetEventRecorder("kubeswift-spin-cache-manager"),
+		}
+		if err := app.SetupWithManager(mgr); err != nil {
+			return err
+		}
+	}
+	if o.mode == modeCacheManager && settings.Configured() {
 		if o.cacheMaxRecords < 1 || o.cacheMaxRecords > 1000 {
 			return fmt.Errorf("--compiled-cache-max-records-per-namespace must be between 1 and 1000")
 		}
@@ -295,7 +333,8 @@ func run(o options) error {
 		if err := rec.SetupWithManager(mgr); err != nil {
 			return err
 		}
-	} else {
+	}
+	if o.mode == modeController {
 		r := &controller.SpinAppReconciler{
 			Client:               mgr.GetClient(),
 			Scheme:               mgr.GetScheme(),
@@ -490,24 +529,29 @@ func controllerBase() []check {
 
 // cacheManagerBase are the cache manager's permissions in every watched
 // scope: it reads SpinApps and executors and never writes them.
-func cacheManagerBase() []check {
-	return []check{
+func cacheManagerBase(compiler bool) []check {
+	out := []check{
 		{"core.spinkube.dev", "spinapps", "", "list"},
 		{"core.spinkube.dev", "spinapps", "", "watch"},
 		{"core.spinkube.dev", "spinappexecutors", "", "list"},
 		{"core.spinkube.dev", "spinappexecutors", "", "watch"},
-		// Compiler sandboxes, in the namespaces of the SpinApps they compile.
-		{"sandbox.kubeswift.io", "swiftsandboxes", "", "list"},
-		{"sandbox.kubeswift.io", "swiftsandboxes", "", "watch"},
-		{"sandbox.kubeswift.io", "swiftsandboxes", "", "create"},
-		{"sandbox.kubeswift.io", "swiftsandboxes", "", "delete"},
-		// Placements on the warm pools of consumer SpinApps.
+		// Placements on the warm pools of consumer SpinApps: compiled caches
+		// and local applications.
 		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "list"},
 		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "watch"},
 		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "create"},
 		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "update"},
 		{"sandbox.kubeswift.io", "swiftartifactplacements", "", "delete"},
 	}
+	if compiler {
+		// Compiler sandboxes, in the namespaces of the SpinApps they compile.
+		out = append(out,
+			check{"sandbox.kubeswift.io", "swiftsandboxes", "", "list"},
+			check{"sandbox.kubeswift.io", "swiftsandboxes", "", "watch"},
+			check{"sandbox.kubeswift.io", "swiftsandboxes", "", "create"},
+			check{"sandbox.kubeswift.io", "swiftsandboxes", "", "delete"})
+	}
+	return out
 }
 
 // controllerChecks are the controller's compiled-cache permissions: it only
@@ -525,15 +569,21 @@ func controllerChecks(s compiledcache.Settings) []namespacedCheck {
 }
 
 // cacheManagerChecks are the cache manager's permissions.
-func cacheManagerChecks(s compiledcache.Settings) []namespacedCheck {
-	out := []namespacedCheck{}
-	for _, verb := range []string{"list", "watch", "create", "delete"} {
-		out = append(out, namespacedCheck{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "", verb}})
+func cacheManagerChecks(s compiledcache.Settings, eventNS string) []namespacedCheck {
+	out := []namespacedCheck{
+		{"", check{"", "namespaces", "", "list"}},
+		{"", check{"", "namespaces", "", "watch"}},
 	}
-	out = append(out, namespacedCheck{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "status", "patch"}},
-		namespacedCheck{"", check{"", "namespaces", "", "list"}},
-		namespacedCheck{"", check{"", "namespaces", "", "watch"}},
-		namespacedCheck{s.Namespace, check{"events.k8s.io", "events", "", "create"}})
+	if s.Configured() {
+		eventNS = s.Namespace
+		for _, verb := range []string{"list", "watch", "create", "delete"} {
+			out = append(out, namespacedCheck{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "", verb}})
+		}
+		out = append(out, namespacedCheck{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "status", "patch"}})
+	}
+	if eventNS != "" {
+		out = append(out, namespacedCheck{eventNS, check{"events.k8s.io", "events", "", "create"}})
+	}
 	return out
 }
 
@@ -552,4 +602,14 @@ func splitList(v string) []string {
 		}
 	}
 	return out
+}
+
+// firstNonEmpty returns the first non-empty string.
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

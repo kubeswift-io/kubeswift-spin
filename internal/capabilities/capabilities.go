@@ -132,7 +132,17 @@ type Sandbox struct {
 	// sandbox can export a directory as an OCI artifact without registry
 	// credentials in the guest.
 	Outputs bool
+	// LocalArtifacts is true when spec.artifacts[] has optional,
+	// fetchTimeout, layout and pullSecretRef: a replica can mount its own
+	// application as an optional OCI layout, read with its pull Secret
+	// (ADR 0015).
+	LocalArtifacts bool
 }
+
+// LocalApplication reports whether the installed KubeSwift has every
+// sandbox feature local applications need (ADR 0015); the placement API is
+// checked separately.
+func (s Sandbox) LocalApplication() bool { return s.LocalArtifacts }
 
 // CompiledCache reports whether the installed KubeSwift has every sandbox
 // feature the trusted compiled cache needs (ADR 0014).
@@ -249,16 +259,17 @@ func ParseSandboxSchema(raw []byte) (Sandbox, error) {
 	_, secretFiles := spec.Properties["secretFiles"]
 	_, startup := spec.Properties["readinessStartup"]
 	_, termination := spec.Properties["termination"]
-	trusted := false
+	trusted, local := false, false
 	if a := spec.Properties["artifacts"].Items; a != nil {
 		trusted = a.has("optional", "fetchTimeout", "claims", "requirePlatformVerification")
+		local = a.has("optional", "fetchTimeout", "layout", "pullSecretRef")
 	}
 	outputs := false
 	if o := spec.Properties["outputs"].Items; o != nil {
 		outputs = o.has("name", "path", "repository", "maxSize", "artifactType")
 	}
 	return Sandbox{Ports: ports, ReadinessProbe: probe, PodMetadata: podMeta, SecretFiles: secretFiles, Egress: egress,
-		ReadinessStartup: startup, Termination: termination, TrustedArtifacts: trusted, Outputs: outputs}, nil
+		ReadinessStartup: startup, Termination: termination, TrustedArtifacts: trusted, Outputs: outputs, LocalArtifacts: local}, nil
 }
 
 // Static is a SandboxDetector returning fixed features, for tests and for
