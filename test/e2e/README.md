@@ -154,7 +154,12 @@ The script passed every check of all nine phases on the KVM lab cluster
 described in
 [compatibility.md](../../docs/compatibility.md#validation-of-v010), with
 KubeSwift v0.16.3 and the v0.1.0 source. Earlier builds also passed it on
-KubeSwift v0.16.0, v0.16.1 and v0.16.2. The v0.2.1-rc1 release artifacts
+KubeSwift v0.16.0, v0.16.1 and v0.16.2. The v0.3.0-rc1 release artifacts
+passed all nine phases on KubeSwift v0.20.0, phase 6 against
+`private-registry.sh`, and `compiled-cache-e2e.sh` and
+`local-application-e2e.sh` in private mode (see
+[compatibility.md](../../docs/compatibility.md#validation-of-v030-rc1)).
+The v0.2.1-rc1 release artifacts
 passed all nine phases on KubeSwift v0.19.3, phase 6 against
 `private-registry.sh`, and `compiled-cache-e2e.sh` in private mode (see
 [compatibility.md](../../docs/compatibility.md#validation-of-v021-rc1)).
@@ -355,4 +360,7 @@ passed phases 1 to 3 in one run and phases 4 and 5 in a second run, after
 a fix to phase 4's ordering (the pool pulls its runtime image with the
 same pull Secret, so it is filled before the Secret is broken). An
 earlier development build passed all five phases in one run (92 checks).
+The v0.3.0-rc1 release artifacts then passed all five phases in one run
+(96 checks; see
+[compatibility.md](../../docs/compatibility.md#validation-of-v030-rc1)).
 Not covered: arm64.
