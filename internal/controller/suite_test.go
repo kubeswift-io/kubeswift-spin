@@ -222,6 +222,9 @@ var nsCounter int
 
 func newNamespace(t *testing.T) string {
 	t.Helper()
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		t.Skip("envtest not available")
+	}
 	nsCounter++
 	name := fmt.Sprintf("t%d-%s", nsCounter, strings.ToLower(strings.NewReplacer("/", "-", "_", "-").Replace(t.Name())))
 	if len(name) > 50 {

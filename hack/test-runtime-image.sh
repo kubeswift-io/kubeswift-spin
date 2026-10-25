@@ -14,7 +14,7 @@ set -euo pipefail
 IMAGE="${1:?usage: $0 <runtime-image>}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPIN="${SPIN:-$ROOT/bin/spin}"
-SPIN_VERSION="${SPIN_VERSION:-4.2.1}"
+SPIN_VERSION="${SPIN_VERSION:-4.2.5}"
 REGISTRY_IMAGE="registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
 REG_PORT="${REG_PORT:-5555}"
 AUTH_REG_PORT="${AUTH_REG_PORT:-5556}"

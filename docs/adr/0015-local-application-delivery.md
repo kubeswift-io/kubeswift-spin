@@ -469,7 +469,7 @@ decides what Spin runs.
 
 The runtime contract declares the exact `spin --version` line the converter
 supports, taken from the verified 4.2.5 release binary (expected
-`spin 4.2.5 (e09d7d5 2026-10-22)`), and a converter version. If the runtime
+`spin 4.2.5 (e09d7d5 2026-10-23)`), and a converter version. If the runtime
 ships a privately patched Spin, the constant is that build's line and
 digest. Spin
 and the entrypoint ship in the same runtime image, Spin pinned by digest and

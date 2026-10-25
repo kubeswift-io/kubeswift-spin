@@ -120,7 +120,8 @@ warm-pool checkout (next list); the others still hold.
   shape: a slot whose kernel has warm mounts mounts them at checkout, and
   `SwiftArtifactPlacement` prepares them on a pool's nodes in advance.
 
-**Spin v4.2.1**:
+**Spin v4.2.5** (these contracts were first verified on v4.2.1; the runtime
+image and example tests pass on v4.2.5):
 
 - `spin up --from <oci-ref>` pulls and runs a registry application;
   `--listen` (or `SPIN_HTTP_LISTEN_ADDR`) sets the HTTP address;
@@ -261,7 +262,7 @@ local OCI layout, so kubeswift-spin does not use it
 
 ## Runtime image
 
-The runtime image contains the static Spin v4.2.1 binary (checksum-pinned),
+The runtime image contains the static Spin v4.2.5 binary (checksum-pinned),
 the kubeswift-spin entrypoint and the distroless `static` base (CA bundle,
 passwd entries, no shell, no package manager). The entrypoint prepares
 writable directories on the guest's memory-backed overlay, writes the

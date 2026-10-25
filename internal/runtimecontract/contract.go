@@ -117,7 +117,7 @@ const (
 	// layout of the Spin in this runtime image. Compile mode refuses to
 	// write another, and the entrypoint uses only a cache that names it.
 	// Update it with Spin; hack/test-runtime-image.sh checks it.
-	WasmtimeCacheVersion = "wasmtime-49.0.1"
+	WasmtimeCacheVersion = "wasmtime-50.0.0"
 
 	// CompiledCacheDir is where a replica's signed compiled cache is
 	// mounted, read-only, when KubeSwift delivers it (ADR 0014).

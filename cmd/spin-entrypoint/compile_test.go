@@ -158,7 +158,7 @@ func TestFindLockedApp(t *testing.T) {
 
 func TestCollectAndWriteOutput(t *testing.T) {
 	cache := t.TempDir()
-	v := filepath.Join(cache, "modules", "wasmtime-49.0.1")
+	v := filepath.Join(cache, "modules", runtimecontract.WasmtimeCacheVersion)
 	if err := os.MkdirAll(v, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -169,12 +169,12 @@ func TestCollectAndWriteOutput(t *testing.T) {
 		}
 	}
 	version, entries, err := collectEntries(cache)
-	if err != nil || version != "wasmtime-49.0.1" || !reflect.DeepEqual(entries, []string{keyA, keyB}) {
+	if err != nil || version != runtimecontract.WasmtimeCacheVersion || !reflect.DeepEqual(entries, []string{keyA, keyB}) {
 		t.Fatalf("%s %v %v", version, entries, err)
 	}
 	out := t.TempDir()
 	meta := runtimecontract.CacheMetadata{Kind: runtimecontract.CompiledCacheKind, Source: testSource, Runtime: testRuntime,
-		Architecture: "amd64", Spin: "spin 4.2.1", WasmtimeCache: version, Entries: entries, Components: []string{"hello"}}
+		Architecture: "amd64", Spin: "spin 4.2.5", WasmtimeCache: version, Entries: entries, Components: []string{"hello"}}
 	if err := writeOutput(out, cache, meta); err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,8 @@ func TestCollectAndWriteOutput(t *testing.T) {
 		}
 		return nil
 	})
-	want := []string{"cache/modules/wasmtime-49.0.1/" + keyA, "cache/modules/wasmtime-49.0.1/" + keyB, "metadata.json"}
+	dir := "cache/modules/" + runtimecontract.WasmtimeCacheVersion + "/"
+	want := []string{dir + keyA, dir + keyB, "metadata.json"}
 	if !reflect.DeepEqual(files, want) {
 		t.Fatalf("output %v", files)
 	}
