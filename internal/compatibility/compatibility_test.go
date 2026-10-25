@@ -555,3 +555,30 @@ func TestAppAnnotationsDocumented(t *testing.T) {
 		}
 	}
 }
+
+func TestSpinAppLocalApplicationAnnotation(t *testing.T) {
+	annotated := func(v string) *spinv1alpha1.SpinApp {
+		a := app()
+		a.Annotations = map[string]string{executor.AnnLocalApplication: v}
+		return a
+	}
+	enabled := profile()
+	enabled.LocalApplication = true
+	for _, tc := range []struct {
+		v string
+		p *executor.Profile
+	}{{"disabled", profile()}, {"disabled", enabled}, {"enabled", enabled}} {
+		if fs := Analyze(annotated(tc.v), tc.p, opts()); len(fs) != 0 {
+			t.Fatalf("%s with executor local application %v: %+v", tc.v, tc.p.LocalApplication, fs)
+		}
+	}
+	fs := Analyze(annotated("enabled"), profile(), opts())
+	if Blocking(fs) || len(fs) != 1 || !strings.Contains(fs[0].Message, "can only opt out") {
+		t.Fatalf("opt-in without executor support: %+v", fs)
+	}
+	for _, v := range []string{"", "true", "on"} {
+		if fs := Analyze(annotated(v), enabled, opts()); !Blocking(fs) {
+			t.Fatalf("%q: %+v", v, fs)
+		}
+	}
+}

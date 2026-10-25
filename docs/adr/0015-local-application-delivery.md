@@ -207,10 +207,10 @@ A new replica gets the artifact only when all of these hold; each rule has a
   KubeSwift resolves tags for artifacts;
 - the image's registry host, normalized as `compiledcache.PinnedReference`
   normalizes it (`docker.io` becomes `index.docker.io`), is one KubeSwift
-  reaches over HTTPS only: not `localhost`, not a name under `.localhost`
-  or `.local` (deliberately stricter than go-containerregistry, which uses
-  HTTPS for `.local`), not a loopback or private-range IP literal
-  (`RegistryNotEligible`); and, when the chart value
+  reaches over HTTPS only: not `localhost`, not a name under `.localhost`,
+  not a loopback or private-range IP literal (`RegistryNotEligible`).
+  Names under `.local`, such as in-cluster registries at
+  `*.svc.cluster.local`, are fetched over HTTPS and stay eligible; and, when the chart value
   `localApplication.registries` lists hosts (compared after the same
   normalization), it is one of them. The KubeSwift bump checklist rechecks
   go-containerregistry's `Registry.Scheme` against this classifier, and a

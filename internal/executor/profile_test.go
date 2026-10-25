@@ -330,3 +330,21 @@ func TestParseCompiledCache(t *testing.T) {
 		}
 	}
 }
+
+func TestParseLocalApplication(t *testing.T) {
+	p, err := Parse(managed("kubeswift", nil), defaults())
+	if err != nil || p.LocalApplication {
+		t.Fatalf("default: %v %v", err, p.LocalApplication)
+	}
+	for v, want := range map[string]bool{LocalApplicationEnabled: true, LocalApplicationDisabled: false} {
+		p, err := Parse(managed("kubeswift", map[string]string{AnnLocalApplication: v}), defaults())
+		if err != nil || p.LocalApplication != want {
+			t.Fatalf("%q: %v %v", v, err, p.LocalApplication)
+		}
+	}
+	for _, v := range []string{"", "true", "Enabled", "on"} {
+		if _, err := Parse(managed("kubeswift", map[string]string{AnnLocalApplication: v}), defaults()); err == nil {
+			t.Errorf("%q accepted", v)
+		}
+	}
+}

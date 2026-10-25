@@ -93,12 +93,24 @@ const (
 	// "disabled". The platform must also configure the feature (chart value
 	// compiledCache.enabled).
 	AnnCompiledCache = Prefix + "compiled-cache"
+	// AnnLocalApplication lets warm replicas start Spin from a verified
+	// copy of their own application artifact (ADR 0015): "enabled" or
+	// "disabled" (the default). A SpinApp can opt out with the same
+	// annotation set to "disabled". The platform must also enable the
+	// feature (chart value localApplication.enabled) and the namespace.
+	AnnLocalApplication = Prefix + "local-application"
 )
 
 // Values of AnnCompiledCache.
 const (
 	CompiledCacheEnabled  = "enabled"
 	CompiledCacheDisabled = "disabled"
+)
+
+// Values of AnnLocalApplication.
+const (
+	LocalApplicationEnabled  = "enabled"
+	LocalApplicationDisabled = "disabled"
 )
 
 // MaxDrainPeriod is KubeSwift's upper bound for spec.termination.drainPeriod.
@@ -170,6 +182,7 @@ var knownAnnotations = map[string]bool{
 	AnnDrainPeriod:            true,
 	AnnMaxDrainPeriod:         true,
 	AnnCompiledCache:          true,
+	AnnLocalApplication:       true,
 }
 
 // KnownAnnotations returns the supported profile annotation keys, sorted.
@@ -226,6 +239,8 @@ type Profile struct {
 
 	// CompiledCache is AnnCompiledCache=enabled.
 	CompiledCache bool
+	// LocalApplication is AnnLocalApplication=enabled.
+	LocalApplication bool
 }
 
 // CheckFeatures reports profile settings the installed KubeSwift cannot
@@ -418,6 +433,15 @@ func Parse(e *spinv1alpha1.SpinAppExecutor, d Defaults) (*Profile, error) {
 		case CompiledCacheDisabled:
 		default:
 			add("annotation %s must be %q or %q, got %q", AnnCompiledCache, CompiledCacheEnabled, CompiledCacheDisabled, bounded(v))
+		}
+	}
+	if v, ok := ann[AnnLocalApplication]; ok {
+		switch v {
+		case LocalApplicationEnabled:
+			p.LocalApplication = true
+		case LocalApplicationDisabled:
+		default:
+			add("annotation %s must be %q or %q, got %q", AnnLocalApplication, LocalApplicationEnabled, LocalApplicationDisabled, bounded(v))
 		}
 	}
 

@@ -26,6 +26,10 @@ running replicas on upgrade) say so under "Upgrade notes".
   `KUBESWIFT_SPIN_APP_DIGEST` nothing changes.
 - `make spinlayout-golden`: compares the converter with the real
   `spin up --from` of the pinned Spin, in CI.
+- Executor annotation `spin.kubeswift.io/local-application` (`enabled`,
+  `disabled`) and the SpinApp opt-out with the same annotation, validated
+  but not yet acted on; `internal/localapp` holds the eligibility rules,
+  placement key and limits of ADR 0015.
 
 ### Changed (runtime image)
 

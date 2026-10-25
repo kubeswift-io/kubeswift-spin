@@ -191,7 +191,12 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		ns := &cachemanager.NamespaceReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Options: r.Options, Settings: o.compiledCache, Delivery: o.delivery,
 			Detector: o.detector, Retention: time.Hour}
 		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: o.compiledCache, Delivery: o.delivery, Defaults: r.Defaults,
-			Recorder: mgr.GetEventRecorder("kubeswift-spin-cache-manager"), MaxCompilers: 4, MaxCompilersPerNamespace: 1}
+			// The cluster-wide limit counts compilers of every namespace,
+			// and envtest neither finishes nor garbage-collects the
+			// compilers earlier tests leave behind: a small limit made later
+			// tests wait out the 30-second capacity requeue. Tests use one
+			// namespace each, so the per-namespace limit still applies.
+			Recorder: mgr.GetEventRecorder("kubeswift-spin-cache-manager"), MaxCompilers: 1000, MaxCompilersPerNamespace: 1}
 		if err := ns.SetupWithManager(mgr); err != nil {
 			cancel()
 			t.Fatal(err)
