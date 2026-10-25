@@ -8,7 +8,7 @@ The released chart is published as an OCI artifact and pins the
 controller, runtime and cache signer images by digest:
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.2.1 --namespace kubeswift-spin-system --create-namespace
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0-rc1 --namespace kubeswift-spin-system --create-namespace
 ```
 
 From a source checkout, at the repository root (the images must exist in

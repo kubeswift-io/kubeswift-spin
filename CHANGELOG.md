@@ -7,7 +7,19 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## Unreleased (v0.3.0)
+## v0.3.0-rc1 (2026-10-25)
+
+Release candidate of v0.3.0: optional local applications
+([ADR 0015](docs/adr/0015-local-application-delivery.md),
+[docs/local-application.md](docs/local-application.md)), off by default.
+Warm replicas of an eligible SpinApp start Spin from a verified copy of
+their own application artifact that KubeSwift placed on the pool's nodes;
+on the KVM lab this took the time from dispatch to the first response from
+751 to 514 ms at p50 without, and from 467 to 113 ms with, the compiled
+cache. The runtime image moves to Spin v4.2.5 (`spin-4.2.5-r1`), so
+upgrading replaces each replica that uses the default runtime image once.
+With local applications disabled, it behaves as v0.2.1 apart from the new
+runtime image.
 
 ### Added
 
@@ -51,6 +63,9 @@ running replicas on upgrade) say so under "Upgrade notes".
   crafted component id in an OCI application writing outside Spin's assets
   directory. Spin 4.2.5 uses Wasmtime 50.0.0
   (`runtimecontract.WasmtimeCacheVersion` is now `wasmtime-50.0.0`).
+- The cache signer image is built with Go 1.27.3, which the sigstore KMS
+  client modules 1.11.1 for Azure, AWS and HashiCorp Vault require; cosign
+  stays at v3.1.3, the version KubeSwift verifies with.
 - The entrypoint drops `SPIN_LOCKED_URL`, `SPIN_WORKING_DIR`,
   `SPIN_LOCAL_APP_DIR`, `SPIN_LOG_DIR`, `RUNTIME_CONFIG_FILE`,
   `SPIN_HTTP_LISTEN_ADDR`, `SPIN_TLS_CERT` and `SPIN_TLS_KEY` from the
