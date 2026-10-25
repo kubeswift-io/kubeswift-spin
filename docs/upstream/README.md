@@ -25,6 +25,7 @@ Later requirements:
 | [kubeswift-optional-artifact-pull-secret.md](kubeswift-optional-artifact-pull-secret.md) | fixed in v0.19.2 ([kubeswift-io/kubeswift#844](https://github.com/kubeswift-io/kubeswift/issues/844)); kubeswift-spin v0.2.1 dropped its workaround | a missing cache pull Secret not failing replicas ([ADR 0014](../adr/0014-compiled-wasmtime-cache.md)) |
 | [kubeswift-artifact-fetch-hardening.md](kubeswift-artifact-fetch-hardening.md) | proposal, not filed | per-artifact size limits, HTTPS-only fetches, `index.json` reference names and anonymous fetches for application artifacts tenants choose ([ADR 0015](../adr/0015-local-application-delivery.md)) |
 | [kubeswift-redispatch-readiness.md](kubeswift-redispatch-readiness.md) | fixed in v0.19.2 ([kubeswift-io/kubeswift#843](https://github.com/kubeswift-io/kubeswift/issues/843)); kubeswift-spin v0.2.1 dropped its workaround | a warm replica whose cache was skipped at checkout becoming ready ([ADR 0014](../adr/0014-compiled-wasmtime-cache.md)) |
+| [kubeswift-placement-target-nodes.md](kubeswift-placement-target-nodes.md) | proposal, not filed | local applications not falling back while a pool is between a checkout and its refill ([ADR 0015](../adr/0015-local-application-delivery.md)) |
 
 kubeswift-spin uses these features only when the installed KubeSwift
 serves them ([ADR 0012](../adr/0012-feature-detection.md)). On v0.15.1 it
