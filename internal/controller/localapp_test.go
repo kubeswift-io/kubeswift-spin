@@ -318,3 +318,34 @@ func TestLocalApplicationPlacementLimit(t *testing.T) {
 		t.Fatalf("the prepared placement was displaced: %+v", c)
 	}
 }
+
+// A placement at the application placement's name that is for another
+// application (a forged or edited spec), even prepared, is never trusted:
+// PlacementBlocked, and new replicas carry no artifact.
+func TestLocalApplicationForeignPlacementNotTrusted(t *testing.T) {
+	// No cache manager, so nothing repairs or replaces the forged object.
+	startManager(t, harnessOpts{localApplication: laSettings()})
+	ns := laNamespace(t, true)
+	k := localapp.Key{Namespace: ns, Pool: "spin-pool", Ref: laAppRef}
+	forged := localapp.Placement(localapp.Key{Namespace: ns, Pool: "spin-pool", Ref: "registry.example.com/someone/else@" + ccDigestA})
+	forged.Name = k.PlacementName()
+	forged.Annotations[localapp.AnnKey] = k.Hash()
+	mustCreate(t, forged)
+	eventually(t, "forged placement prepared", func() error {
+		var pl sandboxv1alpha1.SwiftArtifactPlacement
+		if err := testClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: forged.Name}, &pl); err != nil {
+			return err
+		}
+		pl.Status.ObservedGeneration = pl.Generation
+		pl.Status.TargetNodes, pl.Status.PreparedNodes = 1, 1
+		pl.Status.Conditions = []metav1.Condition{{Type: sandboxv1alpha1.PlacementConditionPrepared, Status: metav1.ConditionTrue,
+			Reason: "Prepared", ObservedGeneration: pl.Generation, LastTransitionTime: metav1.Now()}}
+		return testClient.Status().Update(context.Background(), &pl)
+	})
+	mustCreate(t, laExecutor(ns, true), laApp(ns, "hello", laAppRef))
+	expectCondition(t, ns, "hello", localapp.TypeLocalApplication, metav1.ConditionFalse, localapp.ReasonPlacementBlocked)
+	expectSandboxes(t, ns, "hello-0")
+	if n := len(getSandbox(t, ns, "hello-0").Spec.Artifacts); n != 0 {
+		t.Fatalf("a replica trusted a foreign placement: %d artifacts", n)
+	}
+}
