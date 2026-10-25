@@ -206,7 +206,7 @@ func Decide(in Input) (*Key, *Skip) {
 	}
 	host, err := registryHost(ref)
 	if err != nil || plaintextHost(host) {
-		return skip(ReasonRegistryNotEligible, "the registry of spec.image is one KubeSwift may contact over plain HTTP (localhost, .localhost, .local or a loopback or private IP address); such applications are pulled in the guest")
+		return skip(ReasonRegistryNotEligible, "the registry of spec.image is one KubeSwift may contact over plain HTTP (localhost, .localhost, or a loopback or private IP address); such applications are pulled in the guest")
 	}
 	if len(s.Registries) > 0 && !slices.Contains(s.Registries, host) {
 		return skip(ReasonRegistryNotEligible, "the registry of spec.image is not in the platform's list (chart value localApplication.registries)")
@@ -244,9 +244,10 @@ func registryHost(ref string) (string, error) {
 
 // plaintextHost reports whether go-containerregistry (KubeSwift's fetcher)
 // may use plain HTTP for a registry host, or the host is otherwise local:
-// localhost, names under .localhost or .local, and loopback, private,
-// link-local and unspecified IP literals. Stricter than
-// go-containerregistry's Registry.Scheme on purpose.
+// localhost, names under .localhost, and loopback, private, link-local and
+// unspecified IP literals. Names under .local (in-cluster registries such as
+// *.svc.cluster.local) are fetched over HTTPS and stay eligible; the
+// platform can restrict hosts with Settings.Registries.
 func plaintextHost(hostport string) bool {
 	host := hostport
 	if h, _, err := net.SplitHostPort(hostport); err == nil {
@@ -254,7 +255,7 @@ func plaintextHost(hostport string) bool {
 	}
 	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 	lower := strings.ToLower(host)
-	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") || strings.HasSuffix(lower, ".local") {
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
 		return true
 	}
 	if ip := net.ParseIP(host); ip != nil {

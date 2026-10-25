@@ -91,7 +91,7 @@ func TestDecideReasons(t *testing.T) {
 		}, ReasonImageNotPinned},
 		{"localhost", func(in *Input) { in.App.Spec.Image = "localhost:5000/a@" + digestA }, ReasonRegistryNotEligible},
 		{"private ip", func(in *Input) { in.App.Spec.Image = "10.1.2.3:5000/a@" + digestA }, ReasonRegistryNotEligible},
-		{".local", func(in *Input) { in.App.Spec.Image = "registry.lab.local/a@" + digestA }, ReasonRegistryNotEligible},
+		{".localhost", func(in *Input) { in.App.Spec.Image = "registry.dev.localhost/a@" + digestA }, ReasonRegistryNotEligible},
 		{"not listed", func(in *Input) { in.Settings.Registries = []string{"other.example.com"} }, ReasonRegistryNotEligible},
 		{"two pull secrets", func(in *Input) {
 			in.App.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: "a"}, {Name: "b"}}
@@ -128,7 +128,7 @@ func TestDecideNotRequested(t *testing.T) {
 func TestPlaintextHost(t *testing.T) {
 	for host, want := range map[string]bool{
 		"localhost": true, "localhost:5000": true, "reg.localhost": true, "reg.localhost:443": true,
-		"reg.local": true, "REG.LOCAL": true, "127.0.0.1:5000": true, "[::1]:5000": true, "10.0.0.1": true,
+		"reg.local": false, "e2e-registry.ns.svc.cluster.local:5000": false, "REG.LOCALHOST": true, "127.0.0.1:5000": true, "[::1]:5000": true, "10.0.0.1": true,
 		"172.16.4.5:443": true, "192.168.1.1": true, "169.254.1.1": true, "[fd00::1]:5000": true, "0.0.0.0": true,
 		"ghcr.io": false, "registry.example.com:5000": false, "8.8.8.8": false, "index.docker.io": false,
 		"registry.localdomain": false, "local.example.com": false,
