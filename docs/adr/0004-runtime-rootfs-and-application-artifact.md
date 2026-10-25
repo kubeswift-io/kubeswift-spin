@@ -1,6 +1,8 @@
 # 0004: One runtime rootfs image plus the unchanged Spin application artifact
 
-Status: accepted
+Status: accepted; amended by [ADR 0015](0015-local-application-delivery.md),
+which lets warm replicas start from a KubeSwift-mounted copy of the
+unchanged application artifact when the platform enables it.
 
 ## Context
 
