@@ -159,7 +159,7 @@ else
   docker logs kss-test-local >&2 || true
   fail "local application did not start"
 fi
-docker logs kss-test-local 2>&1 | grep -q "local application used from /opt/kubeswift-spin-app" \
+grep -q "local application used from /opt/kubeswift-spin-app" <<<"$(docker logs kss-test-local 2>&1)" \
   && ok "the entrypoint used the local application" || fail "no 'local application used' line"
 home_dir="$(sed -n 's/^[[:space:]]*BaseDir = "\(.*\)"$/\1/p' "$ROOT/internal/runtimecontract/contract.go")/home"
 if docker cp "kss-test-local:$home_dir/.docker/config.json" - >/dev/null 2>&1; then
@@ -167,7 +167,7 @@ if docker cp "kss-test-local:$home_dir/.docker/config.json" - >/dev/null 2>&1; t
 else
   ok "no registry credentials in Spin's home on the local path"
 fi
-docker logs kss-test-local 2>&1 | grep -q "ignoring SPIN_LOCKED_URL" \
+grep -q "ignoring SPIN_LOCKED_URL" <<<"$(docker logs kss-test-local 2>&1)" \
   && ok "an inherited SPIN_LOCKED_URL is dropped" || fail "inherited SPIN_LOCKED_URL not reported as ignored"
 uids="$(docker top kss-test-local -o uid,pid | tail -n +2 | awk '{print $1}' | sort -u | tr '\n' ' ')"
 [[ "$uids" == "65532 " ]] && ok "the local trigger runs as uid 65532" || fail "local trigger runs as uids [$uids]"
@@ -178,7 +178,7 @@ code="$(docker inspect -f '{{.State.ExitCode}}' kss-test-local)"
 # path, which cannot resolve the registry and fails.
 run_local kss-test-local-rw 3212 rw "registry.invalid/kss/hello-http@$app_digest"
 code="$(timeout 60 docker wait kss-test-local-rw 2>/dev/null || echo timeout)"
-docker logs kss-test-local-rw 2>&1 | grep -q "local application not used: the application mount is writable" \
+grep -q "local application not used: the application mount is writable" <<<"$(docker logs kss-test-local-rw 2>&1)" \
   && [[ "$code" != 0 && "$code" != timeout ]] \
   && ok "a writable application mount falls back to the registry path" || fail "writable mount: exit $code"
 

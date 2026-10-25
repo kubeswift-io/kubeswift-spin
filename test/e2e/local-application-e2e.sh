@@ -94,7 +94,9 @@ image_of() { awk -v n="$1" '$1 == n {print $2}' "$LA_IMAGES"; }
 # console prints the guest console of sandbox $1 (KubeSwift v0.20 console
 # container of its launcher pod; reading logs only).
 console() { $K logs "$(jp "swiftsandbox/$1" '{.status.podRef}')" -c console 2>/dev/null; }
-used_local() { console "$1" | grep -q "local application used from /opt/kubeswift-spin-app"; }
+# The console is read completely first: with pipefail, "console | grep -q"
+# fails when grep exits early and the reader gets SIGPIPE.
+used_local() { grep -q "local application used from /opt/kubeswift-spin-app" <<<"$(console "$1")"; }
 
 [[ -n "${E2E_CONTEXT:-}" ]] || die "set E2E_CONTEXT to the kubectl context of the test cluster"
 [[ "$(kubectl config current-context)" == "$E2E_CONTEXT" ]] || die "the current kubectl context is not E2E_CONTEXT ($E2E_CONTEXT)"
