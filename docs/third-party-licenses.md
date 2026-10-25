@@ -43,7 +43,7 @@ Kubernetes API.
 | Image | Contains | License |
 |---|---|---|
 | kubeswift-spin | controller binary on `gcr.io/distroless/static-debian12:nonroot` | Apache-2.0; distroless contents under their Debian package licenses |
-| kubeswift-spin-runtime | Spin v4.2.1 static binary | Apache-2.0 WITH LLVM-exception (license file at `/usr/share/doc/spin/LICENSE`) |
+| kubeswift-spin-runtime | Spin v4.2.5 static binary | Apache-2.0 WITH LLVM-exception (license file at `/usr/share/doc/spin/LICENSE`) |
 | | entrypoint binary | Apache-2.0 |
 | | `gcr.io/distroless/static-debian12:nonroot` base (CA certificates, tzdata, passwd) | Debian package licenses |
 

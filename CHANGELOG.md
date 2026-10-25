@@ -7,6 +7,24 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## Unreleased (v0.3.0)
+
+### Changed
+
+- The runtime image moves to Spin v4.2.5 (`spin-4.2.5-r1`), signed release
+  binaries verified with `hack/verify-spin-release.sh`. Spin 4.2.4 fixed a
+  crafted component id in an OCI application writing outside Spin's assets
+  directory. Spin 4.2.5 uses Wasmtime 50.0.0
+  (`runtimecontract.WasmtimeCacheVersion` is now `wasmtime-50.0.0`).
+
+### Upgrade notes
+
+- The default runtime image changes, so every replica of an executor that
+  uses it is replaced once after the controller upgrade (one at a time).
+- Compiled caches are rebuilt for the new runtime image (a new runtime
+  digest and Wasmtime version); until a new cache is ready, replicas start
+  without one, as on first use.
+
 ## v0.2.1 (2026-10-24)
 
 A hardening release for compiled caches: KubeSwift v0.19.3 becomes their

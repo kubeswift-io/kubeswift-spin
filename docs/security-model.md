@@ -218,7 +218,7 @@ application.
 
 - **Spin**: the static release binary is downloaded during the image build
   and verified against SHA-256 digests pinned in `runtime/Dockerfile`, taken
-  from the release's `checksums-v4.2.1.txt`. A replaced release asset fails
+  from the release's `checksums-v4.2.5.txt`. A replaced release asset fails
   the build. `hack/verify-spin-release.sh` additionally checks the pins
   against the published checksums and verifies the Sigstore signature of
   each binary against the identity of Spin's release workflow for the tag;

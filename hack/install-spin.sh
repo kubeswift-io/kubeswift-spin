@@ -7,10 +7,10 @@
 # (see docs/runtime-image.md, "Updating Spin").
 set -euo pipefail
 
-SPIN_VERSION="${SPIN_VERSION:-v4.2.1}"
+SPIN_VERSION="${SPIN_VERSION:-v4.2.5}"
 declare -A SHA256=(
-  [linux-amd64]=60cb9f78312acc577a1b839740dc932f2647f438461734bb96a1e374bcf6a3d1
-  [linux-aarch64]=199f55510c534cd71aaf589dcd010f19162614696830ddbdb938739c39d71b39
+  [linux-amd64]=8b26a8afd98874a0ce6c5c66ab9924ac2aba77de8abfd3f206dd37f313b58a56
+  [linux-aarch64]=74048700972619eed5282221f2967d0c593942a0a59287ef15c25213c32a2846
   [macos-amd64]=""
   [macos-aarch64]=""
 )

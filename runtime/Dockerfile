@@ -29,9 +29,9 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 # are pinned here, so a replaced release asset fails the build.
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS spin
 ARG TARGETARCH
-ARG SPIN_VERSION=v4.2.1
-ARG SPIN_SHA256_AMD64=7ba4da8dd39f35a3bcd461e75b29433d292eb997b0c10de6c53924fb73475ab9
-ARG SPIN_SHA256_ARM64=a1c0c3ac2227c0dc91a08c0696318081de6279e96bad397f050ab6459c85ee6f
+ARG SPIN_VERSION=v4.2.5
+ARG SPIN_SHA256_AMD64=204598dabf3addb3e4129964ce69a8f5cb8105e7e4f19e59c9c659d355a58647
+ARG SPIN_SHA256_ARM64=d71545c108a765098ad4228cdc5a7ee873ee9c8c529eef030c4688b063b10c6b
 RUN set -eu; \
     case "$TARGETARCH" in \
       amd64) arch=amd64; sum="$SPIN_SHA256_AMD64" ;; \
@@ -46,7 +46,7 @@ RUN set -eu; \
     chmod 0755 /out/spin
 
 FROM ${BASE_IMAGE}
-ARG SPIN_VERSION=v4.2.1
+ARG SPIN_VERSION=v4.2.5
 COPY --from=spin /out/spin /usr/local/bin/spin
 COPY --from=spin /out/LICENSE /usr/share/doc/spin/LICENSE
 COPY --from=entrypoint /out/kubeswift-spin-entrypoint /usr/local/bin/kubeswift-spin-entrypoint

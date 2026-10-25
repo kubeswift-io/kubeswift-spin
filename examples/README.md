@@ -25,7 +25,7 @@ SDK of the Spin 4.x `http-rust` template.
 ## Prerequisites
 
 - Rust via rustup (the toolchain file installs the right version and target)
-- The pinned Spin CLI: `make spin` installs Spin v4.2.1 into `bin/spin`
+- The pinned Spin CLI: `make spin` installs Spin v4.2.5 into `bin/spin`
 - Go, for the local test fixture in [tools/upstream](tools/upstream/)
 
 ## Build and test locally

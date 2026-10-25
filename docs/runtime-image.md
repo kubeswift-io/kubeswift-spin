@@ -7,7 +7,7 @@ every SpinApp: the application is not baked in, Spin pulls it at start.
 ## Versioning
 
 The runtime image is versioned independently of the controller. Its tag is
-in `runtime/VERSION` (currently `spin-4.2.1-r3`: the Spin version and a
+in `runtime/VERSION` (currently `spin-4.2.5-r1`: the Spin version and a
 revision for entrypoint or base image changes), and the chart's
 `runtimeImage.tag` must match it (`make helm-lint` checks this). The release
 workflow builds and pushes the runtime image only when that tag does not
@@ -19,7 +19,7 @@ upgrade leave running replicas alone.
 
 | Path | Origin |
 |---|---|
-| `/usr/local/bin/spin` | Spin v4.2.1, `spin-v4.2.1-static-linux-<arch>.tar.gz` from the GitHub release, SHA-256 verified |
+| `/usr/local/bin/spin` | Spin v4.2.5, `spin-v4.2.5-static-linux-<arch>.tar.gz` from the GitHub release, SHA-256 verified |
 | `/usr/local/bin/kubeswift-spin-entrypoint` | `cmd/spin-entrypoint`, static Go binary |
 | `/usr/share/doc/spin/LICENSE` | Spin license from the release archive |
 | `/var/lib/kubeswift-spin/` | empty, owned by 65532 |
@@ -166,7 +166,7 @@ checks:
 - the expected files exist and no shell, package manager, `curl` or `wget`
   is present; the image user is 65532; image metadata and history contain
   no credential-like values
-- `spin --version` reports v4.2.1
+- `spin --version` reports v4.2.5
 - the entrypoint rejects other commands and mismatched runtime-config input
 - hello-http is pulled from the registry and serves the expected response
 - every process in the container runs as UID 65532
