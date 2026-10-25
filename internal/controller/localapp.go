@@ -290,7 +290,9 @@ func (r *SpinAppReconciler) localHoldRecheck(key string) time.Duration {
 // localFailure reports why a replica that carried the local application
 // failed in a way the local application may have caused, or "": an
 // artifact failure in KubeSwift, or a failure before the replica was ever
-// seen ready (a lock Spin rejects after the entrypoint started it).
+// seen ready (a lock Spin rejects after the entrypoint started it). A
+// runtime image KubeSwift could not resolve, pull or verify (Image*) fails
+// the replica before the guest runs, whatever it carries.
 func (r *SpinAppReconciler) localFailure(sb *sandboxv1alpha1.SwiftSandbox) string {
 	carried := false
 	for _, a := range sb.Spec.Artifacts {
@@ -313,6 +315,8 @@ func (r *SpinAppReconciler) localFailure(sb *sandboxv1alpha1.SwiftSandbox) strin
 			return metrics.Reason(c.Reason)
 		case c.Reason == "KernelUnsupported" && strings.Contains(c.Message, "artifact"):
 			return metrics.Reason(c.Reason)
+		case strings.HasPrefix(c.Reason, "Image"):
+			return ""
 		}
 	}
 	if !r.everReady[sb.UID] {

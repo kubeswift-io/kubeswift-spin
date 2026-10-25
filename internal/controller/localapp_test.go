@@ -220,3 +220,36 @@ func TestLocalApplicationHoldAfterFailure(t *testing.T) {
 	// The hold ends by itself.
 	expectCondition(t, ns, "hello", localapp.TypeLocalApplication, metav1.ConditionTrue, localapp.ReasonAttached)
 }
+
+// A replica that carried the local application but failed for its runtime
+// image never ran the guest: no hold, replacements still carry it.
+func TestLocalApplicationNoHoldForRuntimeImage(t *testing.T) {
+	startManager(t, harnessOpts{localApplication: laSettings(), cacheManager: true, localHold: time.Hour})
+	ns := laNamespace(t, true)
+	mustCreate(t, laExecutor(ns, true), laApp(ns, "hello", laAppRef))
+	preparePlacement(t, ns)
+	expectCondition(t, ns, "hello", localapp.TypeLocalApplication, metav1.ConditionTrue, localapp.ReasonAttached)
+	updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) { a.Spec.Replicas = 2 })
+	expectSandboxes(t, ns, "hello-0", "hello-1")
+	carrier := getSandbox(t, ns, "hello-1")
+	if len(carrier.Spec.Artifacts) != 1 {
+		t.Fatalf("hello-1 carries no artifact")
+	}
+	setPhase(t, ns, "hello-1", sandboxv1alpha1.SwiftSandboxFailed, metav1.Condition{Type: sandboxv1alpha1.SwiftSandboxConditionGuestRunning,
+		Status: metav1.ConditionFalse, Reason: "ImageResolveFailed", Message: "pull failed"})
+	eventually(t, "a replacement with the artifact", func() error {
+		simulateGC(t, ns)
+		for _, sb := range listSandboxes(t, ns) {
+			if sb.Name == "hello-1" && sb.UID != carrier.UID && sb.DeletionTimestamp.IsZero() {
+				if len(sb.Spec.Artifacts) != 1 {
+					return fmt.Errorf("replacement carries no artifact")
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("no replacement yet")
+	})
+	if c := findCond(getApp(t, ns, "hello"), localapp.TypeLocalApplication); c == nil || c.Reason != localapp.ReasonAttached {
+		t.Fatalf("condition %+v", c)
+	}
+}
