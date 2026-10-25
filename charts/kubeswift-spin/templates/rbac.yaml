@@ -126,6 +126,7 @@ rules:
   - nonResourceURLs: ["/metrics"]
     verbs: ["get"]
 {{- end }}
+{{- if or .Values.compiledCache.enabled .Values.localApplication.enabled }}
 {{- if .Values.compiledCache.enabled }}
 ---
 # Compiled caches: the controller only reads SpinCompiledCache records, in
@@ -141,8 +142,10 @@ rules:
   - apiGroups: ["spin.kubeswift.io"]
     resources: ["spincompiledcaches"]
     verbs: ["get", "list", "watch"]
+{{- end }}
 ---
-# Namespaces opt in to compiled caches with an administrator-set label.
+# Namespaces opt in to compiled caches and local applications with
+# administrator-set labels.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -168,6 +171,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kubeswift-spin.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- if .Values.compiledCache.enabled }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -180,6 +184,37 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "kubeswift-spin.fullname" . }}-compiled-cache-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeswift-spin.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- if .Values.localApplication.enabled }}
+---
+# Local applications (ADR 0015): the controller only reads the application
+# placements the cache manager writes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-local-application-reader
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["sandbox.kubeswift.io"]
+    resources: ["swiftartifactplacements"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-local-application-reader
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubeswift-spin.fullname" . }}-local-application-reader
 subjects:
   - kind: ServiceAccount
     name: {{ include "kubeswift-spin.serviceAccountName" . }}

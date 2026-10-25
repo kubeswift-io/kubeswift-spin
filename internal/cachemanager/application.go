@@ -3,6 +3,7 @@ package cachemanager
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +24,7 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/compatibility"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/localapp"
+	"github.com/kubeswift-io/kubeswift-spin/internal/metrics"
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
 )
 
@@ -51,6 +53,11 @@ type ApplicationReconciler struct {
 	PlacementsServed bool
 	Recorder         events.EventRecorder
 	Now              func() time.Time
+
+	// states counts each namespace's placements by state, for the
+	// placements gauge.
+	statesMu sync.Mutex
+	states   map[string]map[string]int
 }
 
 // SetupWithManager registers the reconciler.
@@ -110,6 +117,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	sel := localapp.Select(wants, existing, now, r.Settings)
+	r.recordStates(ns, sel, owned)
 	for _, k := range sel.Keep {
 		if err := r.ensure(ctx, k, owned[k], byName[k.PlacementName()]); err != nil {
 			return ctrl.Result{}, err
@@ -134,6 +142,34 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		logger.V(1).Info("deleted application placement", "placement", pl.Name)
 	}
 	return ctrl.Result{RequeueAfter: applicationResync}, nil
+}
+
+// recordStates updates the placements gauge with one namespace's counts.
+func (r *ApplicationReconciler) recordStates(ns string, sel localapp.Selection, owned map[localapp.Key]*sandboxv1alpha1.SwiftArtifactPlacement) {
+	counts := map[string]int{}
+	for _, k := range sel.Keep {
+		if localapp.Prepared(owned[k], k) {
+			counts["prepared"]++
+		} else {
+			counts["preparing"]++
+		}
+	}
+	counts["retained"] = len(sel.Retain)
+	r.statesMu.Lock()
+	defer r.statesMu.Unlock()
+	if r.states == nil {
+		r.states = map[string]map[string]int{}
+	}
+	r.states[ns] = counts
+	totals := map[string]int{"prepared": 0, "preparing": 0, "retained": 0}
+	for _, c := range r.states {
+		for state, n := range c {
+			totals[state] += n
+		}
+	}
+	for state, n := range totals {
+		metrics.LocalApplicationPlacements.WithLabelValues(state).Set(float64(n))
+	}
 }
 
 // wants returns what the namespace's SpinApps ask for. A disabled feature

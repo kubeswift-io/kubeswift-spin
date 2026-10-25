@@ -27,6 +27,14 @@ With compiled caches enabled ([compiled-cache.md](compiled-cache.md#metrics)):
 | `kubeswift_spin_compiled_cache_compilations_total` | counter | `result`, `reason` | compiler sandboxes (cache manager) |
 | `kubeswift_spin_compiled_cache_signatures_total` | counter | `result` | signing attempts (cache signer) |
 
+With local applications enabled ([ADR 0015](adr/0015-local-application-delivery.md)):
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `kubeswift_spin_local_application_lookups_total` | counter | `result` (`attached`, `unplaced`, `cold`, `held`, `ineligible`) | replicas created for SpinApps that asked for a local application (controller) |
+| `kubeswift_spin_local_application_attachments_total` | counter | `result` (`mounted`, `skipped`), `reason` | what KubeSwift did with a replica's application artifact (controller) |
+| `kubeswift_spin_local_application_placements` | gauge | `state` (`prepared`, `preparing`, `retained`) | application placements the cache manager keeps (cache manager) |
+
 `reason` values are a fixed set of KubeSwift and kubeswift-spin reasons;
 anything else is counted as `Other`.
 

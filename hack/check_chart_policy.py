@@ -62,6 +62,11 @@ EXPECTED = {
         {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftartifactplacements"], "verbs": ["get", "list", "watch", "create", "update", "delete"]},
         {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "watch"]},
     ]),
+    # Local applications (ADR 0015): the controller only reads application
+    # placements.
+    "local-application-reader": norm([
+        {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftartifactplacements"], "verbs": ["get", "list", "watch"]},
+    ]),
     # The cache manager with only local applications enabled (ADR 0015): no
     # compiler sandboxes.
     "cache-manager-local": norm([
@@ -111,6 +116,7 @@ ALLOWED_COMPONENTS = {
     "cache-manager": {"cache-manager"},
     "cache-manager-records": {"cache-manager"},
     "cache-manager-local": {"cache-manager"},
+    "local-application-reader": {"controller"},
     "cache-manager-lease": {"cache-manager"},
     "cache-signer": {"cache-signer"},
     "cache-signer-records": {"cache-signer"},
@@ -122,6 +128,7 @@ EXPECTED_KIND = {"controller": "ClusterRole", "leader-election": "Role", "metric
                  "compiled-cache-reader": "Role", "compiled-cache-namespaces": "ClusterRole",
                  "cache-manager": "ClusterRole", "cache-manager-records": "Role",
                  "cache-manager-local": "ClusterRole", "cache-manager-lease": "Role",
+                 "local-application-reader": "ClusterRole",
                  "cache-signer": "ClusterRole", "cache-signer-records": "Role"}
 
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]

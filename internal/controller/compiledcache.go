@@ -50,6 +50,9 @@ type cacheView struct {
 	// preparedPools are the warm pools whose placement of the artifact is
 	// Prepared on every node.
 	preparedPools map[string]bool
+	// local is the SpinApp's local application (ADR 0015), carried along
+	// the same paths; nil leaves its condition as it is.
+	local *localView
 }
 
 // compiledCache decides the compiled cache of a SpinApp.

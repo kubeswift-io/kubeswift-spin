@@ -70,7 +70,7 @@ for example `kubeswift`, `kubeswift-open` and `kubeswift-warm`.
 | `spin.kubeswift.io/drain-period` | a duration with units from `0s` to `10m` (for example `30s`): how long a deleted replica keeps running after its readiness was withdrawn, before KubeSwift stops it (`spec.termination.drainPeriod`); the default for the executor's SpinApps, which a SpinApp's own annotation overrides; see [Drain period](#drain-period); needs KubeSwift v0.16.3 | unset (KubeSwift's default, 5 seconds for exposed sandboxes) |
 | `spin.kubeswift.io/max-drain-period` | a duration with units from `0s` to `10m`: the longest drain period the executor's SpinApps, and its own `drain-period`, may set | `10m` (KubeSwift's limit) |
 | `spin.kubeswift.io/compiled-cache` | `enabled`, `disabled`: new replicas of the executor's SpinApps mount a trusted, precompiled Wasmtime cache when one is ready, and start without it otherwise; the platform must enable the feature (chart value `compiledCache.enabled`); see [compiled-cache.md](compiled-cache.md) | `disabled` |
-| `spin.kubeswift.io/local-application` | `enabled`, `disabled`: new warm replicas of the executor's SpinApps start Spin from a verified copy of their own digest-pinned application artifact, mounted by KubeSwift, and from the registry otherwise; the platform and the namespace must enable the feature ([ADR 0015](adr/0015-local-application-delivery.md)). Accepted and validated; the controller does not act on it yet | `disabled` |
+| `spin.kubeswift.io/local-application` | `enabled`, `disabled`: new warm replicas of the executor's SpinApps start Spin from a verified copy of their own digest-pinned application artifact, mounted by KubeSwift, and from the registry otherwise; the platform and the namespace must enable the feature ([ADR 0015](adr/0015-local-application-delivery.md)) | `disabled` |
 
 Any other annotation with the `spin.kubeswift.io/` prefix makes the executor
 invalid, so a misspelled key is reported rather than ignored. Network mode
@@ -161,13 +161,17 @@ server would otherwise drop them silently. `ports`, `podMetadata` and the
 probes are set together, for every replica, whenever exposure is detected.
 
 `timeout` and `ttl` are never set: a Spin server runs until it is replaced.
-GPU fields, `scratchDisk` and `model` are never set. `artifacts` is set
-only for a signed compiled cache
-([compiled-cache.md](compiled-cache.md#replicas)): one optional entry,
-`wasmtime-cache`, outside the revision. The application itself is still
-pulled in the guest: Spin 4.2.1 can run an application only from a
-manifest, a `.wasm` file or a registry reference, not from a local OCI
-layout.
+GPU fields, `scratchDisk` and `model` are never set. `artifacts` holds at
+most two optional entries, both outside the revision: `wasmtime-cache`, a
+signed compiled cache ([compiled-cache.md](compiled-cache.md#replicas)),
+and `application`, the replica's own application artifact as a read-only
+OCI image layout for a warm replica of an eligible SpinApp
+([ADR 0015](adr/0015-local-application-delivery.md)): `ref` is
+`spec.image` without its tag, `layout: oci`, mount path
+`/opt/kubeswift-spin-app`, `fetchTimeout: 0s`, `pullSecretRef` the
+SpinApp's image pull Secret if it has one, no claims. Without it, or when
+the runtime cannot use it, Spin pulls the application in the guest as
+before.
 
 ### Probes
 
@@ -258,6 +262,7 @@ drops root (see [runtime-image.md](runtime-image.md)).
 | `KUBESWIFT_SPIN_RUNTIME_CONFIG_FILE` | `/run/kubeswift-spin/runtime-config.toml` when `runtimeConfig.loadFromSecret` is set |
 | `KUBESWIFT_SPIN_REGISTRY_AUTH_FILES` | comma-separated registry credential files from `imagePullSecrets` |
 | `KUBESWIFT_SPIN_CACHE_SOURCE`, `KUBESWIFT_SPIN_CACHE_RUNTIME`, `KUBESWIFT_SPIN_CACHE_ARCHITECTURE` | the identity a mounted compiled cache must have; set only with the `wasmtime-cache` artifact |
+| `KUBESWIFT_SPIN_APP_DIGEST` | the manifest digest the mounted application layout must have; set only with the `application` artifact |
 
 KubeSwift writes literal environment values in plain text into the
 sandbox's runtime-intent ConfigMap. A `valueFrom.secretKeyRef` stays a
@@ -819,6 +824,8 @@ v0.15.1 sandboxes have no probe, so `readyReplicas` stays 0.
 | Available | False | `NetworkUnavailable` | KubeSwift before v0.16.0 only: sandboxes run, but readiness cannot be verified and the app cannot be exposed |
 | Available | False | same as Progressing | nothing is running yet |
 | CompiledCache | True or False | see [compiled-cache.md](compiled-cache.md#what-a-spinapp-reports) | only for SpinApps whose executor enables compiled caches; it never affects `Available` or `Progressing` and is removed when the SpinApp no longer asks for a cache |
+| LocalApplication | True | `Attached` | new warm replicas carry the application artifact; whether Spin used it is in the replica's console |
+| LocalApplication | False | `NotConfigured`, `NamespaceNotEnabled`, `Unsupported`, `ImageNotPinned`, `RegistryNotEligible`, `PullSecrets`, `ComponentsSelected`, `RuntimeNotAllowed`, `NoWarmPool`, `Placing`, `PlacementFailed`, `PlacementLimit`, `PlacementBlocked`, `DeliveryFailed` | only for SpinApps whose executor enables local applications ([ADR 0015](adr/0015-local-application-delivery.md)); replicas start from the registry; it never affects `Available` or `Progressing` and is removed when the SpinApp no longer asks |
 
 Messages name fields, variables and objects, never values. A condition
 message lists at most five problems ("and N more problems"), echoes names
@@ -834,7 +841,10 @@ Events are recorded on the SpinApp with the `events.k8s.io/v1` API:
 `SandboxRejected`, `ExecutorChanged`, and for compiled caches
 `CompiledCacheRequested`, `CompiledCacheReady`, `CompiledCacheFailed`,
 `CompiledCacheSkipped` and `CompiledCachePlacementFailed` (once per change
-of the `CompiledCache` reason). Configuration Events fire once per
+of the `CompiledCache` reason), and for local applications
+`LocalApplicationReady`, `LocalApplicationSkipped` and
+`LocalApplicationFailed` (once per change of the `LocalApplication`
+reason). Configuration Events fire once per
 SpinApp generation, when a `spin.kubeswift.io/` annotation of the SpinApp
 changes, or when the message changes.
 

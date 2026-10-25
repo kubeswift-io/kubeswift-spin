@@ -198,17 +198,26 @@ func run(o options) error {
 			return fmt.Errorf("--compiled-cache-repository is set, but the SpinCompiledCache API (%s) is not installed; install the chart with compiledCache.enabled=true", capabilities.CompiledCaches.String())
 		}
 	}
+	placementsServed := false
+	if localSettings.Enabled {
+		if placementsServed, err = capabilities.Served(cs.Discovery(), capabilities.Placements); err != nil {
+			return fmt.Errorf("discover %s: %w", capabilities.Placements.String(), err)
+		}
+		if !placementsServed {
+			setupLog.Info("local applications are enabled, but the SwiftArtifactPlacement API is not installed (KubeSwift v0.19.3 or later); SpinApps start from the registry")
+		}
+	}
 	namespaces := splitList(o.watchNamespaces)
 	switch o.mode {
 	case modeController:
-		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, controllerBase(), controllerChecks(settings)); err != nil {
+		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, controllerBase(), controllerChecks(settings, localSettings.Enabled && placementsServed)); err != nil {
 			return err
 		}
 	case modeCacheManager:
 		if !settings.Configured() && !localSettings.Enabled {
 			return fmt.Errorf("--mode=%s needs compiled caches (--compiled-cache-repository and --compiled-cache-namespace) or --local-application", modeCacheManager)
 		}
-		placementsServed, err := capabilities.Served(cs.Discovery(), capabilities.Placements)
+		placementsServed, err = capabilities.Served(cs.Discovery(), capabilities.Placements)
 		if err != nil {
 			return fmt.Errorf("discover %s: %w", capabilities.Placements.String(), err)
 		}
@@ -249,6 +258,11 @@ func run(o options) error {
 		recordNS = settings.Namespace
 	}
 	cacheOpts := controller.CacheOptions(namespaces, recordNS)
+	if o.mode == modeController && localSettings.Enabled && placementsServed {
+		// The controller reads only application placements.
+		cacheOpts.ByObject[&sandboxapi.SwiftArtifactPlacement{}] = cache.ByObject{Label: labels.SelectorFromSet(labels.Set{
+			translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: localapp.ComponentPlacement})}
+	}
 	if o.mode == modeCacheManager {
 		// The cache manager only needs its compiler sandboxes, not the
 		// SpinApps' replicas.
@@ -345,6 +359,8 @@ func run(o options) error {
 			PoolsServed:          poolsServed,
 			CompiledCache:        settings,
 			CompiledCachesServed: cachesServed,
+			LocalApplication:     localSettings,
+			PlacementsServed:     placementsServed,
 			CacheDelivery:        delivery,
 		}
 		if err := r.SetupWithManager(ctx, mgr); err != nil {
@@ -556,16 +572,25 @@ func cacheManagerBase(compiler bool) []check {
 
 // controllerChecks are the controller's compiled-cache permissions: it only
 // reads records.
-func controllerChecks(s compiledcache.Settings) []namespacedCheck {
-	if !s.Configured() {
-		return nil
+func controllerChecks(s compiledcache.Settings, local bool) []namespacedCheck {
+	var out []namespacedCheck
+	if s.Configured() {
+		out = append(out,
+			namespacedCheck{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "", "list"}},
+			namespacedCheck{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "", "watch"}})
 	}
-	return []namespacedCheck{
-		{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "", "list"}},
-		{s.Namespace, check{"spin.kubeswift.io", "spincompiledcaches", "", "watch"}},
-		{"", check{"", "namespaces", "", "list"}},
-		{"", check{"", "namespaces", "", "watch"}},
+	if local {
+		// Application placements, read only (ADR 0015).
+		out = append(out,
+			namespacedCheck{"", check{"sandbox.kubeswift.io", "swiftartifactplacements", "", "list"}},
+			namespacedCheck{"", check{"sandbox.kubeswift.io", "swiftartifactplacements", "", "watch"}})
 	}
+	if s.Configured() || local {
+		out = append(out,
+			namespacedCheck{"", check{"", "namespaces", "", "list"}},
+			namespacedCheck{"", check{"", "namespaces", "", "watch"}})
+	}
+	return out
 }
 
 // cacheManagerChecks are the cache manager's permissions.
