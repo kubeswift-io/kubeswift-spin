@@ -16,8 +16,8 @@ SpinApp becomes `Available` the same way either way.
 
 Local applications are new in kubeswift-spin v0.3.0 (unreleased) and need
 KubeSwift v0.19.3 or later. The KVM e2e passed on the amd64 lab with
-KubeSwift v0.20.0 (see
-[test/e2e/README.md](../test/e2e/README.md#local-applications)). arm64
+KubeSwift v0.20.0, also with the v0.3.0-rc1 release artifacts (see
+[compatibility.md](compatibility.md#validation-of-v030-rc1)). arm64
 follows the same path but is untested.
 
 ## What changes for a replica
