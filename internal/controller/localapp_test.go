@@ -253,3 +253,99 @@ func TestLocalApplicationNoHoldForRuntimeImage(t *testing.T) {
 		t.Fatalf("condition %+v", c)
 	}
 }
+
+// A SpinApp that reported another False reason for a long time and then
+// starts waiting for its placement reports Placing, not PlacementBlocked:
+// the wait is measured from when the placement was first seen missing.
+func TestLocalApplicationPlacingAfterLongSkip(t *testing.T) {
+	// No cache manager: the placement never appears.
+	startManager(t, harnessOpts{localApplication: laSettings()})
+	ns := laNamespace(t, false)
+	mustCreate(t, laExecutor(ns, true), laApp(ns, "hello", laAppRef))
+	expectCondition(t, ns, "hello", localapp.TypeLocalApplication, metav1.ConditionFalse, localapp.ReasonNamespaceNotEnabled)
+	// Age the condition as if it had been there for a day.
+	eventually(t, "condition aged", func() error {
+		app := getApp(t, ns, "hello")
+		for i := range app.Status.Conditions {
+			if app.Status.Conditions[i].Type == localapp.TypeLocalApplication {
+				app.Status.Conditions[i].LastTransitionTime = metav1.NewTime(time.Now().Add(-24 * time.Hour))
+			}
+		}
+		return testClient.Status().Update(context.Background(), app)
+	})
+	patch := []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:%q}}}`, localapp.NamespaceLabel, localapp.NamespaceEnabled))
+	if err := testClient.Patch(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		t.Fatal(err)
+	}
+	expectCondition(t, ns, "hello", localapp.TypeLocalApplication, metav1.ConditionFalse, localapp.ReasonPlacing)
+	// Further reconciles within two minutes keep Placing.
+	for i := 0; i < 3; i++ {
+		updateApp(t, ns, "hello", func(a *spinv1alpha1.SpinApp) {
+			a.Annotations = map[string]string{"example.com/touch": fmt.Sprint(i)}
+		})
+		time.Sleep(time.Second)
+		if c := findCond(getApp(t, ns, "hello"), localapp.TypeLocalApplication); c == nil || c.Reason != localapp.ReasonPlacing {
+			t.Fatalf("reconcile %d: condition %+v", i, c)
+		}
+	}
+}
+
+// At the namespace limit, a SpinApp that starts wanting a placement later
+// does not displace a prepared one and reports PlacementLimit, even when it
+// is older.
+func TestLocalApplicationPlacementLimit(t *testing.T) {
+	s := laSettings()
+	s.MaxPlacements = 1
+	startManager(t, harnessOpts{localApplication: s, cacheManager: true})
+	ns := laNamespace(t, true)
+	old := laApp(ns, "old", "registry.example.com/apps/other@"+ccDigestB)
+	old.Annotations = map[string]string{executor.AnnLocalApplication: executor.LocalApplicationDisabled}
+	mustCreate(t, laExecutor(ns, true), old)
+	time.Sleep(1100 * time.Millisecond) // a later creation timestamp
+	mustCreate(t, laApp(ns, "hello", laAppRef))
+	preparePlacement(t, ns)
+	expectCondition(t, ns, "hello", localapp.TypeLocalApplication, metav1.ConditionTrue, localapp.ReasonAttached)
+	updateApp(t, ns, "old", func(a *spinv1alpha1.SpinApp) { a.Annotations = nil })
+	expectCondition(t, ns, "old", localapp.TypeLocalApplication, metav1.ConditionFalse, localapp.ReasonPlacementLimit)
+	var pls sandboxv1alpha1.SwiftArtifactPlacementList
+	if err := testClient.List(context.Background(), &pls, client.InNamespace(ns)); err != nil {
+		t.Fatal(err)
+	}
+	if len(pls.Items) != 1 || pls.Items[0].Name != (localapp.Key{Namespace: ns, Pool: "spin-pool", Ref: laAppRef}).PlacementName() {
+		t.Fatalf("placements %d", len(pls.Items))
+	}
+	if c := findCond(getApp(t, ns, "hello"), localapp.TypeLocalApplication); c == nil || c.Reason != localapp.ReasonAttached {
+		t.Fatalf("the prepared placement was displaced: %+v", c)
+	}
+}
+
+// A placement at the application placement's name that is for another
+// application (a forged or edited spec), even prepared, is never trusted:
+// PlacementBlocked, and new replicas carry no artifact.
+func TestLocalApplicationForeignPlacementNotTrusted(t *testing.T) {
+	// No cache manager, so nothing repairs or replaces the forged object.
+	startManager(t, harnessOpts{localApplication: laSettings()})
+	ns := laNamespace(t, true)
+	k := localapp.Key{Namespace: ns, Pool: "spin-pool", Ref: laAppRef}
+	forged := localapp.Placement(localapp.Key{Namespace: ns, Pool: "spin-pool", Ref: "registry.example.com/someone/else@" + ccDigestA})
+	forged.Name = k.PlacementName()
+	forged.Annotations[localapp.AnnKey] = k.Hash()
+	mustCreate(t, forged)
+	eventually(t, "forged placement prepared", func() error {
+		var pl sandboxv1alpha1.SwiftArtifactPlacement
+		if err := testClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: forged.Name}, &pl); err != nil {
+			return err
+		}
+		pl.Status.ObservedGeneration = pl.Generation
+		pl.Status.TargetNodes, pl.Status.PreparedNodes = 1, 1
+		pl.Status.Conditions = []metav1.Condition{{Type: sandboxv1alpha1.PlacementConditionPrepared, Status: metav1.ConditionTrue,
+			Reason: "Prepared", ObservedGeneration: pl.Generation, LastTransitionTime: metav1.Now()}}
+		return testClient.Status().Update(context.Background(), &pl)
+	})
+	mustCreate(t, laExecutor(ns, true), laApp(ns, "hello", laAppRef))
+	expectCondition(t, ns, "hello", localapp.TypeLocalApplication, metav1.ConditionFalse, localapp.ReasonPlacementBlocked)
+	expectSandboxes(t, ns, "hello-0")
+	if n := len(getSandbox(t, ns, "hello-0").Spec.Artifacts); n != 0 {
+		t.Fatalf("a replica trusted a foreign placement: %d artifacts", n)
+	}
+}

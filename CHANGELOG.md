@@ -9,6 +9,41 @@ running replicas on upgrade) say so under "Upgrade notes".
 
 ## Unreleased (v0.3.0)
 
+### Added
+
+- Local applications (ADR 0015, [docs/local-application.md](docs/local-application.md)),
+  off by default: new warm replicas of a digest-pinned SpinApp start Spin
+  from a verified copy of their own application artifact, which KubeSwift
+  placed on the pool's nodes, instead of pulling it from the registry in
+  the guest. Enabled by the chart value `localApplication.enabled` (which
+  requires `localApplication.nodeCacheBounded=true` and
+  `runtimeImage.digest`), the namespace label
+  `spin.kubeswift.io/local-application=enabled` and the executor annotation
+  `spin.kubeswift.io/local-application: enabled`; a SpinApp can opt out
+  with the same annotation set to `disabled`.
+  - Runtime image: the entrypoint verifies the mounted OCI layout from the
+    expected digest, copies what Spin needs into its tmpfs, writes the
+    locked application as `spin up` would and starts `spin trigger http`;
+    any failed check starts `spin up --from` unchanged
+    (`internal/spinlayout`). Without `KUBESWIFT_SPIN_APP_DIGEST` nothing
+    changes.
+  - The cache manager keeps one SwiftArtifactPlacement per namespace, pool,
+    image and pull Secret, with per-namespace and per-hour limits and a
+    retention period. It runs when compiled caches or local applications
+    are enabled; with only local applications its RBAC has no SwiftSandbox
+    or record access.
+  - The controller attaches the artifact to new warm replicas once their
+    placement is prepared, reports the `LocalApplication` condition and
+    Events, counts lookups and attachments, and holds the feature for a
+    SpinApp for 30 minutes after a replica that carried it failed (not for
+    runtime image failures). It reads application placements and
+    namespaces (new RBAC with the feature enabled). Replicas are never
+    replaced because the feature appears, changes or goes away.
+- `make spinlayout-golden`: compares the converter with the real
+  `spin up --from` of the pinned Spin, in CI.
+- The KVM e2e `test/e2e/local-application-e2e.sh`, and
+  `PERF_LOCAL_APPLICATION=1` for `hack/perf-startup.sh`.
+
 ### Changed
 
 - The runtime image moves to Spin v4.2.5 (`spin-4.2.5-r1`), signed release
@@ -16,37 +51,6 @@ running replicas on upgrade) say so under "Upgrade notes".
   crafted component id in an OCI application writing outside Spin's assets
   directory. Spin 4.2.5 uses Wasmtime 50.0.0
   (`runtimecontract.WasmtimeCacheVersion` is now `wasmtime-50.0.0`).
-
-### Added
-
-- Runtime image: the entrypoint can start Spin from a verified copy of the
-  application's own artifact mounted as a read-only OCI image layout
-  (ADR 0015, `internal/spinlayout`). It is inert until the controller
-  mounts an application, which a later change adds; without
-  `KUBESWIFT_SPIN_APP_DIGEST` nothing changes.
-- `make spinlayout-golden`: compares the converter with the real
-  `spin up --from` of the pinned Spin, in CI.
-- Executor annotation `spin.kubeswift.io/local-application` (`enabled`,
-  `disabled`) and the SpinApp opt-out with the same annotation, validated
-  but not yet acted on; `internal/localapp` holds the eligibility rules,
-  placement key and limits of ADR 0015.
-- The cache manager keeps the application placements of local applications
-  (chart values `localApplication.*`, which require
-  `localApplication.nodeCacheBounded=true` and `runtimeImage.digest`). It
-  runs when compiled caches or local applications are enabled; with only
-  local applications its RBAC has no SwiftSandbox or record access.
-- The controller attaches a SpinApp's own application artifact to new warm
-  replicas when the platform, namespace and executor enable local
-  applications, the image is pinned by digest and its pool's placement is
-  prepared (ADR 0015). It reports the `LocalApplication` condition and
-  Events, counts lookups and attachments, and holds the feature for a
-  SpinApp for 30 minutes after a replica that carried it failed. The
-  controller reads application placements and namespaces (new RBAC with
-  the feature enabled). Replicas are never replaced because the feature
-  appears, changes or goes away.
-
-### Changed (runtime image)
-
 - The entrypoint drops `SPIN_LOCKED_URL`, `SPIN_WORKING_DIR`,
   `SPIN_LOCAL_APP_DIR`, `SPIN_LOG_DIR`, `RUNTIME_CONFIG_FILE`,
   `SPIN_HTTP_LISTEN_ADDR`, `SPIN_TLS_CERT` and `SPIN_TLS_KEY` from the
@@ -60,6 +64,14 @@ running replicas on upgrade) say so under "Upgrade notes".
 - Compiled caches are rebuilt for the new runtime image (a new runtime
   digest and Wasmtime version); until a new cache is ready, replicas start
   without one, as on first use.
+- Local applications need KubeSwift v0.19.3 or later: upgrade KubeSwift
+  first.
+- Before rolling the controller back below v0.3.0, remove
+  `spin.kubeswift.io/local-application` from executors (older controllers
+  reject unknown executor annotations). After such a rollback, SpinApps
+  keep a stale `LocalApplication` condition, and application placements
+  stay until deleted
+  (`kubectl delete swiftartifactplacements -A -l spin.kubeswift.io/component=application-placement`).
 
 ## v0.2.1 (2026-10-24)
 

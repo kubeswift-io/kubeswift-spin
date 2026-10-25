@@ -9,7 +9,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,26 +31,22 @@ import (
 // ends and the hourly limit move with time, not with events.
 const applicationResync = 2 * time.Minute
 
-// Event reasons of the application placement reconciler (API).
-const (
-	EventApplicationPlacementConflict = "ApplicationPlacementConflict"
-	EventApplicationPlacementRejected = "ApplicationPlacementRejected"
-)
-
 // ApplicationReconciler keeps the SwiftArtifactPlacements that prepare
 // SpinApps' own application artifacts on their warm pools' nodes (ADR 0015).
 // One reconcile converges one namespace. It decides only with
 // localapp.Decide and localapp.Select, which the controller also uses, and
 // it never modifies a placement it does not own.
 type ApplicationReconciler struct {
-	Client   client.Client
-	Defaults executor.Defaults
-	Options  compatibility.Options
-	Settings localapp.Settings
-	Detector capabilities.SandboxDetector
+	Client client.Client
+	// APIReader reads uncached, to tell an object at a placement's name
+	// that the informer does not see (it lacks the labels) from cache lag.
+	APIReader client.Reader
+	Defaults  executor.Defaults
+	Options   compatibility.Options
+	Settings  localapp.Settings
+	Detector  capabilities.SandboxDetector
 	// PlacementsServed reports that the SwiftArtifactPlacement API exists.
 	PlacementsServed bool
-	Recorder         events.EventRecorder
 	Now              func() time.Time
 
 	// states counts each namespace's placements by state, for the
@@ -172,9 +167,10 @@ func (r *ApplicationReconciler) recordStates(ns string, sel localapp.Selection, 
 	}
 }
 
-// wants returns what the namespace's SpinApps ask for. A disabled feature
-// or namespace wants nothing, so its placements are retained and then
-// removed like any other unwanted placement.
+// wants returns what the namespace's SpinApps ask for. A namespace without
+// the label wants nothing, so its placements are retained and then removed
+// like any other unwanted placement. (The reconciler runs only with the
+// feature enabled; Settings.Enabled is checked for tests and safety.)
 func (r *ApplicationReconciler) wants(ctx context.Context, ns string) ([]localapp.Want, error) {
 	if !r.Settings.Enabled || !r.PlacementsServed {
 		return nil, nil
@@ -204,7 +200,7 @@ func (r *ApplicationReconciler) wants(ctx context.Context, ns string) ([]localap
 	var wants []localapp.Want
 	for i := range apps.Items {
 		app := &apps.Items[i]
-		if !app.DeletionTimestamp.IsZero() || app.Spec.Executor == "" || app.Spec.Replicas == 0 {
+		if !localapp.WantsPlacement(app) || app.Spec.Executor == "" {
 			continue
 		}
 		p, seen := profiles[app.Spec.Executor]
@@ -249,21 +245,31 @@ func (r *ApplicationReconciler) profile(ctx context.Context, ns, name string) (*
 }
 
 // ensure creates or repairs the placement of a wanted key. A foreign object
-// at the name is reported and left alone.
+// at the name is logged and left alone; the SpinApps that want the key
+// report PlacementBlocked (the cache manager has no Event access in tenant
+// namespaces).
 func (r *ApplicationReconciler) ensure(ctx context.Context, k localapp.Key, owned, atName *sandboxv1alpha1.SwiftArtifactPlacement) error {
 	want := localapp.Placement(k)
 	switch {
 	case owned == nil && atName != nil:
-		r.event(atName, corev1.EventTypeWarning, EventApplicationPlacementConflict,
-			"an object not owned by kubeswift-spin has the name of an application placement; it is not modified")
+		r.logConflict(ctx, want)
 		return nil
 	case owned == nil:
 		if err := r.Client.Create(ctx, want); err != nil {
 			if apierrors.IsAlreadyExists(err) {
-				return nil // the next reconcile sees it
+				// Cache lag after our own create, or an object the label
+				// filtered informer does not see.
+				if r.APIReader != nil {
+					var cur sandboxv1alpha1.SwiftArtifactPlacement
+					if gerr := r.APIReader.Get(ctx, client.ObjectKeyFromObject(want), &cur); gerr == nil && !localapp.Owned(&cur, k) {
+						r.logConflict(ctx, want)
+					}
+				}
+				return nil
 			}
 			if apierrors.IsForbidden(err) || apierrors.IsInvalid(err) {
-				log.FromContext(ctx).Error(err, "application placement rejected", "placement", want.Name)
+				log.FromContext(ctx).Error(err, "application placement refused by the API server (a quota or admission policy); the SpinApps that want it report PlacementBlocked",
+					"namespace", want.Namespace, "placement", want.Name)
 				return nil
 			}
 			return fmt.Errorf("create placement %s: %w", want.Name, err)
@@ -318,9 +324,7 @@ func keyOf(pl *sandboxv1alpha1.SwiftArtifactPlacement) (localapp.Key, bool) {
 	return k, true
 }
 
-func (r *ApplicationReconciler) event(obj *sandboxv1alpha1.SwiftArtifactPlacement, typ, reason, note string) {
-	if r.Recorder == nil {
-		return
-	}
-	r.Recorder.Eventf(obj, nil, typ, reason, "Reconcile", "%s", note)
+func (r *ApplicationReconciler) logConflict(ctx context.Context, want *sandboxv1alpha1.SwiftArtifactPlacement) {
+	log.FromContext(ctx).Info("an object kubeswift-spin does not own has the name of an application placement; it is not modified, and the SpinApps that want it report PlacementBlocked",
+		"namespace", want.Namespace, "placement", want.Name)
 }

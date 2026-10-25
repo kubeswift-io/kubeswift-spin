@@ -46,7 +46,7 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 | Wasm components | untrusted | Application code, possibly third-party or generated. |
 | Executor authors | trusted like SwiftSandbox creators | Whoever can create or update a SpinAppExecutor in a namespace decides, through the controller, the runtime image, node selector, kernel profile, network mode (`open` removes the cloud metadata block), egress allowlist and warm pool of every sandbox for that namespace. That is the power of creating SwiftSandboxes there. kubeswift-spin has no administrator policy that limits executor profiles; grant executor write access only to platform operators. |
 | SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to, and can make any Secret in that namespace available to their application (see [Secrets](#secrets)). Their `spec.podLabels` become launcher pod labels, so they can match pod-label based NetworkPolicy peers and Services in their namespace (see [Network isolation](#network-isolation)). |
-| Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest. |
+| Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest, or, for local applications, fetched by KubeSwift onto the pool's nodes and verified by the entrypoint from the digest. |
 | kubeswift-spin cache signer | trusted, holds the signing key | Only with compiled caches enabled. Its own ServiceAccount and image: gets compiler SwiftSandboxes, reads and patches the status of records in the release namespace. The signing key (or KMS access) and a registry credential that writes signatures are volumes of its pod; it has no Secret RBAC and never runs tenant code. It parses exported artifacts with size and entry limits. Prefer a KMS key, so a compromise of the pod does not reveal key material. An optional CA bundle (`compiledCache.signer.registryCABundle`) is an immutable ConfigMap volume trusted for all its TLS connections: who can replace ConfigMaps and the signer's Deployment in the release namespace controls its trust anchors, so limit that to the chart's operators. |
 | kubeswift-spin cache manager | trusted control plane component | Only with compiled caches or local applications enabled. Its own ServiceAccount: reads SpinApps, executors, pools and Namespaces. With compiled caches it writes `SpinCompiledCache` records in the release namespace and creates compiler SwiftSandboxes with SpinApps' pull Secrets, and SwiftArtifactPlacements that name the cache pull Secret, in any namespace, so, like the controller, treat its credentials like a cluster-wide Secret reader. With local applications it creates SwiftArtifactPlacements that name a SpinApp's own image pull Secret and reference, in that SpinApp's namespace ([ADR 0015](adr/0015-local-application-delivery.md)); with only local applications enabled it has no SwiftSandbox or record access. It changes or deletes only placements it owns: a record's labels and UID for compiled caches; the labels, the key annotation, the key's name and the key fields of the spec for local applications. See [compiled-cache.md](compiled-cache.md). |
 
@@ -352,11 +352,22 @@ against the runtime image's CA bundle. kubeswift-spin does not pass
 `--insecure`. It does not verify application artifact signatures and does
 not resolve tags to digests, so a mutable tag can change the code that runs
 on the next replacement. Use digest references (`registry/app@sha256:...`).
-KubeSwift v0.16.0 can mount OCI artifacts read-only (`spec.artifacts`), but
-kubeswift-spin does not use it: Spin 4.2.1 runs an application only from a
-manifest, a `.wasm` file or a registry reference, not from a local OCI
-layout
-([upstream/kubeswift-sandbox-artifact-projection.md](upstream/kubeswift-sandbox-artifact-projection.md)).
+
+With local applications enabled
+([local-application.md](local-application.md),
+[ADR 0015](adr/0015-local-application-delivery.md)), warm replicas of a
+digest-pinned SpinApp mount their own `spec.image` read-only through
+KubeSwift (`spec.artifacts`), and the entrypoint starts Spin from a copy of
+it. The integrity anchor is the digest, not the mount: the controller sets
+the expected digest from `spec.image`, and the entrypoint hashes the
+manifest, the locked application and every blob it uses against it before
+copying them into the guest's tmpfs. Content that does not match, a mount
+that is not read-only, or a path that leaves the mount falls back to
+`spin up --from`. KubeSwift resolves the artifact with the SpinApp's own
+pull Secret for each replica and binds a node's cached copy to the
+repository that served it, so a SpinApp cannot reach another tenant's
+application by naming its digest under a repository it can read. On the
+local path no registry credential is written into the guest's home.
 
 The runtime image itself can be verified by KubeSwift before boot when the
 executor names a cosign key Secret.
@@ -599,8 +610,9 @@ They never contain values of variables or runtime-config options.
 
 - Any SpinApp author in a namespace can expose that namespace's Secrets to
   their application; KubeSwift does not check the author's access.
-- Registry credentials and Secret-backed configuration are readable by the
-  Spin process in the guest for the lifetime of the sandbox. Rotated Secret
+- Registry credentials (on the registry path) and Secret-backed
+  configuration are readable by the Spin process in the guest for the
+  lifetime of the sandbox. Rotated Secret
   values take effect only when a replica is replaced.
 - Without `spin.kubeswift.io/ingress-from`, any cluster source can reach the
   Spin HTTP port. Ingress restriction depends on the CNI enforcing
@@ -674,3 +686,20 @@ Residual risks:
   the mounted code is the signed code is KubeSwift's: the entrypoint cannot
   verify a signature. A mount that is not read-only, or whose metadata
   names anything else, is not used.
+
+Residual risks of local applications:
+
+- KubeSwift's control plane fetches tenant-named artifacts onto every node
+  of a pool and contacts the registry hosts tenants name, including
+  in-cluster Service names, unless `localApplication.registries` restricts
+  them; a placement's reason tells the tenant whether a host answered like
+  a registry. The node artifact cache
+  bound and the placement limits cap the disk used, not the hosts
+  contacted.
+- After a pull Secret is removed or access is revoked, new replicas can
+  still mount the node's copy for up to KubeSwift's authorization TTL
+  (default 5 minutes).
+- The local path runs Spin's hidden `spin trigger http` subcommand. The
+  runtime pins the exact Spin build the converter was tested against, and
+  a golden test compares the converter's output with `spin up`'s for every
+  example.

@@ -108,9 +108,10 @@ warm-pool checkout (next list); the others still hold.
   ClusterIP or an IPv4 CIDR, optionally narrowed to ports;
   `169.254.0.0/16` stays blocked.
 - `spec.artifacts` mounts OCI artifacts read-only. kubeswift-spin uses it
-  only for a signed compiled cache (optional, platform-verified, with
-  claims); Spin 4.2.1 cannot run the application itself from a local OCI
-  layout. An optional artifact KubeSwift cannot deliver is skipped and
+  for a signed compiled cache (optional, platform-verified, with claims)
+  and, with local applications, for the replica's own application
+  artifact as an OCI layout, which the entrypoint converts for
+  `spin trigger http` ([local-application.md](local-application.md)). An optional artifact KubeSwift cannot deliver is skipped and
   never keeps the workload from starting or becoming ready (fixed in
   v0.19.2 for warm checkouts and unusable pull Secrets; v0.19.3 also uses
   a node's cached copy for a cold start).
@@ -255,10 +256,10 @@ which rules out network mode `none`, and registry credentials for a private
 registry must be inside the guest. kubeswift-spin delivers them from
 `imagePullSecrets` as KubeSwift secret files (KubeSwift v0.16.0; see
 [executor-contract.md](executor-contract.md#registry-credentials)).
-KubeSwift v0.16.0 can also mount OCI artifacts read-only, which would keep
-credentials on the host, but Spin 4.2.1 cannot run an application from a
-local OCI layout, so kubeswift-spin does not use it
-([kubeswift-sandbox-artifact-projection.md](upstream/kubeswift-sandbox-artifact-projection.md)).
+Local applications (v0.3.0, [local-application.md](local-application.md))
+use KubeSwift's read-only artifact mounts for warm replicas of eligible
+SpinApps; on that path no registry credential is written into the guest's
+home. Every other replica pulls in the guest as described.
 
 ## Runtime image
 

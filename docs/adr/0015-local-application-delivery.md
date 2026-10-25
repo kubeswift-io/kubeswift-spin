@@ -1,8 +1,8 @@
 # 0015: Run warm replicas from a KubeSwift-mounted copy of the application artifact
 
-Status: accepted for implementation in kubeswift-spin v0.3.0
+Status: accepted and implemented for kubeswift-spin v0.3.0 (unreleased)
 ([#56](https://github.com/kubeswift-io/kubeswift-spin/issues/56)) after two
-rounds of architecture and security review. Not implemented. It amends [ADR 0004](0004-runtime-rootfs-and-application-artifact.md),
+rounds of architecture and security review. It amends [ADR 0004](0004-runtime-rootfs-and-application-artifact.md),
 [executor-contract.md](../executor-contract.md) and
 [kubeswift-sandbox-artifact-projection.md](../upstream/kubeswift-sandbox-artifact-projection.md),
 which say the application is always pulled in the guest, and extends the
@@ -200,7 +200,8 @@ A new replica gets the artifact only when all of these hold; each rule has a
   `layout` and `pullSecretRef`, and the `swiftartifactplacements` resource
   exists (`Unsupported`). KubeSwift v0.19.3 or later is required and
   documented; the schema cannot show it (see Version detection);
-- the replica comes from a warm pool, `spec.poolRef` set (`NoWarmPool`);
+- the executor names a warm pool (`spin.kubeswift.io/sandbox-pool`,
+  `NoWarmPool`); a replica created without `spec.poolRef` gets no artifact;
 - `SpinApp.spec.image` matches `^[^@\s]+@sha256:[a-f0-9]{64}$` and is at
   most 512 bytes (`ImageNotPinned`). Resolving tags in the controller would
   need registry access with the tenant's credentials; it can be revisited if
@@ -208,11 +209,12 @@ A new replica gets the artifact only when all of these hold; each rule has a
 - the image's registry host, normalized as `compiledcache.PinnedReference`
   normalizes it (`docker.io` becomes `index.docker.io`), is one KubeSwift
   reaches over HTTPS only: not `localhost`, not a name under `.localhost`,
-  not a loopback or private-range IP literal (`RegistryNotEligible`).
-  Names under `.local`, such as in-cluster registries at
-  `*.svc.cluster.local`, are fetched over HTTPS and stay eligible; and, when the chart value
-  `localApplication.registries` lists hosts (compared after the same
-  normalization), it is one of them. The KubeSwift bump checklist rechecks
+  not a loopback, private-range, link-local or unspecified IP literal
+  (`RegistryNotEligible`); names under `.local`, such as in-cluster
+  registries at `*.svc.cluster.local`, are fetched over HTTPS and stay
+  eligible. When the chart value `localApplication.registries` lists hosts
+  (compared after the same normalization), it must be one of them. The
+  KubeSwift bump checklist rechecks
   go-containerregistry's `Registry.Scheme` against this classifier, and a
   unit test lists the hosts it must treat as plaintext;
 - the SpinApp has exactly one image pull Secret, or none while the executor
@@ -328,17 +330,26 @@ stay generic; nothing recreates VMs.
   deletes it after `localApplication.retention` (default 24 hours), so a
   rollback finds its placement prepared.
 - Limits: at most `localApplication.maxPlacementsPerNamespace` placements
-  per namespace (default 8), counting retained ones; at the limit, retained
-  placements are deleted first, and wanted placements are kept in a stable
-  order (oldest SpinApp creation, then name). At most
-  `localApplication.maxNewPerHour` (default 10) of the namespace's existing
-  application placements may have a `creationTimestamp` within the last
-  hour; a new one waits until that holds. SpinApps beyond either limit
-  report `PlacementLimit`. Both limits depend only on current objects, so
-  the controller computes them with the same `internal/localapp` function.
+  per namespace (default 8), counting retained ones. Wanted keys that
+  already have a placement are served first, then wanted keys without one,
+  each in a stable order (oldest SpinApp creation, then name), so a SpinApp
+  that starts wanting a placement never displaces a prepared one. A wanted
+  key beyond the limit (after the limit was lowered) loses its placement.
+  At the limit, retained placements are deleted first, except that a
+  placement created within the last hour is never deleted to make room: at
+  most `localApplication.maxNewPerHour` (default 10) of the namespace's
+  existing application placements may have a `creationTimestamp` within
+  the last hour, and keeping young placements makes that bound the number
+  created per hour (at most the smaller of the two limits). A new key waits
+  until both hold. SpinApps beyond either limit report `PlacementLimit`,
+  also when a placement for them still exists. Both limits depend only on
+  current objects, so the controller computes them with the same
+  `internal/localapp` function.
 - A placement the controller expects but that is missing for longer than
-  two minutes (a conflict, a quota or admission refusal) is
-  `PlacementBlocked`; the cache manager logs the cause and emits an Event.
+  two minutes, measured from when the controller first saw it missing (a
+  conflict, a quota or admission refusal), is `PlacementBlocked`, with a
+  Warning Event on the SpinApp; the cache manager logs the cause (it has no
+  Event access in tenant namespaces).
   No `LocalApplication` message copies KubeSwift or API message text.
 - The controller attaches the artifact only when the placement is
   prepared. A miss after that (an eviction, a new node) costs KubeSwift one
@@ -546,16 +557,16 @@ chart value is off), `NamespaceNotEnabled`, `Unsupported`, `ImageNotPinned`,
 `PlacementLimit`, `PlacementBlocked`, `DeliveryFailed`, `Attached`. Messages
 name fields and chart values, never values from Secrets, KubeSwift or the
 API server. Events `LocalApplicationReady`, `LocalApplicationSkipped` and
-`LocalApplicationFailed` fire once per reason change. This extends the
+`LocalApplicationFailed` fire once per reason change (`Placing` has no
+Event). This extends the
 status contract of ADR 0014; executor-contract.md is updated.
 
 Metrics with fixed label values only (no namespace, name, digest or
 registry): `kubeswift_spin_local_application_lookups_total{result}`
-(`attached`, `ineligible`, `unplaced`, `held`), counted per created replica;
+(`attached`, `ineligible`, `unplaced`, `cold`, `held`), counted per created replica;
 `..._attachments_total{result,reason}` from the replica's artifact status
 (`mounted`; `skipped` with KubeSwift's skip reasons mapped to a fixed set);
-`..._placements{state}` gauge (`prepared`, `preparing`, `failed`,
-`retained`). The runtime's decision is one console line; kubeswift-spin does
+`..._placements{state}` gauge (`prepared`, `preparing`, `retained`). The runtime's decision is one console line; kubeswift-spin does
 not read consoles.
 
 ### RBAC and processes
@@ -629,7 +640,8 @@ first, and the controller logs the assumption at startup, as in ADR 0014.
   under two repositories, one without access); a private registry behind a
   private CA, with credential removal and invalid credentials; an HTTP-only
   registry never used on the local path; the four combinations with the
-  compiled cache; unsupported applications falling back.
+  compiled cache (run by the performance validation, which records both
+  artifacts' state for every start); unsupported applications falling back.
 - Performance: at least 30 warm starts each for registry and local, with and
   without the compiled cache, compared structurally with the proof of
   concept; registry request counts at dispatch and at placement.

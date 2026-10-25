@@ -8,9 +8,10 @@ that ran; nothing else is implied.
 | Component | Version | How it was tested |
 |---|---|---|
 | kubeswift-spin | v0.2.1, v0.2.1-rc1, v0.2.0, v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); v0.2.0 differs from v0.2.0-rc1 only in documentation and version strings; v0.2.1-rc1 passed every KVM e2e phase and the compiled-cache e2e on KubeSwift v0.19.3 (see [Validation of v0.2.1-rc1](#validation-of-v021-rc1)), and v0.2.1 differs from it only in documentation, version strings and test scripts |
-| Spin | v4.2.5 | runtime image (`make runtime-test`), examples (`make example-test`); KVM e2e not yet run on v4.2.5 (v4.2.1: KVM e2e) |
+| Spin | v4.2.5 | runtime image (`make runtime-test`), examples (`make example-test`); the local-application KVM e2e with a development build of v0.3.0 on KubeSwift v0.20.0 (see [test/e2e/README.md](../test/e2e/README.md#local-applications)); the full KVM e2e not yet run on v4.2.5 (v4.2.1: KVM e2e) |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
+| KubeSwift | v0.20.0 | local applications: the local-application KVM e2e (seven examples, registry unreachable, repository binding, invalid credentials, fallbacks) with a development build of v0.3.0, the node artifact cache bounded and a registry behind a private CA |
 | KubeSwift | v0.19.3 | contract test of `internal/sandboxapi` against the v0.19.3 Go types and CRDs; v0.19.3 sandbox and placement CRDs in envtest. The required version for compiled caches from kubeswift-spin v0.2.1. With kubeswift-spin v0.2.1-rc1 on the lab cluster: every KVM e2e phase including the private registry, the compiled-cache e2e against a registry behind a private CA, and the startup benchmark (see [Validation of v0.2.1-rc1](#validation-of-v021-rc1)) |
 | KubeSwift | v0.19.1 | compiled caches: the compiled-cache end-to-end test (seven examples, trust boundaries, restarts, teardown) and the compiled-cache startup benchmark on the lab cluster with a development build of v0.2.0-rc1 (see [Compiled caches on KubeSwift v0.19.1](#compiled-caches-on-kubeswift-v0191)); the KVM e2e (all phases but 6) and the compiled-cache e2e with the v0.2.0-rc1 release artifacts (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); contract test of `internal/sandboxapi` against the v0.19.1 Go types and CRDs; v0.19.1 sandbox and placement CRDs in envtest, in kubeswift-spin v0.2.0. The required version for compiled caches in kubeswift-spin v0.2.0; v0.2.1 requires v0.19.3 |
 | KubeSwift | v0.16.4 | drain period: default, `0s`, `10s` and a request longer than the drain, through rolling updates, scale-down and a broken replacement under traffic, `ingress-from` through a 10-second drain, invalid values; warm-pool checkout and refill on the lab cluster (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); contract test of `internal/sandboxapi` against the v0.16.4 Go types and CRDs and v0.16.4 sandbox CRDs in envtest, in kubeswift-spin v0.1.1 (now v0.19.3). The recommended baseline without compiled caches |
@@ -431,7 +432,7 @@ Service selects would exceed the 63-character limit of a label name.
 
 ## SpinApp annotations
 
-kubeswift-spin reads two annotations on a SpinApp. An invalid value stops
+kubeswift-spin reads three annotations on a SpinApp. An invalid value stops
 reconciliation like an unsupported field (`UnsupportedConfiguration`). Any
 other annotation under `spin.kubeswift.io/` is reported in a Warning Event
 and otherwise ignored, so SpinApps that reconciled before keep doing so.
@@ -439,7 +440,7 @@ and otherwise ignored, so SpinApps that reconciled before keep doing so.
 | Annotation | Effect |
 |---|---|
 | `spin.kubeswift.io/compiled-cache` | `disabled` opts the SpinApp out of the compiled Wasmtime cache its executor enables. `enabled` changes nothing: a SpinApp can only opt out, and on an executor that does not enable compiled caches it gives a Warning Event. See [compiled-cache.md](compiled-cache.md). |
-| `spin.kubeswift.io/local-application` | `disabled` opts the SpinApp out of starting from a local copy of its application artifact, which its executor enables. `enabled` changes nothing: a SpinApp can only opt out, and on an executor that does not enable the feature it gives a Warning Event. See [ADR 0015](adr/0015-local-application-delivery.md); not available until the controller part of v0.3.0. |
+| `spin.kubeswift.io/local-application` | `disabled` opts the SpinApp out of starting from a local copy of its application artifact, which its executor enables. `enabled` changes nothing: a SpinApp can only opt out, and on an executor that does not enable the feature it gives a Warning Event. See [local-application.md](local-application.md). Since v0.3.0. |
 | `spin.kubeswift.io/drain-period` | The replicas' `spec.termination.drainPeriod`, overriding the executor's annotation of the same name; a duration with units from `0s` to the executor's `spin.kubeswift.io/max-drain-period` (default `10m`). Needs KubeSwift v0.16.3 or later. See [executor-contract.md](executor-contract.md#drain-period). |
 
 ## SpinAppExecutor field support

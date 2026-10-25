@@ -257,3 +257,87 @@ whose status it forged.
 Phase 2 scales the signer to zero while it runs and forges record status,
 and phase 5 stops the cache manager and forges a record's placements; run
 them only on a test cluster.
+
+## Local applications
+
+`local-application-e2e.sh` tests local applications
+([docs/local-application.md](../../docs/local-application.md)): warm
+replicas that start Spin from a KubeSwift-mounted, verified copy of their
+own application artifact.
+
+| Phase | Checks |
+|---|---|
+| 1 functional | hello-http, multi-component, request-info, outbound-http, key-value, serverless-ai and the MCP example on the warm pool `kss-la-e2e`: the SpinApp reports `LocalApplication=True/Attached` once its placement is prepared; its second replica carries the `application` artifact, KubeSwift mounts it (state `Mounted`), the guest console shows `local application used from /opt/kubeswift-spin-app`, and the application answers through its Service |
+| 2 offline | (private registry) with the application placed, the registry's Service is pointed at no pod; a fresh warm replica mounts the application, uses it and serves; the Service is restored |
+| 3 binding | (private registry) the same digest under another repository, without a pull Secret: the placement fails (`PlacementFailed`) and the replica carries no application, although the nodes hold the digest |
+| 4 credentials | (private registry) with the pull Secret replaced by an invalid credential, and then with the Secret removed, a new replica does not mount the application; the Secret is restored |
+| 5 fallback | a tag reference (`ImageNotPinned`) and a component selection (`ComponentsSelected`) become ready from the registry (the tag SpinApp's replica is checked to carry no application); a private-range IP registry, which KubeSwift would reach over plain HTTP, is `RegistryNotEligible` and never placed |
+
+Requirements, on top of the [KVM e2e requirements](#requirements):
+
+- KubeSwift v0.20.0 or later (the script reads the `console` container,
+  `sandboxMaterialize.console=true`, the default) with its node artifact
+  cache bounded (`sandboxMaterialize.artifactCache.maxBytes` or
+  `maxPercent`), and a SwiftKernel `sandbox` in the namespace at
+  `kernels/sandbox:6.6.18` or later (live warm-checkout console output)
+  with warm mounts;
+- kubeswift-spin installed with `localApplication.enabled=true`,
+  `localApplication.nodeCacheBounded=true` and `runtimeImage.digest` set,
+  and the namespace labelled `spin.kubeswift.io/local-application=enabled`;
+- the example artifacts pinned by digest in a file, plus hello-http by tag:
+
+```text
+hello-http ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http@sha256:...
+multi-component ghcr.io/kubeswift-io/kubeswift-spin-examples/multi-component@sha256:...
+request-info ghcr.io/kubeswift-io/kubeswift-spin-examples/request-info@sha256:...
+outbound-http ghcr.io/kubeswift-io/kubeswift-spin-examples/outbound-http@sha256:...
+key-value ghcr.io/kubeswift-io/kubeswift-spin-examples/key-value@sha256:...
+serverless-ai ghcr.io/kubeswift-io/kubeswift-spin-examples/serverless-ai@sha256:...
+mcp-tools ghcr.io/kubeswift-io/kubeswift-spin-examples/mcp-tools@sha256:...
+hello-http-tag ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http:<tag>
+```
+
+```bash
+E2E_CONTEXT=<test cluster context> LA_IMAGES=la-images.txt test/e2e/local-application-e2e.sh
+```
+
+`E2E_NAMESPACE` (default `kubeswift-spin-e2e`), `E2E_PHASES` (default
+`1 2 3 4 5`) and `TIMEOUT` (seconds per step, default 600) are optional.
+
+Without `LA_PRIVATE_REGISTRY_DIR`, phases 2 to 4 are skipped. For them,
+start a registry with [`private-registry.sh`](#a-registry-behind-a-private-ca):
+
+```bash
+E2E_CONTEXT=<test cluster context> PRIVATE_REGISTRY_DIR=/tmp/kss-private test/e2e/private-registry.sh up
+```
+
+Add its CA (`/tmp/kss-private/ca.crt`) to KubeSwift
+(`sandboxMaterialize.registryCABundle`). Copy hello-http into it twice,
+under different repositories:
+
+```bash
+E2E_CONTEXT=<test cluster context> PRIVATE_REGISTRY_DIR=/tmp/kss-private test/e2e/private-registry.sh copy ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http@sha256:<digest> apps/hello-http:e2e
+```
+
+```bash
+E2E_CONTEXT=<test cluster context> PRIVATE_REGISTRY_DIR=/tmp/kss-private test/e2e/private-registry.sh copy ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http@sha256:<digest> apps-b/hello-http:e2e
+```
+
+Build a runtime image that trusts the CA, and list the reference it prints
+in `localApplication.extraRuntimes`:
+
+```bash
+E2E_CONTEXT=<test cluster context> PRIVATE_REGISTRY_DIR=/tmp/kss-private test/e2e/private-registry.sh runtime <runtime image> kubeswift-spin-runtime:e2e
+```
+
+Add the two copies to the image file as `private-hello-http` and
+`private-hello-http-b`, and run:
+
+```bash
+E2E_CONTEXT=<test cluster context> LA_IMAGES=la-images.txt LA_PRIVATE_REGISTRY_DIR=/tmp/kss-private LA_RUNTIME_IMAGE=<runtime in the registry> test/e2e/local-application-e2e.sh
+```
+
+Phase 2 points the registry's Service at no pod while it runs, and phase 4
+replaces the pull Secret; the script restores both, also when it fails.
+It deletes its SpinApps, pool, executor and the pool's application
+placements afterwards unless `KEEP=1`.

@@ -58,6 +58,12 @@ relying on it in production.
   verified by KubeSwift and mounted read-only in warm-pool replicas, so
   Spin starts serving without compiling the application first
   ([compiled caches](docs/compiled-cache.md)).
+- Optional local applications (unreleased, v0.3.0; KubeSwift v0.19.3 or
+  later): warm
+  replicas start Spin from a verified copy of their own digest-pinned
+  application artifact that KubeSwift placed on the pool's nodes, instead
+  of pulling it from the registry on every start
+  ([local applications](docs/local-application.md)).
 
 ## How it works
 
@@ -206,8 +212,8 @@ and an experimental MCP server, are in [examples](examples/).
   of executors with a warm pool by default, and have been run on
   linux/amd64 only ([compiled caches](docs/compiled-cache.md#replicas)).
 - Any SpinApp author in a namespace can make that namespace's Secrets
-  readable by their application, and registry credentials and
-  Secret-backed values are readable by the Spin process in the guest; see
+  readable by their application, and registry credentials (except on the
+  local application path) and Secret-backed values are readable by the Spin process in the guest; see
   the [security model](docs/security-model.md).
 
 ## Documentation
@@ -223,7 +229,9 @@ and an experimental MCP server, are in [examples](examples/).
 - [Startup performance](docs/performance.md),
   [observability](docs/observability.md),
   [troubleshooting](docs/troubleshooting.md)
-- [Serverless AI](docs/serverless-ai.md)
+- [Serverless AI](docs/serverless-ai.md),
+  [compiled caches](docs/compiled-cache.md),
+  [local applications](docs/local-application.md)
 - [Releasing](docs/releasing.md): release process and artifact verification
 - [Upstream KubeSwift requirements](docs/upstream/README.md) and
   [architecture decisions](docs/adr/README.md)

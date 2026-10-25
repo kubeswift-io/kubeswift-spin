@@ -41,6 +41,9 @@
 #   PERF_COMPILED_CACHE=1  the executors enable compiled caches
 #                       (docs/compiled-cache.md); each result lists the
 #                       state KubeSwift reported for the cache artifact
+#   PERF_LOCAL_APPLICATION=1  the executors enable local applications
+#                       (ADR 0015); the platform and namespace must enable
+#                       them and PERF_APP_IMAGE must be pinned by digest
 #   PERF_KEEP=1         keep the objects afterwards
 set -euo pipefail
 
@@ -96,6 +99,7 @@ READINESS_STARTUP="${PERF_READINESS_STARTUP:-}"
 EXEC_EXTRA="    spin.kubeswift.io/runtime-image: $(sq "$RUNTIME_IMAGE")"
 [[ -n "$READINESS_STARTUP" ]] && EXEC_EXTRA+=$'\n'"    spin.kubeswift.io/readiness-startup: $READINESS_STARTUP"
 [[ "${PERF_COMPILED_CACHE:-}" == "1" ]] && EXEC_EXTRA+=$'\n'"    spin.kubeswift.io/compiled-cache: enabled"
+[[ "${PERF_LOCAL_APPLICATION:-}" == "1" ]] && EXEC_EXTRA+=$'\n'"    spin.kubeswift.io/local-application: enabled"
 
 if [[ -z "${PERF_IMAGE:-}" ]]; then
   [[ -n "${PERF_REGISTRY:-}" ]] || die "set PERF_IMAGE, or PERF_REGISTRY to build and push startupbench"
