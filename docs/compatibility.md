@@ -439,6 +439,7 @@ and otherwise ignored, so SpinApps that reconciled before keep doing so.
 | Annotation | Effect |
 |---|---|
 | `spin.kubeswift.io/compiled-cache` | `disabled` opts the SpinApp out of the compiled Wasmtime cache its executor enables. `enabled` changes nothing: a SpinApp can only opt out, and on an executor that does not enable compiled caches it gives a Warning Event. See [compiled-cache.md](compiled-cache.md). |
+| `spin.kubeswift.io/local-application` | `disabled` opts the SpinApp out of starting from a local copy of its application artifact, which its executor enables. `enabled` changes nothing: a SpinApp can only opt out, and on an executor that does not enable the feature it gives a Warning Event. See [ADR 0015](adr/0015-local-application-delivery.md); not available until the controller part of v0.3.0. |
 | `spin.kubeswift.io/drain-period` | The replicas' `spec.termination.drainPeriod`, overriding the executor's annotation of the same name; a duration with units from `0s` to the executor's `spin.kubeswift.io/max-drain-period` (default `10m`). Needs KubeSwift v0.16.3 or later. See [executor-contract.md](executor-contract.md#drain-period). |
 
 ## SpinAppExecutor field support
