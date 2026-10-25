@@ -20,6 +20,10 @@ the node the replica lands on holds it. In the kubeswift-spin benchmark
 of local applications (one-slot pool, 30 warm starts), one start in 30
 hit this window and started from the registry.
 
+The same rule means a pool with `minWarm: 0` never has a target node, so a
+placement for it never becomes `Prepared`, although its replicas boot cold
+on the nodes its node selector names.
+
 ## Proposal
 
 Keep the target node set stable across such moments: count the nodes of
