@@ -36,6 +36,7 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/compatibility"
 	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
+	"github.com/kubeswift-io/kubeswift-spin/internal/localapp"
 	"github.com/kubeswift-io/kubeswift-spin/internal/scheme"
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
 )
@@ -131,6 +132,10 @@ type harnessOpts struct {
 	// noColdCache keeps the platform default, which gives SpinApps without a
 	// warm pool no cache; otherwise cold replicas get one (3s timeout).
 	noColdCache bool
+	// localApplication configures local applications (ADR 0015); with
+	// cacheManager the application placement reconciler runs too.
+	localApplication localapp.Settings
+	localHold        time.Duration
 }
 
 func startManager(t *testing.T, o harnessOpts) *harness {
@@ -181,13 +186,17 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		CompiledCachesServed: o.compiledCache.Configured(),
 		CacheDelivery:        o.delivery,
 		CacheHoldPeriod:      o.cacheHold,
+
+		LocalApplication: o.localApplication,
+		PlacementsServed: true,
+		LocalHoldPeriod:  o.localHold,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := r.SetupWithManager(ctx, mgr); err != nil {
 		cancel()
 		t.Fatal(err)
 	}
-	if o.cacheManager {
+	if o.cacheManager && o.compiledCache.Configured() {
 		ns := &cachemanager.NamespaceReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Options: r.Options, Settings: o.compiledCache, Delivery: o.delivery,
 			Detector: o.detector, Retention: time.Hour}
 		rec := &cachemanager.RecordReconciler{Client: mgr.GetClient(), Settings: o.compiledCache, Delivery: o.delivery, Defaults: r.Defaults,
@@ -202,6 +211,14 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 			t.Fatal(err)
 		}
 		if err := rec.SetupWithManager(mgr); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+	}
+	if o.cacheManager && o.localApplication.Enabled {
+		app := &cachemanager.ApplicationReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Options: r.Options,
+			Settings: o.localApplication, Detector: o.detector, PlacementsServed: true}
+		if err := app.SetupWithManager(mgr); err != nil {
 			cancel()
 			t.Fatal(err)
 		}

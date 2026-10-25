@@ -505,7 +505,8 @@ image release, without a controller change.
 
 Fallbacks happen before Spin starts. A replica that carried the
 `application` artifact and failed without ever having been observed with
-KubeSwift's `WorkloadReady` condition `True`, or that
+KubeSwift's `WorkloadReady` condition `True` (other than for its runtime
+image, KubeSwift reasons `Image*`, which fail it before the guest runs), or that
 KubeSwift failed for an artifact reason (`Artifact*`, or `KernelUnsupported`
 naming artifacts), starts a hold: for 30 minutes, new replicas of that
 SpinApp get no `application` artifact (`LocalApplication=False/

@@ -35,6 +35,15 @@ running replicas on upgrade) say so under "Upgrade notes".
   `localApplication.nodeCacheBounded=true` and `runtimeImage.digest`). It
   runs when compiled caches or local applications are enabled; with only
   local applications its RBAC has no SwiftSandbox or record access.
+- The controller attaches a SpinApp's own application artifact to new warm
+  replicas when the platform, namespace and executor enable local
+  applications, the image is pinned by digest and its pool's placement is
+  prepared (ADR 0015). It reports the `LocalApplication` condition and
+  Events, counts lookups and attachments, and holds the feature for a
+  SpinApp for 30 minutes after a replica that carried it failed. The
+  controller reads application placements and namespaces (new RBAC with
+  the feature enabled). Replicas are never replaced because the feature
+  appears, changes or goes away.
 
 ### Changed (runtime image)
 

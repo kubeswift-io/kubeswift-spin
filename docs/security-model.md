@@ -628,11 +628,15 @@ See [SECURITY.md](../SECURITY.md).
 Compiled Wasmtime caches are native code mounted into replicas
 ([ADR 0014](adr/0014-compiled-wasmtime-cache.md)). The trust anchor is
 KubeSwift's platform verification of the signer's signature and claims, not
-the `SpinCompiledCache` record. With the feature enabled the chart adds:
+the `SpinCompiledCache` record. Local applications
+([ADR 0015](adr/0015-local-application-delivery.md)) mount a replica's own
+application artifact, verified from its digest. With either feature enabled
+the chart adds:
 
 | Identity | Resource | Verbs | Scope |
 |---|---|---|---|
-| controller | `spincompiledcaches` | get, list, watch | release namespace |
+| controller | `spincompiledcaches` (compiled caches only) | get, list, watch | release namespace |
+| controller | `swiftartifactplacements` (local applications only) | get, list, watch | cluster |
 | controller | `namespaces` | get, list, watch | cluster |
 | cache manager | `spinapps`, `spinappexecutors`, `swiftsandboxpools`, `namespaces` | get, list, watch | cluster |
 | cache manager | `swiftsandboxes` (compilers; compiled caches only) | get, list, watch, create, delete | cluster |

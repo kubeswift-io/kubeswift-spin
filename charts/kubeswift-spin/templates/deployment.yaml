@@ -52,6 +52,9 @@ spec:
             {{- include "kubeswift-spin.compiledCacheArgs" . | nindent 12 }}
             {{- include "kubeswift-spin.compiledCacheDeliveryArgs" . | nindent 12 }}
             {{- end }}
+            {{- if .Values.localApplication.enabled }}
+            {{- include "kubeswift-spin.localApplicationArgs" . | nindent 12 }}
+            {{- end }}
             {{- range .Values.controller.extraArgs }}
             - {{ . }}
             {{- end }}

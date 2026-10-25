@@ -41,6 +41,7 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/compatibility"
 	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
+	"github.com/kubeswift-io/kubeswift-spin/internal/localapp"
 	"github.com/kubeswift-io/kubeswift-spin/internal/metrics"
 	"github.com/kubeswift-io/kubeswift-spin/internal/rollout"
 	"github.com/kubeswift-io/kubeswift-spin/internal/status"
@@ -130,6 +131,18 @@ type SpinAppReconciler struct {
 	// CacheHoldPeriod overrides how long new replicas go without a
 	// compiled cache after one failed because of it (tests).
 	CacheHoldPeriod time.Duration
+
+	// LocalApplication are the platform's local application settings
+	// (ADR 0015); PlacementsServed is true when the SwiftArtifactPlacement
+	// API is installed.
+	LocalApplication localapp.Settings
+	PlacementsServed bool
+	// LocalHoldPeriod overrides how long new replicas start from the
+	// registry after one that carried the local application failed (tests).
+	LocalHoldPeriod time.Duration
+	localHolds      map[string]localHoldEntry
+	localCounted    map[types.UID]string
+	everReady       map[types.UID]bool
 }
 
 // SetupWithManager registers the controller, its watches and the field index.
@@ -173,9 +186,16 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	}
 	if r.CompiledCache.Configured() && r.CompiledCachesServed {
 		b = b.Watches(&cachev1alpha1.SpinCompiledCache{}, handler.EnqueueRequestsFromMapFunc(r.appsForRecord),
-			builder.WithPredicates(recordViewChanged)).
-			Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.appsForNamespace),
-				builder.WithPredicates(predicate.LabelChangedPredicate{}))
+			builder.WithPredicates(recordViewChanged))
+	}
+	localApps := r.LocalApplication.Enabled && r.PlacementsServed
+	if localApps {
+		b = b.Watches(&sandboxv1alpha1.SwiftArtifactPlacement{}, handler.EnqueueRequestsFromMapFunc(r.appsForPlacement))
+	}
+	if (r.CompiledCache.Configured() && r.CompiledCachesServed) || localApps {
+		// The namespace labels decide whether SpinApps get either feature.
+		b = b.Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.appsForNamespace),
+			builder.WithPredicates(predicate.LabelChangedPredicate{}))
 	}
 	return b.Complete(r)
 }
@@ -271,7 +291,11 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (re
 	// A replica that failed because of its compiled cache sets a hold now,
 	// so this reconcile already gives new replicas no cache.
 	r.countAttachments(key, owned)
+	r.countLocal(key, owned)
 	cacheRecheck = r.holdRecheck(key)
+	if lr := r.localHoldRecheck(key); lr > 0 && (cacheRecheck == 0 || lr < cacheRecheck) {
+		cacheRecheck = lr
+	}
 
 	var exec spinv1alpha1.SpinAppExecutor
 	var execErr error = apierrors.NewNotFound(spinv1alpha1.GroupVersion.WithResource("spinappexecutors").GroupResource(), app.Spec.Executor)
@@ -353,6 +377,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (re
 	}
 
 	cache := r.compiledCache(ctx, &app, profile, features)
+	cache.local = r.localApplication(ctx, &app, profile, features)
 
 	tmpl, err := translate.BuildTemplate(&app, profile, r.Options.Resources, features)
 	if err != nil {
@@ -406,6 +431,7 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (re
 			sb.Labels[translate.LabelSurge] = "true"
 		}
 		lookup := r.decorateCache(sb, cache)
+		localLookup := r.decorateLocal(sb, cache.local)
 		if err := controllerutil.SetControllerReference(&app, sb, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -486,6 +512,9 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (re
 		metrics.SandboxCreations.Inc()
 		if lookup != "" {
 			metrics.CompiledCacheLookups.WithLabelValues(lookup).Inc()
+		}
+		if localLookup != "" {
+			metrics.LocalApplicationLookups.WithLabelValues(localLookup).Inc()
 		}
 		logger.Info("created sandbox", "sandbox", sb.Name, "revision", tmpl.Revision)
 		r.event(&app, corev1.EventTypeNormal, EventSandboxCreated, "Create", "created sandbox %s at revision %s", sb.Name, tmpl.Revision)
@@ -793,6 +822,7 @@ func (r *SpinAppReconciler) finishWithInstances(ctx context.Context, app *spinv1
 	app.Status.ReadyReplicas = res.ReadyReplicas
 	status.Apply(&app.Status.Conditions, res)
 	r.applyCache(app, base.Status.Conditions, cache)
+	r.applyLocal(app, base.Status.Conditions, cache.local)
 
 	state := metrics.StateProgressing
 	switch {
@@ -865,6 +895,7 @@ func (r *SpinAppReconciler) forget(key string) {
 	delete(r.annSeen, key)
 	r.annMu.Unlock()
 	r.forgetAttachments(key)
+	r.forgetLocal(key)
 }
 
 // annotationsChanged records the SpinApp's spin.kubeswift.io/ annotations
