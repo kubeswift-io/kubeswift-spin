@@ -340,4 +340,19 @@ E2E_CONTEXT=<test cluster context> LA_IMAGES=la-images.txt LA_PRIVATE_REGISTRY_D
 Phase 2 points the registry's Service at no pod while it runs, and phase 4
 replaces the pull Secret; the script restores both, also when it fails.
 It deletes its SpinApps, pool, executor and the pool's application
-placements afterwards unless `KEEP=1`.
+placements afterwards unless `KEEP=1`; each test also deletes its pool's
+placements when it is done, because a placement younger than an hour
+counts against the namespace's placement limits.
+
+Lab result (2026-10-25, amd64 KVM lab, KubeSwift v0.20.0 with the node
+artifact cache bounded and the test registry's CA, SwiftKernel
+`kernels/sandbox:6.6.18`, Spin Operator v0.6.1, private mode): a
+development build of the v0.3.0 controller and runtime image (the code of
+this repository's `main` after the local application changes, with the
+converter fix of
+[kubeswift-io/kubeswift-spin#65](https://github.com/kubeswift-io/kubeswift-spin/pull/65))
+passed phases 1 to 3 in one run and phases 4 and 5 in a second run, after
+a fix to phase 4's ordering (the pool pulls its runtime image with the
+same pull Secret, so it is filled before the Secret is broken). An
+earlier development build passed all five phases in one run (92 checks).
+Not covered: arm64.

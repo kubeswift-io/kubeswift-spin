@@ -123,6 +123,22 @@ fi
 registry_scaled=""
 secret_broken=""
 
+# drop_placements deletes the test pool's application placements. Once
+# their SpinApps are gone they are retained, and a placement younger than an
+# hour counts against the namespace's placement limits (ADR 0015), so each
+# test removes its own.
+drop_placements() {
+  $K get swiftartifactplacement -l spin.kubeswift.io/component=application-placement \
+    -o jsonpath="{range .items[?(@.spec.poolRef.name==\"$POOL\")]}{.metadata.name}{'\\n'}{end}" 2>/dev/null \
+    | xargs -r $K delete swiftartifactplacement --ignore-not-found >/dev/null 2>&1 || true
+}
+# done_app deletes the SpinApps of a finished test and the test pool's
+# placements.
+done_app() {
+  $K delete spinapp "$@" --wait=true >/dev/null
+  drop_placements
+}
+
 cleanup() {
   if [[ -n "$registry_scaled" ]]; then
     $K patch svc e2e-registry --type merge -p '{"spec":{"selector":{"app":"e2e-registry"}}}' >/dev/null 2>&1 || true
@@ -133,11 +149,7 @@ cleanup() {
   fi
   [[ "${KEEP:-}" == "1" ]] && return 0
   $K delete spinapp -l app.kubernetes.io/created-by=kss-la-e2e --ignore-not-found --wait=true >/dev/null 2>&1 || true
-  # The application placements of the test pool, retained once their
-  # SpinApps are gone.
-  $K get swiftartifactplacement -l spin.kubeswift.io/component=application-placement \
-    -o jsonpath="{range .items[?(@.spec.poolRef.name==\"$POOL\")]}{.metadata.name}{'\\n'}{end}" 2>/dev/null \
-    | xargs -r $K delete swiftartifactplacement --ignore-not-found >/dev/null 2>&1 || true
+  drop_placements
   $K delete pod e2e-client upstream --ignore-not-found --wait=false >/dev/null 2>&1 || true
   $K delete svc upstream --ignore-not-found >/dev/null 2>&1 || true
   $K delete configmap upstream-src --ignore-not-found >/dev/null 2>&1 || true
@@ -268,20 +280,20 @@ if want 1; then
   log "phase 1: functional, every example from local content"
   local_replica la-hello "$(image_of hello-http)" </dev/null
   [[ "$(http http://la-hello/hello)" == "Hello from Spin on KubeSwift" ]] && ok "hello-http answers" || fail "hello-http"
-  $K delete spinapp la-hello --wait=false >/dev/null
+  done_app la-hello
 
   local_replica la-multi "$(image_of multi-component)" <<'YAML'
   variables: [{name: app_version, value: "2.0.0"}]
 YAML
   [[ "$(http 'http://la-multi/info/x?y=1')" == *'"app_version":"2.0.0"'* ]] && ok "multi-component answers with its variable" || fail "multi-component"
-  $K delete spinapp la-multi --wait=false >/dev/null
+  done_app la-multi
 
   local_replica la-info "$(image_of request-info)" <<'YAML'
   variables: [{name: app_version, value: "0.1.0"}, {name: greeting, value: hi}]
 YAML
   b="$(http -H 'x-request-id: req-42' 'http://la-info/info?x=1')"
   [[ "$b" == *'"query":"x=1"'* && "$b" == *'"greeting":"hi"'* ]] && ok "request-info answers" || fail "request-info: $b"
-  $K delete spinapp la-info --wait=false >/dev/null
+  done_app la-info
 
   local_replica la-outbound "$(image_of outbound-http)" <<YAML
   variables:
@@ -289,12 +301,12 @@ YAML
     - {name: target_origin, value: "http://upstream.$NS.svc.cluster.local:8090"}
 YAML
   [[ "$(http http://la-outbound/fetch)" == *'"ok":true'* ]] && ok "outbound-http reaches its allowed target" || fail "outbound-http"
-  $K delete spinapp la-outbound --wait=false >/dev/null
+  done_app la-outbound
 
   local_replica la-kv "$(image_of key-value)" </dev/null
   [[ "$($K exec e2e-client -- curl -s -o /dev/null -w '%{http_code}' -X PUT --data-binary v1 http://la-kv/kv/a)" == 204 && "$(http http://la-kv/kv/a)" == v1 ]] \
     && ok "key-value stores and reads" || fail "key-value"
-  $K delete spinapp la-kv --wait=false >/dev/null
+  done_app la-kv
 
   local_replica la-ai "$(image_of serverless-ai)" <<YAML
   variables: [{name: llm_model, value: default-model}]
@@ -309,12 +321,12 @@ YAML
 YAML
   [[ "$(http -X POST --data-binary 'hello from the e2e test' http://la-ai/ask)" == *'mock completion from model \"default-model\"'* ]] \
     && ok "serverless-ai answers with a Secret-backed token" || fail "serverless-ai"
-  $K delete spinapp la-ai --wait=false >/dev/null
+  done_app la-ai
 
   local_replica la-mcp "$(image_of mcp-tools)" </dev/null
   [[ "$(http http://la-mcp/mcp -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"word_count","arguments":{"text":"a b  c"}}}')" == *'"text":"3"'* ]] \
     && ok "mcp answers a tool call" || fail "mcp"
-  $K delete spinapp la-mcp --wait=false >/dev/null
+  done_app la-mcp
 fi
 
 if want 2; then
@@ -334,7 +346,7 @@ if want 2; then
   $K patch svc e2e-registry --type merge -p '{"spec":{"selector":{"app":"e2e-registry"}}}' >/dev/null
   registry_scaled=""
   until_true "registry reachable again" bash -c "$K exec e2e-client -- curl -sk --max-time 5 -o /dev/null https://e2e-registry:5000/v2/"
-  $K delete spinapp la-offline --wait=false >/dev/null
+  done_app la-offline
 fi
 
 if want 3; then
@@ -346,12 +358,15 @@ if want 3; then
   app la-binding "$(image_of private-hello-http-b)" 1 </dev/null
   until_true "la-binding: placement fails (PlacementFailed)" has_reason la-binding PlacementFailed
   carries la-binding-0 && fail "la-binding-0 carries the application" || ok "la-binding-0 carries no application"
-  $K delete spinapp la-binding --wait=false >/dev/null
+  done_app la-binding
 fi
 
 if want 4; then
   log "phase 4: credentials, an invalid pull Secret"
   local_replica la-creds "$(image_of private-hello-http)" pull </dev/null
+  # The pool pulls the runtime image with the same Secret, so it cannot
+  # refill once the Secret is broken: fill it for both replicas below now.
+  warm
   $K create secret docker-registry "$PULL" --docker-server="$(cat "$PRIV/host")" --docker-username=nobody \
     --docker-password="invalid-$RUN_ID" --dry-run=client -o yaml | $K apply -f - >/dev/null
   secret_broken=1
@@ -362,7 +377,6 @@ if want 4; then
     || fail "la-creds-2 mounted the application with invalid credentials"
   # The pull Secret removed: new replicas do not mount the application.
   $K delete secret "$PULL" >/dev/null
-  warm
   scale la-creds 4
   until_true "la-creds-3 created" bash -c "$K get swiftsandbox la-creds-3 >/dev/null"
   until_true "la-creds-3: the application decided" bash -c "[[ -n \"\$($K get swiftsandbox la-creds-3 -o jsonpath='{.status.artifacts[?(@.name==\"application\")].state}' 2>/dev/null)\" ]] || ! $K get swiftsandbox la-creds-3 -o jsonpath='{.spec.artifacts[*].name}' | grep -q application"
@@ -370,7 +384,7 @@ if want 4; then
     || fail "la-creds-3 mounted the application without its pull Secret"
   PRIVATE_REGISTRY_DIR="$PRIV" "$ROOT/test/e2e/private-registry.sh" secret "$NS" "$PULL" >/dev/null
   secret_broken=""
-  $K delete spinapp la-creds --wait=false >/dev/null
+  done_app la-creds
 fi
 
 if want 5; then
@@ -385,7 +399,7 @@ if want 5; then
 YAML
   until_true "la-comp: ComponentsSelected" has_reason la-comp ComponentsSelected
   until_true "la-comp: ready from the registry" ready_replicas la-comp 1
-  $K delete spinapp la-tag la-comp --wait=false >/dev/null
+  done_app la-tag la-comp
   # A registry KubeSwift would reach over plain HTTP (a private-range IP
   # literal) is never eligible; nothing listens there, so the replica only
   # has to be created.
@@ -396,7 +410,7 @@ YAML
   carries la-plain-0 && fail "la-plain-0 carries the application" || ok "la-plain-0 carries no application"
   [[ -z "$($K get swiftartifactplacement -o jsonpath='{range .items[*]}{.spec.artifacts[*].ref}{"\n"}{end}' | grep '^10\.255\.255\.1:')" ]] \
     && ok "no placement names the plain-HTTP registry" || fail "a placement names the plain-HTTP registry"
-  $K delete spinapp la-plain --wait=false >/dev/null
+  done_app la-plain
 fi
 
 [[ $FAILED -eq 0 ]] && log "local application e2e: all checks passed" || { log "local application e2e: FAILED"; exit 1; }

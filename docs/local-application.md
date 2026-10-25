@@ -280,8 +280,17 @@ is created; otherwise it starts from the registry.
 
 ## Limits of this revision
 
-- Only warm replicas. A pool replica that boots cold because no slot is
-  free keeps the artifact and uses it when its node holds it.
+- Only warm replicas gain. A pool replica that boots cold because no slot
+  is free keeps the artifact and uses it when its node holds it, but the
+  cold boot dominates: on the amd64 lab (hello-http, a one-slot pool, 2026-10-25),
+  replicas that booted cold were ready 12 to 14 seconds after creation from
+  the registry and 11 to 16 seconds with the local application (six each,
+  measured from KubeSwift's `WorkloadReady` condition, one-second
+  resolution), against 1 to 2 seconds for the checked-out replicas.
+- A pool with `minWarm: 0` gets no local application: KubeSwift prepares a
+  placement only on nodes that run one of the pool's pods, so the
+  placement stays `NoTargetNodes` and its SpinApps report `Placing`
+  ([upstream/kubeswift-placement-target-nodes.md](upstream/kubeswift-placement-target-nodes.md)).
 - The local path starts Spin's hidden `spin trigger http` subcommand, which
   has no documented stability. kubeswift-spin pins the exact Spin build the
   converter supports. A supported way to run a pre-resolved application is

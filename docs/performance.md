@@ -62,6 +62,9 @@ Spin's own tracing; that build is not part of the repository.
 
 ## Current results
 
+Local applications (v0.3.0, unreleased) on KubeSwift v0.20.0, with and
+without the compiled cache:
+[Local applications (KubeSwift v0.20.0)](#local-applications-kubeswift-v0200-2026-10-25).
 The v0.2.1 release-time comparison and its compiled-cache measurements on
 KubeSwift v0.19.3 are in
 [Compiled Wasmtime cache (KubeSwift v0.19.3)](#compiled-wasmtime-cache-kubeswift-v0193-2026-10-24).
@@ -373,6 +376,73 @@ and `always` (the latter on the `/healthz` check):
 With `never`, a fast replica was ready 0.46 seconds after it first
 answered, at its periodic probe. No replica received Service traffic
 before its endpoint was ready.
+
+## Local applications (KubeSwift v0.20.0, 2026-10-25)
+
+Local applications ([local-application.md](local-application.md)) start
+warm replicas from a copy of their own application artifact that KubeSwift
+placed on the pool's nodes, instead of Spin pulling it in the guest.
+Setup: hello-http (its v0.2.1 artifact, copied into a lab registry next to
+the cluster; the shipped manifest's readiness check), 30 warm starts per
+case on one node with `hack/perf-startup.sh` (`PERF_LAUNCHER_LOGS=1`; a
+development build of v0.3.0, Spin 4.2.5) on KubeSwift v0.20.0. For B and
+D, an extra SpinApp with the same image kept the application placement
+wanted between runs; for C and D it kept the compiled cache placed.
+
+- A: registry, no compiled cache;
+- B: local application (`PERF_LOCAL_APPLICATION=1`); all 30 replicas
+  mounted the application (`Mounted/Cached`);
+- C: registry with the compiled cache (`PERF_COMPILED_CACHE=1`); all 30
+  mounted the cache;
+- D: local application and compiled cache; 29 of 30 replicas mounted both.
+  For the other, the placement reported `NoTargetNodes` for a moment
+  (KubeSwift counts the nodes that run a pool pod, and the one-slot pool
+  had none between a checkout and its refill), so the controller gave that
+  replica no application and it started from the registry with the cache.
+
+| Milliseconds, p50 / p95 | A | B | C | D |
+|---|---:|---:|---:|---:|
+| SpinApp create to slot claim | 77 / 102 | 82 / 126 | 89 / 119 | 94 / 156 |
+| claim to artifact decision | | 18 / 42 | 25 / 45 | 25 / 37 |
+| dispatch to first direct response | 751 / 1337 | 514 / 549 | 467 / 1093 | 113 / 172 |
+| create to first direct response | 811 / 1415 | 587 / 642 | 541 / 1166 | 184 / 297 |
+| create to `Available` | 1149 / 3155 | 1155 / 1197 | 1157 / 3135 | 1164 / 1219 |
+| create to first Service response | 2541 / 3308 | 2390 / 2560 | 2539 / 3299 | 2547 / 2567 |
+
+Without a registry fetch in the guest, the tail goes: B's and D's p95 from
+dispatch to first direct response are within 60 ms of their p50, against
+about 600 ms in A and C. The local application saves 237 ms at p50 on its
+own (A to B) and 354 ms with the compiled cache (C to D); D is 85% faster
+than A at p50. `Available` and Service traffic follow the readiness
+check's schedule (`initialDelaySeconds: 1`, `periodSeconds: 2`) and the
+Service path, so they move only in their tails. The proof of concept for
+ADR 0015 measured 774 / 1319 (A), 521 / 565 (B), 511 / 1027 (C) and
+126 / 184 (D) on the same path.
+
+Registry requests for the application's repository during the 30 starts
+(registry access log; HTTP status 200 throughout):
+
+| Case | Spin in the guest | KubeSwift |
+|---|---|---|
+| A | 30 manifest, 90 blob | none |
+| B | none | 6 manifest |
+| C | 30 manifest, 90 blob | 7 manifest |
+| D | 1 manifest, 3 blob (the start above) | 6 manifest |
+
+KubeSwift's requests are its resolves of the application's digest with the
+replica's credentials, at most once per authorization TTL (5 minutes);
+the blobs were fetched once, when the placement was prepared (setting up
+B: 1 manifest and 3 blob requests by Spin for the first replica, which
+started before the placement was prepared, and 1 manifest by KubeSwift).
+
+Not measured: the phases inside the guest (entrypoint start, verification
+and copy, Spin's application load) are not visible without a diagnostic
+runtime image. Cold starts are covered in
+[local-application.md](local-application.md#limits-of-this-revision).
+
+Results:
+[performance-results/2026-10-25-local-application](performance-results/2026-10-25-local-application/)
+(`a-registry`, `b-local`, `c-cache`, `d-local-cache`).
 
 ## Compiled Wasmtime cache (KubeSwift v0.19.3, 2026-10-24)
 

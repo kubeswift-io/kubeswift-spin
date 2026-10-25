@@ -1,0 +1,20 @@
+date: 2026-10-25T09:26:43Z
+commit: 9b39c76 (feat/56-controller-localapp) with the PERF_LOCAL_APPLICATION change to hack/perf-startup.sh later committed as a84c734; kubeswift-spin controller and cache manager: a development build of that commit
+node: miles
+kubelet: v1.34.3+k0s
+kernel: 6.8.0-137-generic
+os: Ubuntu 24.04.4 LTS
+runtime: containerd://1.7.30
+cpu: 8
+memory: 65616956Ki
+controller images:
+  kubeswift-system/controller-manager ghcr.io/kubeswift-io/kubeswift/controller-manager:v0.20.0
+  spin-operator/spin-operator-controller-manager ghcr.io/spinframework/spin-operator:v0.6.1
+runtime image: a development build of the v0.3.0 runtime (Spin 4.2.5), held in a lab registry
+readiness startup: auto (default)
+probe interval: 50ms
+startupbench image: built from test/perf/startupbench, held in a lab registry
+manifest: examples/hello-http/spinapp.yaml (sha256 5f4a4907f313ed74d1241b2f5c93a31c0a9ac927d7c38390a7be94d4369a4b22)
+app image override: the hello-http v0.2.1 artifact (sha256:84cab114bfbb387e55c0e2dc0ea6d60cd926ab88757429976ce8963a0cd30b2e) copied into a lab registry next to the cluster
+runs per mode: 30; modes: warm; pool: 1 vCPU, 256Mi
+launcher logs: 1
