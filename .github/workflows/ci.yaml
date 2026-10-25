@@ -97,6 +97,9 @@ jobs:
       # pinned toolchain and the wasm32-wasip2 target.
       - name: Build and test examples
         run: make example-test
+      # Needs the examples built by the step above (ADR 0015).
+      - name: Local application converter against spin up
+        run: make spinlayout-golden
 
   runtime-image:
     name: Runtime image

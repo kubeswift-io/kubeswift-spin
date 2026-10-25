@@ -193,6 +193,10 @@ examples: spin ## Build every example Spin application.
 example-test: spin ## Run every example locally under spin up and check its behavior.
 	hack/test-examples.sh
 
+.PHONY: spinlayout-golden
+spinlayout-golden: spin ## Compare the local application converter with the pinned spin up (examples must be built).
+	KSS_GOLDEN_SPIN=$(abspath $(SPIN)) go test -count=1 -run TestGoldenAgainstSpin ./internal/spinlayout/
+
 .PHONY: example-build
 example-build: spin ## Build one example: make example-build EXAMPLE=hello-http
 	'$(SPIN)' build -f 'examples/$(EXAMPLE)/spin.toml'
