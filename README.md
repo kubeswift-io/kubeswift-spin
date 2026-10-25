@@ -58,6 +58,11 @@ relying on it in production.
   verified by KubeSwift and mounted read-only in warm-pool replicas, so
   Spin starts serving without compiling the application first
   ([compiled caches](docs/compiled-cache.md)).
+- Optional local applications (v0.3.0, KubeSwift v0.19.3 or later): warm
+  replicas start Spin from a verified copy of their own digest-pinned
+  application artifact that KubeSwift placed on the pool's nodes, instead
+  of pulling it from the registry on every start
+  ([local applications](docs/local-application.md)).
 
 ## How it works
 

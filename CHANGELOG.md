@@ -43,7 +43,11 @@ running replicas on upgrade) say so under "Upgrade notes".
   SpinApp for 30 minutes after a replica that carried it failed. The
   controller reads application placements and namespaces (new RBAC with
   the feature enabled). Replicas are never replaced because the feature
-  appears, changes or goes away.
+  appears, changes or goes away. A replica that failed for its runtime
+  image (KubeSwift reasons `Image*`) does not start the hold.
+- Operator guide [docs/local-application.md](docs/local-application.md),
+  the KVM e2e `test/e2e/local-application-e2e.sh`, and
+  `PERF_LOCAL_APPLICATION=1` for `hack/perf-startup.sh`.
 
 ### Changed (runtime image)
 

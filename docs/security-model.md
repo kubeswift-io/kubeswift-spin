@@ -352,11 +352,22 @@ against the runtime image's CA bundle. kubeswift-spin does not pass
 `--insecure`. It does not verify application artifact signatures and does
 not resolve tags to digests, so a mutable tag can change the code that runs
 on the next replacement. Use digest references (`registry/app@sha256:...`).
-KubeSwift v0.16.0 can mount OCI artifacts read-only (`spec.artifacts`), but
-kubeswift-spin does not use it: Spin 4.2.1 runs an application only from a
-manifest, a `.wasm` file or a registry reference, not from a local OCI
-layout
-([upstream/kubeswift-sandbox-artifact-projection.md](upstream/kubeswift-sandbox-artifact-projection.md)).
+
+With local applications enabled
+([local-application.md](local-application.md),
+[ADR 0015](adr/0015-local-application-delivery.md)), warm replicas of a
+digest-pinned SpinApp mount their own `spec.image` read-only through
+KubeSwift (`spec.artifacts`), and the entrypoint starts Spin from a copy of
+it. The integrity anchor is the digest, not the mount: the controller sets
+the expected digest from `spec.image`, and the entrypoint hashes the
+manifest, the locked application and every blob it uses against it before
+copying them into the guest's tmpfs. Content that does not match, a mount
+that is not read-only, or a path that leaves the mount falls back to
+`spin up --from`. KubeSwift resolves the artifact with the SpinApp's own
+pull Secret for each replica and binds a node's cached copy to the
+repository that served it, so a SpinApp cannot reach another tenant's
+application by naming its digest under a repository it can read. On the
+local path no registry credential is written into the guest's home.
 
 The runtime image itself can be verified by KubeSwift before boot when the
 executor names a cosign key Secret.
@@ -599,8 +610,9 @@ They never contain values of variables or runtime-config options.
 
 - Any SpinApp author in a namespace can expose that namespace's Secrets to
   their application; KubeSwift does not check the author's access.
-- Registry credentials and Secret-backed configuration are readable by the
-  Spin process in the guest for the lifetime of the sandbox. Rotated Secret
+- Registry credentials (on the registry path) and Secret-backed
+  configuration are readable by the Spin process in the guest for the
+  lifetime of the sandbox. Rotated Secret
   values take effect only when a replica is replaced.
 - Without `spin.kubeswift.io/ingress-from`, any cluster source can reach the
   Spin HTTP port. Ingress restriction depends on the CNI enforcing
@@ -674,3 +686,18 @@ Residual risks:
   the mounted code is the signed code is KubeSwift's: the entrypoint cannot
   verify a signature. A mount that is not read-only, or whose metadata
   names anything else, is not used.
+
+Residual risks of local applications:
+
+- KubeSwift's control plane fetches tenant-named artifacts onto every node
+  of a pool and contacts the registry hosts tenants name, unless
+  `localApplication.registries` restricts them. The node artifact cache
+  bound and the placement limits cap the disk used, not the hosts
+  contacted.
+- After a pull Secret is removed or access is revoked, new replicas can
+  still mount the node's copy for up to KubeSwift's authorization TTL
+  (default 5 minutes).
+- The local path runs Spin's hidden `spin trigger http` subcommand. The
+  runtime pins the exact Spin build the converter was tested against, and
+  a golden test compares the converter's output with `spin up`'s for every
+  example.
