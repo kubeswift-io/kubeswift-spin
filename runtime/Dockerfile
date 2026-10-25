@@ -20,6 +20,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/spin-entrypoint cmd/spin-entrypoint
 COPY internal/runtimecontract internal/runtimecontract
+COPY internal/spinlayout internal/spinlayout
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -buildid=" -o /out/kubeswift-spin-entrypoint ./cmd/spin-entrypoint \
  && mkdir -p /out/var/lib/kubeswift-spin

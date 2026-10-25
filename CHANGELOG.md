@@ -17,6 +17,24 @@ running replicas on upgrade) say so under "Upgrade notes".
   directory. Spin 4.2.5 uses Wasmtime 50.0.0
   (`runtimecontract.WasmtimeCacheVersion` is now `wasmtime-50.0.0`).
 
+### Added
+
+- Runtime image: the entrypoint can start Spin from a verified copy of the
+  application's own artifact mounted as a read-only OCI image layout
+  (ADR 0015, `internal/spinlayout`). It is inert until the controller
+  mounts an application, which a later change adds; without
+  `KUBESWIFT_SPIN_APP_DIGEST` nothing changes.
+- `make spinlayout-golden`: compares the converter with the real
+  `spin up --from` of the pinned Spin, in CI.
+
+### Changed (runtime image)
+
+- The entrypoint drops `SPIN_LOCKED_URL`, `SPIN_WORKING_DIR`,
+  `SPIN_LOCAL_APP_DIR`, `SPIN_LOG_DIR`, `RUNTIME_CONFIG_FILE`,
+  `SPIN_HTTP_LISTEN_ADDR`, `SPIN_TLS_CERT` and `SPIN_TLS_KEY` from the
+  environment it passes to Spin, and treats every `KUBESWIFT_SPIN_*`
+  variable as its own. The controller sets none of them.
+
 ### Upgrade notes
 
 - The default runtime image changes, so every replica of an executor that

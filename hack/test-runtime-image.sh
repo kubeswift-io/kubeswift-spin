@@ -127,6 +127,49 @@ elapsed_ms=$(( ($(date +%s%N) - start) / 1000000 ))
 code="$(docker inspect kss-test-hello --format '{{.State.ExitCode}}')"
 if [[ "$code" == "0" && $elapsed_ms -lt 5000 ]]; then ok "SIGTERM: exit 0 after ${elapsed_ms}ms"; else fail "SIGTERM: exit $code after ${elapsed_ms}ms"; fi
 
+# 4b. Local application (ADR 0015): hello-http's own artifact as a
+# read-only OCI image layout, the way KubeSwift mounts it, with --from
+# naming an unresolvable registry so that only the local path can serve.
+local_ver="$(sed -n 's/^[[:space:]]*LocalAppSpinVersion = "\(.*\)"$/\1/p' "$ROOT/internal/runtimecontract/contract.go")"
+[[ -n "$local_ver" && "$ver" == "$local_ver" ]] && ok "spin --version is the local runner's supported version" \
+  || fail "spin --version [$ver] differs from LocalAppSpinVersion [$local_ver]"
+docker run --rm --entrypoint /usr/local/bin/spin "$IMAGE" trigger http --help >/dev/null 2>&1 \
+  && ok "spin trigger http is available" || fail "spin trigger http --help failed"
+mkdir -p "$TMP/layout"
+app_digest="$(go run "$ROOT/test/tools/ocilayout" "localhost:$REG_PORT/hello-http:test" "$TMP/layout/hello")" \
+  || fail "could not write the hello-http layout"
+# run_local <name> <port> <mount option> <from>
+run_local() {
+  docker run -d --name "$1" --network host --user 0 -v "$TMP/layout/hello:/opt/kubeswift-spin-app:$3" \
+    -e "KUBESWIFT_SPIN_APP_DIGEST=$app_digest" -e "SPIN_LOCKED_URL=file:///etc/passwd" \
+    --entrypoint /usr/local/bin/kubeswift-spin-entrypoint "$IMAGE" up "--from=$4" "--listen=127.0.0.1:$2" >/dev/null
+  CONTAINERS+=("$1")
+}
+run_local kss-test-local 3211 ro "registry.invalid/kss/hello-http@$app_digest"
+if wait_http http://127.0.0.1:3211/healthz; then
+  [[ "$(curl -fsS http://127.0.0.1:3211/hello)" == "Hello from Spin on KubeSwift" ]] \
+    && ok "local application serves with the registry unresolvable" || fail "local application response"
+else
+  docker logs kss-test-local >&2 || true
+  fail "local application did not start"
+fi
+docker logs kss-test-local 2>&1 | grep -q "local application used from /opt/kubeswift-spin-app" \
+  && ok "the entrypoint used the local application" || fail "no 'local application used' line"
+docker logs kss-test-local 2>&1 | grep -q "ignoring SPIN_LOCKED_URL" \
+  && ok "an inherited SPIN_LOCKED_URL is dropped" || fail "inherited SPIN_LOCKED_URL not reported as ignored"
+uids="$(docker top kss-test-local -o uid,pid | tail -n +2 | awk '{print $1}' | sort -u | tr '\n' ' ')"
+[[ "$uids" == "65532 " ]] && ok "the local trigger runs as uid 65532" || fail "local trigger runs as uids [$uids]"
+docker stop -t 10 kss-test-local >/dev/null
+code="$(docker inspect -f '{{.State.ExitCode}}' kss-test-local)"
+[[ "$code" == 0 ]] && ok "spin trigger http exits 0 on SIGTERM" || fail "local trigger exit code $code after SIGTERM"
+# A writable mount is never used: the entrypoint falls back to the registry
+# path, which cannot resolve the registry and fails.
+run_local kss-test-local-rw 3212 rw "registry.invalid/kss/hello-http@$app_digest"
+code="$(timeout 60 docker wait kss-test-local-rw 2>/dev/null || echo timeout)"
+docker logs kss-test-local-rw 2>&1 | grep -q "local application not used: the application mount is writable" \
+  && [[ "$code" != 0 && "$code" != timeout ]] \
+  && ok "a writable application mount falls back to the registry path" || fail "writable mount: exit $code"
+
 # 5. Runtime configuration delivered the way the controller delivers it.
 kv_config=$'[key_value_store.default]\ntype = "spin"\npath = "/var/lib/kubeswift-spin/state/kv.db"\n'
 run_sandbox kss-test-kv 3202 "localhost:$REG_PORT/key-value:test" \

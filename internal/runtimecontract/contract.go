@@ -140,6 +140,28 @@ const (
 	WasmtimeCacheFileEnv    = "WASMTIME_CACHE_FILE"
 	DisableWasmtimeCacheEnv = "DISABLE_WASMTIME_CACHE"
 
+	// LocalAppDir is where a warm replica's own application artifact is
+	// mounted, read-only, as an OCI image layout (ADR 0015).
+	LocalAppDir = "/opt/kubeswift-spin-app"
+
+	// LocalAppDigestEnv carries the manifest digest the mounted layout must
+	// have. Only the controller sets it; the entrypoint never passes it on.
+	LocalAppDigestEnv = "KUBESWIFT_SPIN_APP_DIGEST"
+
+	// LocalAppOutDir is where the entrypoint writes the verified copy and
+	// the resolved locked application that Spin runs.
+	LocalAppOutDir = TmpDir + "/app"
+
+	// LocalAppSpinVersion is the exact `spin --version` line of the Spin
+	// the local application converter reproduces; hack/test-runtime-image.sh
+	// checks it against the image. Empty disables the local application.
+	// Update it with Spin, after `make spinlayout-golden` passes.
+	LocalAppSpinVersion = "spin 4.2.5 (e09d7d5 2026-10-23)"
+
+	// LocalAppConverterVersion versions the conversion; it changes when the
+	// converter's output for the same layout changes.
+	LocalAppConverterVersion = "1"
+
 	// RunAsUID and RunAsGID are the unprivileged identity the entrypoint
 	// switches to before exec'ing Spin. They match the distroless "nonroot"
 	// user shipped in the runtime image.

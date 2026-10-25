@@ -187,3 +187,6 @@ func walkChmod(path string) error {
 	}
 	return nil
 }
+
+// Remove deletes an output tree written by Prepare.
+func Remove(path string) { removeTree(path) }

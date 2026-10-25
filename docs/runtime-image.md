@@ -70,13 +70,30 @@ unprivileged:
    `WASMTIME_CACHE_FILE` and `DISABLE_WASMTIME_CACHE` from the environment
    are always dropped. See
    [compiled-cache.md](compiled-cache.md#runtime-mount-contract).
-6. When running as root: chown those paths to 65532, clear supplementary
+6. Local application (ADR 0015): when `KUBESWIFT_SPIN_APP_DIGEST` is set
+   (`up` only), the arguments are only `--from` (pinned to that digest,
+   with a registry host), `--listen` and `--runtime-config-file`, and
+   `/opt/kubeswift-spin-app` is a read-only mount point, convert the OCI
+   image layout mounted there with `internal/spinlayout` within 5 seconds:
+   verify it from the digest, copy every blob Spin needs into
+   `/var/lib/kubeswift-spin/tmp/app` while hashing it, and write the
+   resolved locked application Spin's own OCI loader would write. Then run
+   `spin trigger http` with the `--listen` and `--runtime-config-file`
+   arguments, `SPIN_LOCKED_URL` and `SPIN_WORKING_DIR`, and remove the
+   registry credentials written in step 4. Any other case logs one line
+   with a fixed reason, removes the copy and starts `spin up` unchanged. The
+   converter supports the Spin of `runtimecontract.LocalAppSpinVersion`
+   only; see the ADR for what it refuses.
+7. When running as root: chown those paths to 65532, clear supplementary
    groups, `setgid(65532)`, `setuid(65532)`, and verify the result.
-7. Set `PR_SET_NO_NEW_PRIVS`.
-8. Set `HOME`, `TMPDIR`, `XDG_*` under `/var/lib/kubeswift-spin` and
-   `PATH=/usr/local/bin`, remove every `KUBESWIFT_SPIN_*` contract variable
-   (including the Secret values), and `exec` `/usr/local/bin/spin` with the
-   given arguments.
+8. Set `PR_SET_NO_NEW_PRIVS`.
+9. Set `HOME`, `TMPDIR`, `XDG_*` under `/var/lib/kubeswift-spin` and
+   `PATH=/usr/local/bin`, remove every `KUBESWIFT_SPIN_*` variable
+   (including the Secret values), drop `SPIN_LOCKED_URL`,
+   `SPIN_WORKING_DIR`, `SPIN_LOCAL_APP_DIR`, `SPIN_LOG_DIR`,
+   `RUNTIME_CONFIG_FILE`, `SPIN_HTTP_LISTEN_ADDR`, `SPIN_TLS_CERT` and
+   `SPIN_TLS_KEY` (logged as ignored: they would choose what Spin runs or
+   reads), and `exec` `/usr/local/bin/spin` with the planned arguments.
 
 Error messages name variables and paths, never file contents or Secret
 values.
@@ -84,7 +101,8 @@ values.
 Because the entrypoint execs Spin, Spin receives termination signals
 directly. `spin up` handles SIGINT, SIGTERM and SIGHUP by stopping its
 trigger processes; in the Docker test it exits with status 0 within about
-100 ms of SIGTERM.
+100 ms of SIGTERM. On the local path `spin trigger http` receives them directly and also
+exits with status 0 (tested).
 
 The paths and variable names are defined once in
 `internal/runtimecontract` and shared by the controller and the entrypoint.
