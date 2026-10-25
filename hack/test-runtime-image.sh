@@ -138,10 +138,16 @@ docker run --rm --entrypoint /usr/local/bin/spin "$IMAGE" trigger http --help >/
 mkdir -p "$TMP/layout"
 app_digest="$(go run "$ROOT/test/tools/ocilayout" "localhost:$REG_PORT/hello-http:test" "$TMP/layout/hello")" \
   || fail "could not write the hello-http layout"
+# A registry credential, delivered as the controller delivers the SpinApp's
+# pull Secret: the local path must not hand it to Spin.
+printf '{"auths":{"registry.invalid":{"auth":"%s"}}}' "$(printf 'ci:not-a-secret' | base64 -w0)" >"$TMP/local-auth.json"
+chmod 0400 "$TMP/local-auth.json"
 # run_local <name> <port> <mount option> <from>
 run_local() {
   docker run -d --name "$1" --network host --user 0 -v "$TMP/layout/hello:/opt/kubeswift-spin-app:$3" \
+    -v "$TMP/local-auth.json:/run/kubeswift-spin/registry-auth/0.json:ro" \
     -e "KUBESWIFT_SPIN_APP_DIGEST=$app_digest" -e "SPIN_LOCKED_URL=file:///etc/passwd" \
+    -e "KUBESWIFT_SPIN_REGISTRY_AUTH_FILES=/run/kubeswift-spin/registry-auth/0.json" \
     --entrypoint /usr/local/bin/kubeswift-spin-entrypoint "$IMAGE" up "--from=$4" "--listen=127.0.0.1:$2" >/dev/null
   CONTAINERS+=("$1")
 }
@@ -155,6 +161,12 @@ else
 fi
 docker logs kss-test-local 2>&1 | grep -q "local application used from /opt/kubeswift-spin-app" \
   && ok "the entrypoint used the local application" || fail "no 'local application used' line"
+home_dir="$(sed -n 's/^[[:space:]]*BaseDir = "\(.*\)"$/\1/p' "$ROOT/internal/runtimecontract/contract.go")/home"
+if docker cp "kss-test-local:$home_dir/.docker/config.json" - >/dev/null 2>&1; then
+  fail "the local path left registry credentials in Spin's home"
+else
+  ok "no registry credentials in Spin's home on the local path"
+fi
 docker logs kss-test-local 2>&1 | grep -q "ignoring SPIN_LOCKED_URL" \
   && ok "an inherited SPIN_LOCKED_URL is dropped" || fail "inherited SPIN_LOCKED_URL not reported as ignored"
 uids="$(docker top kss-test-local -o uid,pid | tail -n +2 | awk '{print $1}' | sort -u | tr '\n' ' ')"
@@ -247,6 +259,10 @@ run_sandbox kss-test-private 3208 "localhost:$AUTH_REG_PORT/hello-http:private" 
   -- KUBESWIFT_SPIN_REGISTRY_AUTH_FILES=/run/kubeswift-spin/registry-auth/0.json \
   "MOUNT:$TMP/auth.json:/run/kubeswift-spin/registry-auth/0.json"
 [[ "$(curl -fsS http://127.0.0.1:3208/hello)" == "Hello from Spin on KubeSwift" ]] && ok "application pulled from a private registry" || fail "private pull"
+# Control for the local path's check: the registry path needs the
+# credential in Spin's home.
+docker cp "kss-test-private:$home_dir/.docker/config.json" - >/dev/null 2>&1 \
+  && ok "the registry path writes the credential for Spin" || fail "registry path: no credential in Spin's home"
 if docker run --rm --network host --user 0 --entrypoint /usr/local/bin/kubeswift-spin-entrypoint "$IMAGE" \
   up "--from=localhost:$AUTH_REG_PORT/hello-http:private" --insecure --listen=127.0.0.1:3209 >"$TMP/noauth.log" 2>&1; then
   fail "private application pulled without credentials"
