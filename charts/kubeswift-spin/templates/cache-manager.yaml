@@ -1,8 +1,11 @@
-{{- if .Values.compiledCache.enabled }}
+{{- if or .Values.compiledCache.enabled .Values.localApplication.enabled }}
 {{- $name := include "kubeswift-spin.cacheManagerName" . }}
-# The compiled-cache manager (ADR 0014): its own ServiceAccount and RBAC. It
-# reads SpinApps and executors and writes SpinCompiledCache records; it has no
-# access to Secrets, ConfigMaps or Pods.
+{{- $cc := .Values.compiledCache.enabled }}
+# The cache manager: compiled caches (ADR 0014) and local application
+# placements (ADR 0015). Its own ServiceAccount and RBAC; it reads SpinApps
+# and executors, writes SpinCompiledCache records and placements, and has no
+# access to Secrets, ConfigMaps or Pods. Compiler sandboxes and records only
+# with compiled caches enabled.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -21,21 +24,25 @@ rules:
   - apiGroups: ["core.spinkube.dev"]
     resources: ["spinapps", "spinappexecutors"]
     verbs: ["get", "list", "watch"]
+  {{- if $cc }}
   # Compiler sandboxes, in the namespaces of the SpinApps they compile.
   # Their specs are immutable, so there is no update or patch.
   - apiGroups: ["sandbox.kubeswift.io"]
     resources: ["swiftsandboxes"]
     verbs: ["get", "list", "watch", "create", "delete"]
+  {{- end }}
   # Warm pools whose nodes receive placements.
   - apiGroups: ["sandbox.kubeswift.io"]
     resources: ["swiftsandboxpools"]
     verbs: ["get", "list", "watch"]
-  # One placement per signed cache and warm pool, in the pool's namespace.
-  # Placements have no status the cache manager writes.
+  # One placement per signed cache and warm pool, and one per local
+  # application and warm pool, in the pool's namespace. Placements have no
+  # status the cache manager writes.
   - apiGroups: ["sandbox.kubeswift.io"]
     resources: ["swiftartifactplacements"]
     verbs: ["get", "list", "watch", "create", "update", "delete"]
-  # Namespaces opt in with the label spin.kubeswift.io/compiled-cache.
+  # Namespaces opt in with the labels spin.kubeswift.io/compiled-cache and
+  # spin.kubeswift.io/local-application.
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
@@ -64,12 +71,14 @@ metadata:
   labels:
     {{- include "kubeswift-spin.labels" . | nindent 4 }}
 rules:
+  {{- if $cc }}
   - apiGroups: ["spin.kubeswift.io"]
     resources: ["spincompiledcaches"]
     verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: ["spin.kubeswift.io"]
     resources: ["spincompiledcaches/status"]
     verbs: ["get", "patch"]
+  {{- end }}
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create"]
@@ -146,6 +155,10 @@ spec:
             - --metrics-bind-address=0
             {{- end }}
             {{- include "kubeswift-spin.profileArgs" . | nindent 12 }}
+            {{- if .Values.localApplication.enabled }}
+            {{- include "kubeswift-spin.localApplicationArgs" . | nindent 12 }}
+            {{- end }}
+            {{- if $cc }}
             {{- include "kubeswift-spin.compiledCacheArgs" . | nindent 12 }}
             {{- include "kubeswift-spin.compiledCacheDeliveryArgs" . | nindent 12 }}
             - --compiled-cache-retention={{ .Values.compiledCache.retention }}
@@ -158,6 +171,7 @@ spec:
             - --compiled-cache-max-entries={{ .maxEntries }}
             - --compiled-cache-max-compilers={{ .maxConcurrent }}
             - --compiled-cache-max-compilers-per-namespace={{ .maxConcurrentPerNamespace }}
+            {{- end }}
             {{- end }}
             - --zap-log-level={{ .Values.compiledCache.manager.logLevel }}
             {{- range .Values.compiledCache.manager.extraArgs }}

@@ -129,6 +129,34 @@ metrics:
 # executors opt in with the annotation spin.kubeswift.io/compiled-cache:
 # enabled. It needs KubeSwift v0.19.3 or later and the administrator setup in
 # docs/compiled-cache.md (export policy, verification policy, signer key).
+# Local applications (ADR 0015): warm replicas start Spin from a verified
+# copy of their own digest-pinned application artifact, which KubeSwift
+# mounts after a placement prepared it on the pool's nodes, instead of
+# fetching it from the registry. Namespaces opt in with the label
+# spin.kubeswift.io/local-application=enabled, executors with the annotation
+# of the same name. Needs KubeSwift v0.19.3 or later and runtimeImage.digest.
+localApplication:
+  enabled: false
+  # Must be true to enable the feature: confirms KubeSwift's node artifact
+  # cache is bounded (KubeSwift chart artifactCache.maxBytes or maxPercent),
+  # because tenants' application artifacts are placed on every pool node.
+  nodeCacheBounded: false
+  # Runtime images, besides runtimeImage, allowed to run local applications,
+  # as repository@sha256:<digest>; their Spin must be the one the converter
+  # supports.
+  extraRuntimes: []
+  # When not empty, the only registry hosts eligible (after normalization:
+  # docker.io is index.docker.io). Empty allows any registry KubeSwift reaches
+  # over HTTPS; KubeSwift's control plane then contacts hosts tenants choose.
+  registries: []
+  # Application placements per namespace, retained ones included.
+  maxPlacementsPerNamespace: 8
+  # How many of a namespace's placements may have been created in the last
+  # hour.
+  maxNewPerHour: 10
+  # How long an unwanted placement is kept, so that a rollback finds it.
+  retention: 24h
+
 compiledCache:
   enabled: false
   # Base repository of compiled caches: registry host and path, lowercase,

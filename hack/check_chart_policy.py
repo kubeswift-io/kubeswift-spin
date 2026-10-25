@@ -62,6 +62,20 @@ EXPECTED = {
         {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftartifactplacements"], "verbs": ["get", "list", "watch", "create", "update", "delete"]},
         {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "watch"]},
     ]),
+    # The cache manager with only local applications enabled (ADR 0015): no
+    # compiler sandboxes.
+    "cache-manager-local": norm([
+        {"apiGroups": ["core.spinkube.dev"], "resources": ["spinapps", "spinappexecutors"], "verbs": ["get", "list", "watch"]},
+        {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftsandboxpools"], "verbs": ["get", "list", "watch"]},
+        {"apiGroups": ["sandbox.kubeswift.io"], "resources": ["swiftartifactplacements"], "verbs": ["get", "list", "watch", "create", "update", "delete"]},
+        {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "watch"]},
+    ]),
+    # Its Lease and Events, without records.
+    "cache-manager-lease": norm([
+        {"apiGroups": ["coordination.k8s.io"], "resources": ["leases"], "verbs": ["get", "create", "update"]},
+        {"apiGroups": [""], "resources": ["events"], "verbs": ["create", "patch"]},
+        {"apiGroups": ["events.k8s.io"], "resources": ["events"], "verbs": ["create", "patch"]},
+    ]),
     # The cache manager's records, Lease and Events, in the release namespace
     # only.
     "cache-manager-records": norm([
@@ -96,6 +110,8 @@ ALLOWED_COMPONENTS = {
     "compiled-cache-namespaces": {"controller"},
     "cache-manager": {"cache-manager"},
     "cache-manager-records": {"cache-manager"},
+    "cache-manager-local": {"cache-manager"},
+    "cache-manager-lease": {"cache-manager"},
     "cache-signer": {"cache-signer"},
     "cache-signer-records": {"cache-signer"},
 }
@@ -105,6 +121,7 @@ ALLOWED_COMPONENTS = {
 EXPECTED_KIND = {"controller": "ClusterRole", "leader-election": "Role", "metrics-auth": "ClusterRole", "metrics-reader": "ClusterRole",
                  "compiled-cache-reader": "Role", "compiled-cache-namespaces": "ClusterRole",
                  "cache-manager": "ClusterRole", "cache-manager-records": "Role",
+                 "cache-manager-local": "ClusterRole", "cache-manager-lease": "Role",
                  "cache-signer": "ClusterRole", "cache-signer-records": "Role"}
 
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]

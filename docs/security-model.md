@@ -48,7 +48,7 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 | SpinApp authors | partially trusted | May create SpinApps in namespaces they have access to, and can make any Secret in that namespace available to their application (see [Secrets](#secrets)). Their `spec.podLabels` become launcher pod labels, so they can match pod-label based NetworkPolicy peers and Services in their namespace (see [Network isolation](#network-isolation)). |
 | Application registries | untrusted content source | Artifacts are pulled by Spin inside the guest. |
 | kubeswift-spin cache signer | trusted, holds the signing key | Only with compiled caches enabled. Its own ServiceAccount and image: gets compiler SwiftSandboxes, reads and patches the status of records in the release namespace. The signing key (or KMS access) and a registry credential that writes signatures are volumes of its pod; it has no Secret RBAC and never runs tenant code. It parses exported artifacts with size and entry limits. Prefer a KMS key, so a compromise of the pod does not reveal key material. An optional CA bundle (`compiledCache.signer.registryCABundle`) is an immutable ConfigMap volume trusted for all its TLS connections: who can replace ConfigMaps and the signer's Deployment in the release namespace controls its trust anchors, so limit that to the chart's operators. |
-| kubeswift-spin cache manager | trusted control plane component | Only with compiled caches enabled. Its own ServiceAccount: reads SpinApps, executors, pools and Namespaces, and writes `SpinCompiledCache` records in the release namespace. It also creates compiler SwiftSandboxes with SpinApps' pull Secrets and SwiftArtifactPlacements that name the cache pull Secret, in any namespace, so, like the controller, treat its credentials like a cluster-wide Secret reader. It changes or deletes only placements that carry a record's labels and UID. See [compiled-cache.md](compiled-cache.md). |
+| kubeswift-spin cache manager | trusted control plane component | Only with compiled caches or local applications enabled. Its own ServiceAccount: reads SpinApps, executors, pools and Namespaces. With compiled caches it writes `SpinCompiledCache` records in the release namespace and creates compiler SwiftSandboxes with SpinApps' pull Secrets, and SwiftArtifactPlacements that name the cache pull Secret, in any namespace, so, like the controller, treat its credentials like a cluster-wide Secret reader. With local applications it creates SwiftArtifactPlacements that name a SpinApp's own image pull Secret and reference, in that SpinApp's namespace ([ADR 0015](adr/0015-local-application-delivery.md)); with only local applications enabled it has no SwiftSandbox or record access. It changes or deletes only placements it owns: a record's labels and UID for compiled caches; the labels, the key annotation, the key's name and the key fields of the spec for local applications. See [compiled-cache.md](compiled-cache.md). |
 
 ## Threat actors
 
@@ -635,10 +635,10 @@ the `SpinCompiledCache` record. With the feature enabled the chart adds:
 | controller | `spincompiledcaches` | get, list, watch | release namespace |
 | controller | `namespaces` | get, list, watch | cluster |
 | cache manager | `spinapps`, `spinappexecutors`, `swiftsandboxpools`, `namespaces` | get, list, watch | cluster |
-| cache manager | `swiftsandboxes` (compilers) | get, list, watch, create, delete | cluster |
+| cache manager | `swiftsandboxes` (compilers; compiled caches only) | get, list, watch, create, delete | cluster |
 | cache manager | `swiftartifactplacements` | get, list, watch, create, update, delete | cluster |
-| cache manager | `spincompiledcaches` | get, list, watch, create, delete | release namespace |
-| cache manager | `spincompiledcaches/status` | get, patch | release namespace |
+| cache manager | `spincompiledcaches` (compiled caches only) | get, list, watch, create, delete | release namespace |
+| cache manager | `spincompiledcaches/status` (compiled caches only) | get, patch | release namespace |
 | cache manager | `leases` | create; get, update on its own Lease | release namespace |
 | cache manager | core and `events.k8s.io` `events` | create, patch | release namespace |
 | cache signer | `swiftsandboxes` | get | cluster |

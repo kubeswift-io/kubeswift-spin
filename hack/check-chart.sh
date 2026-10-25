@@ -19,6 +19,18 @@ cc=(--set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111
     --set compiledCache.enabled=true --set compiledCache.repository=registry.example.com/kubeswift-spin-cache
     --set compiledCache.signer.registryCredentialsSecret=cache-registry)
 render "${cc[@]}" --set compiledCache.signer.key.secretName=cache-signing-key | check
+# Local applications (ADR 0015), alone and with compiled caches.
+la=(--set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
+    --set localApplication.enabled=true --set localApplication.nodeCacheBounded=true)
+render "${la[@]}" | check
+render "${la[@]}" --set 'localApplication.registries[0]=ghcr.io' | check
+render "${cc[@]}" --set compiledCache.signer.key.secretName=cache-signing-key "${la[@]}" | check
+if render --set localApplication.enabled=true --set localApplication.nodeCacheBounded=true >/dev/null 2>&1; then
+  echo "localApplication rendered without runtimeImage.digest" >&2; exit 1
+fi
+if render --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 --set localApplication.enabled=true >/dev/null 2>&1; then
+  echo "localApplication rendered without localApplication.nodeCacheBounded" >&2; exit 1
+fi
 render "${cc[@]}" --set compiledCache.signer.key.kmsRef=gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k --set metrics.secure=true | check
 # The signer needs exactly one key source and registry credentials.
 if render "${cc[@]}" >/dev/null 2>&1; then echo "compiledCache rendered without a signing key" >&2; exit 1; fi

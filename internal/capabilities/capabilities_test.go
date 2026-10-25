@@ -137,3 +137,28 @@ func TestParseSandboxSchema(t *testing.T) {
 		t.Fatal("invalid JSON accepted")
 	}
 }
+
+// v020Schema has the artifact fields local applications need (layout,
+// pullSecretRef, optional, fetchTimeout), as KubeSwift v0.19.3 and later
+// publish them.
+const v020Schema = `{"components":{"schemas":{"io.kubeswift.sandbox.v1alpha1.SwiftSandbox":{"properties":{"spec":{"properties":{
+  "artifacts":{"type":"array","items":{"properties":{"name":{},"ref":{},"mountPath":{},"layout":{},"pullSecretRef":{},"optional":{},"fetchTimeout":{},"claims":{},"requirePlatformVerification":{}}}}}}}}}}}`
+
+func TestParseSandboxSchemaLocalApplication(t *testing.T) {
+	s, err := ParseSandboxSchema([]byte(v020Schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.LocalArtifacts || !s.LocalApplication() {
+		t.Fatalf("v0.20 schema not detected: %+v", s)
+	}
+	for name, doc := range map[string]string{"v0.16.4 (no optional)": v0164Schema, "no pullSecretRef": v0191Schema, "v0.16.3": v0163Schema} {
+		s, err := ParseSandboxSchema([]byte(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.LocalApplication() {
+			t.Fatalf("%s reported local application support: %+v", name, s)
+		}
+	}
+}

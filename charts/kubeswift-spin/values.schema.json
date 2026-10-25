@@ -280,7 +280,10 @@
           },
           "compiledCache": {
             "type": "string",
-            "enum": ["enabled", "disabled"],
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
             "description": "spin.kubeswift.io/compiled-cache: enabled gives the executor's SpinApps signed compiled Wasmtime caches when the platform enables them (compiledCache.enabled)."
           }
         }
@@ -334,6 +337,46 @@
         },
         "serviceMonitor": {
           "type": "object"
+        }
+      }
+    },
+    "localApplication": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "nodeCacheBounded": {
+          "type": "boolean"
+        },
+        "extraRuntimes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@sha256:[a-f0-9]{64}$"
+          }
+        },
+        "registries": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$"
+          }
+        },
+        "maxPlacementsPerNamespace": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "maxNewPerHour": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "retention": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$"
         }
       }
     },
