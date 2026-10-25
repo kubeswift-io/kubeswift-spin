@@ -45,6 +45,9 @@ type plan struct {
 	cacheConfig []byte
 	// dropped are reserved variables found in the environment and removed.
 	dropped []string
+	// localDigest is the manifest digest of the application the controller
+	// mounted at runtimecontract.LocalAppDir, if any (ADR 0015).
+	localDigest string
 }
 
 type readFileFunc func(string) ([]byte, error)
@@ -74,6 +77,9 @@ func run(args []string) error {
 	if err := prepare(p, os.Geteuid() == 0); err != nil {
 		return err
 	}
+	// After prepare: the copy goes below its tmpfs, as root, before the
+	// privilege drop (ADR 0015).
+	useLocalApp(p, hostFS, runtimecontract.LocalAppDir, runtimecontract.LocalAppOutDir, runtimecontract.LocalAppSpinVersion)
 	if os.Geteuid() == 0 {
 		if err := dropPrivileges(runtimecontract.RunAsUID, runtimecontract.RunAsGID); err != nil {
 			return err
@@ -92,12 +98,10 @@ func run(args []string) error {
 // internalEnv reports whether an environment variable is part of the
 // entrypoint contract and must not reach Spin.
 func internalEnv(k string) bool {
-	switch k {
-	case runtimecontract.RuntimeConfigEnv, runtimecontract.RuntimeConfigFileEnv, runtimecontract.RegistryAuthFilesEnv,
-		runtimecontract.CompiledCacheSourceEnv, runtimecontract.CompiledCacheRuntimeEnv, runtimecontract.CompiledCacheArchitectureEnv:
-		return true
-	}
-	return strings.HasPrefix(k, runtimecontract.SecretValueEnvPrefix)
+	// Every KUBESWIFT_SPIN_* variable is the entrypoint's: the runtime
+	// configuration, registry credentials, Secret values and the compiled
+	// cache and local application expectations.
+	return strings.HasPrefix(k, "KUBESWIFT_SPIN_")
 }
 
 // buildPlan validates the arguments and computes the Spin argv, environment,
@@ -130,6 +134,13 @@ func buildPlan(args, environ []string, readFile readFileFunc) (*plan, error) {
 			// not set could point Spin at code nobody verified.
 			p.dropped = append(p.dropped, k)
 			continue
+		case "SPIN_LOCKED_URL", "SPIN_WORKING_DIR", "SPIN_LOCAL_APP_DIR", "SPIN_LOG_DIR", "RUNTIME_CONFIG_FILE",
+			"SPIN_HTTP_LISTEN_ADDR", "SPIN_TLS_CERT", "SPIN_TLS_KEY":
+			// Read by Spin's trigger; they would choose what it runs, where
+			// it listens or what it reads instead of the entrypoint
+			// (ADR 0015). Dropped on both paths.
+			p.dropped = append(p.dropped, k)
+			continue
 		}
 		env = append(env, kv)
 	}
@@ -152,6 +163,9 @@ func buildPlan(args, environ []string, readFile readFileFunc) (*plan, error) {
 	}
 	if want, ok := expectation(vars); ok && args[0] == "up" {
 		p.cache = &want
+	}
+	if args[0] == "up" {
+		p.localDigest = vars[runtimecontract.LocalAppDigestEnv]
 	}
 	return p, nil
 }
