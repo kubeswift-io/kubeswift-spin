@@ -249,6 +249,9 @@ func run(o options) error {
 		// publishes no version kubeswift-spin can read.
 		setupLog.Info("compiled caches assume KubeSwift v0.19.3 or later, which kubeswift-spin cannot verify: on v0.19.1 a warm replica whose cache is skipped at the checkout never becomes ready (see docs/compiled-cache.md#upgrading)")
 	}
+	if localSettings.Enabled && features.LocalApplication() {
+		setupLog.Info("local applications assume KubeSwift v0.19.3 or later, which kubeswift-spin cannot verify: on older v0.19 releases a warm replica whose optional artifact is skipped may never become ready (see docs/local-application.md#requirements)")
+	}
 	if features.Exposure() && !features.Termination {
 		setupLog.Info("KubeSwift is older than v0.16.3 (no spec.termination): a deleted replica is not drained and loses its NetworkPolicy while it can still serve; upgrade KubeSwift to v0.16.3 or later")
 	}
@@ -301,12 +304,12 @@ func run(o options) error {
 	if o.mode == modeCacheManager && localSettings.Enabled {
 		app := &cachemanager.ApplicationReconciler{
 			Client:           mgr.GetClient(),
+			APIReader:        mgr.GetAPIReader(),
 			Defaults:         defaults,
 			Options:          compatibility.Options{MaxReplicas: int32(o.maxReplicas), Resources: policy}, //nolint:gosec // bounded in policy()
 			Settings:         localSettings,
 			Detector:         detector,
 			PlacementsServed: true,
-			Recorder:         mgr.GetEventRecorder("kubeswift-spin-cache-manager"),
 		}
 		if err := app.SetupWithManager(mgr); err != nil {
 			return err

@@ -56,7 +56,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "kubeswift-spin.localApplicationArgs" -}}
 {{- $_ := required "localApplication.enabled needs runtimeImage.digest: only digest-pinned runtime images run local applications" .Values.runtimeImage.digest -}}
 {{- if not .Values.localApplication.nodeCacheBounded -}}
-{{- fail "localApplication.enabled needs localApplication.nodeCacheBounded=true: bound KubeSwift's node artifact cache first (KubeSwift chart artifactCache.maxBytes or maxPercent); see docs/adr/0015-local-application-delivery.md" -}}
+{{- fail "localApplication.enabled needs localApplication.nodeCacheBounded=true: bound KubeSwift's node artifact cache first (KubeSwift chart sandboxMaterialize.artifactCache.maxBytes or maxPercent); see docs/local-application.md" -}}
 {{- end }}
 - --local-application
 - --local-application-runtimes={{ join "," (prepend .Values.localApplication.extraRuntimes (printf "%s@%s" .Values.runtimeImage.repository .Values.runtimeImage.digest)) }}

@@ -48,6 +48,9 @@ type localView struct {
 	// attach is true when new warm replicas get the artifact.
 	attach bool
 	held   bool
+	// recheck asks for a reconcile after this long (a missing placement
+	// that may become PlacementBlocked).
+	recheck time.Duration
 }
 
 func localCond(reason, msg string, status metav1.ConditionStatus) *metav1.Condition {
@@ -78,6 +81,12 @@ func (r *SpinAppReconciler) localApplication(ctx context.Context, app *spinv1alp
 	}
 	v := &localView{key: k}
 	appKey := client.ObjectKeyFromObject(app).String()
+	missing := false
+	defer func() {
+		if !missing {
+			r.clearPlacing(appKey)
+		}
+	}()
 	if h, held := r.localHold(appKey); held {
 		v.held = true
 		v.cond = localCond(localapp.ReasonDeliveryFailed, fmt.Sprintf(
@@ -88,9 +97,12 @@ func (r *SpinAppReconciler) localApplication(ctx context.Context, app *spinv1alp
 	var pl sandboxv1alpha1.SwiftArtifactPlacement
 	err := r.Client.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: k.PlacementName()}, &pl)
 	switch {
+	case err == nil && localapp.Owned(&pl, *k) && r.limited(ctx, *k):
+		// Beyond a limit: the cache manager deletes this placement.
+		v.cond = limitCond(app)
 	case err == nil && localapp.Prepared(&pl, *k):
 		v.attach = true
-		v.cond = localCond(localapp.ReasonAttached, "new warm replicas mount the application artifact, prepared on the pool's nodes; the replica's console says whether Spin used it",
+		v.cond = localCond(localapp.ReasonAttached, "new warm replicas carry the application artifact, prepared on the pool's nodes; the replica's console says whether Spin used it",
 			metav1.ConditionTrue)
 	case err == nil && localapp.Owned(&pl, *k):
 		if reason := placementFailure(&pl); reason != "" {
@@ -100,9 +112,12 @@ func (r *SpinAppReconciler) localApplication(ctx context.Context, app *spinv1alp
 			v.cond = localCond(localapp.ReasonPlacing, "the application artifact is being prepared on the pool's nodes; new replicas start from the registry until then", metav1.ConditionFalse)
 		}
 	case err == nil:
-		v.cond = localCond(localapp.ReasonPlacementBlocked, "an object not owned by kubeswift-spin has the name of the application placement; new replicas start from the registry", metav1.ConditionFalse)
+		v.cond = localCond(localapp.ReasonPlacementBlocked, fmt.Sprintf(
+			"SwiftArtifactPlacement %s exists but is not kubeswift-spin's placement for this application (labels, key annotation or spec differ); delete it to let the cache manager recreate it; new replicas start from the registry",
+			k.PlacementName()), metav1.ConditionFalse)
 	case apierrors.IsNotFound(err):
-		v.cond = r.missingPlacement(ctx, app, *k)
+		missing = true
+		v.cond, v.recheck = r.missingPlacement(ctx, app, appKey, *k)
 	default:
 		log.FromContext(ctx).Info("cannot read the application placement; continuing without it", "error", err.Error())
 		return nil
@@ -110,21 +125,50 @@ func (r *SpinAppReconciler) localApplication(ctx context.Context, app *spinv1alp
 	return v
 }
 
+func limitCond(app *spinv1alpha1.SpinApp) *metav1.Condition {
+	return localCond(localapp.ReasonPlacementLimit, fmt.Sprintf(
+		"namespace %s is at its limit of application placements (chart values localApplication.maxPlacementsPerNamespace and maxNewPerHour); new replicas start from the registry",
+		app.Namespace), metav1.ConditionFalse)
+}
+
 // missingPlacement reports a placement the cache manager has not created:
-// beyond a limit, being created, or blocked after placementBlockedAfter.
-func (r *SpinAppReconciler) missingPlacement(ctx context.Context, app *spinv1alpha1.SpinApp, k localapp.Key) *metav1.Condition {
+// beyond a limit, being created, or blocked
+// once it has been missing for placementBlockedAfter, measured from when
+// this controller first saw it missing. It returns when to look again.
+func (r *SpinAppReconciler) missingPlacement(ctx context.Context, app *spinv1alpha1.SpinApp, appKey string, k localapp.Key) (*metav1.Condition, time.Duration) {
 	if r.limited(ctx, k) {
-		return localCond(localapp.ReasonPlacementLimit, fmt.Sprintf(
-			"namespace %s is at its limit of application placements (chart values localApplication.maxPlacementsPerNamespace and maxNewPerHour); new replicas start from the registry",
-			app.Namespace), metav1.ConditionFalse)
+		return limitCond(app), 0
 	}
-	if old := apimeta.FindStatusCondition(app.Status.Conditions, localapp.TypeLocalApplication); old != nil &&
-		(old.Reason == localapp.ReasonPlacing || old.Reason == localapp.ReasonPlacementBlocked) && r.Now().Sub(old.LastTransitionTime.Time) > placementBlockedAfter {
-		return localCond(localapp.ReasonPlacementBlocked,
-			"the cache manager has not created the application placement; check that it runs and its Events (a quota or admission policy may refuse placements); new replicas start from the registry",
-			metav1.ConditionFalse)
+	since := r.placingSince(appKey)
+	if waited := r.Now().Sub(since); waited < placementBlockedAfter {
+		return localCond(localapp.ReasonPlacing, "the application artifact is being prepared on the pool's nodes; new replicas start from the registry until then", metav1.ConditionFalse),
+			placementBlockedAfter - waited + time.Second
 	}
-	return localCond(localapp.ReasonPlacing, "the application artifact is being prepared on the pool's nodes; new replicas start from the registry until then", metav1.ConditionFalse)
+	return localCond(localapp.ReasonPlacementBlocked, fmt.Sprintf(
+		"the cache manager has not created SwiftArtifactPlacement %s; check that it runs and its logs (a quota, an admission policy or another object at that name may refuse it); new replicas start from the registry",
+		k.PlacementName()), metav1.ConditionFalse), placementBlockedAfter
+}
+
+// placingSince returns when the controller first saw the SpinApp's
+// placement missing, recording now if it had not.
+func (r *SpinAppReconciler) placingSince(appKey string) time.Time {
+	r.attachMu.Lock()
+	defer r.attachMu.Unlock()
+	if r.placing == nil {
+		r.placing = map[string]time.Time{}
+	}
+	t, ok := r.placing[appKey]
+	if !ok {
+		t = r.Now()
+		r.placing[appKey] = t
+	}
+	return t
+}
+
+func (r *SpinAppReconciler) clearPlacing(appKey string) {
+	r.attachMu.Lock()
+	defer r.attachMu.Unlock()
+	delete(r.placing, appKey)
 }
 
 // limited computes the namespace's selection as the cache manager does and
@@ -144,7 +188,7 @@ func (r *SpinAppReconciler) limited(ctx context.Context, k localapp.Key) bool {
 	var wants []localapp.Want
 	for i := range apps.Items {
 		a := &apps.Items[i]
-		if !a.DeletionTimestamp.IsZero() || a.Spec.Executor == "" || a.Spec.Replicas == 0 {
+		if !localapp.WantsPlacement(a) || a.Spec.Executor == "" {
 			continue
 		}
 		p, seen := profiles[a.Spec.Executor]
@@ -290,10 +334,12 @@ func (r *SpinAppReconciler) localHoldRecheck(key string) time.Duration {
 // localFailure reports why a replica that carried the local application
 // failed in a way the local application may have caused, or "": an
 // artifact failure in KubeSwift, or a failure before the replica was ever
-// seen ready (a lock Spin rejects after the entrypoint started it). A
-// runtime image KubeSwift could not resolve, pull or verify (Image*) fails
-// the replica before the guest runs, whatever it carries.
-func (r *SpinAppReconciler) localFailure(sb *sandboxv1alpha1.SwiftSandbox) string {
+// seen ready while KubeSwift reported the artifact mounted (a lock Spin
+// rejects after the entrypoint started it). A runtime image KubeSwift could
+// not resolve or authorize fails the replica before the guest runs,
+// whatever it carries. A replica created before this controller started has
+// an unknown history and starts no hold for failing before ready.
+func (r *SpinAppReconciler) localFailure(key string, sb *sandboxv1alpha1.SwiftSandbox) string {
 	carried := false
 	for _, a := range sb.Spec.Artifacts {
 		if a.Name == localapp.ArtifactName {
@@ -304,7 +350,7 @@ func (r *SpinAppReconciler) localFailure(sb *sandboxv1alpha1.SwiftSandbox) strin
 		return ""
 	}
 	if wr := apimeta.FindStatusCondition(sb.Status.Conditions, sandboxv1alpha1.SwiftSandboxConditionWorkloadReady); wr != nil && wr.Status == metav1.ConditionTrue {
-		r.everReady[sb.UID] = true
+		r.everReady[sb.UID] = key
 	}
 	if sb.Status.Phase != sandboxv1alpha1.SwiftSandboxFailed {
 		return ""
@@ -315,11 +361,17 @@ func (r *SpinAppReconciler) localFailure(sb *sandboxv1alpha1.SwiftSandbox) strin
 			return metrics.Reason(c.Reason)
 		case c.Reason == "KernelUnsupported" && strings.Contains(c.Message, "artifact"):
 			return metrics.Reason(c.Reason)
-		case strings.HasPrefix(c.Reason, "Image"):
+		case c.Reason == "ImageResolveFailed" || c.Reason == "ImagePullSecretInvalid":
 			return ""
 		}
 	}
-	if !r.everReady[sb.UID] {
+	mounted := false
+	for _, a := range sb.Status.Artifacts {
+		if a.Name == localapp.ArtifactName && a.State == sandboxv1alpha1.SandboxArtifactMounted {
+			mounted = true
+		}
+	}
+	if _, ready := r.everReady[sb.UID]; !ready && mounted && !sb.CreationTimestamp.Time.Before(r.startedAt) {
 		return "FailedBeforeReady"
 	}
 	return ""
@@ -333,7 +385,7 @@ func (r *SpinAppReconciler) countLocal(key string, owned []sandboxv1alpha1.Swift
 	if r.localHolds == nil {
 		r.localHolds = map[string]localHoldEntry{}
 		r.localCounted = map[types.UID]string{}
-		r.everReady = map[types.UID]bool{}
+		r.everReady = map[types.UID]string{}
 	}
 	if r.startedAt.IsZero() {
 		r.startedAt = r.Now()
@@ -342,7 +394,7 @@ func (r *SpinAppReconciler) countLocal(key string, owned []sandboxv1alpha1.Swift
 	for i := range owned {
 		sb := &owned[i]
 		live[sb.UID] = true
-		if reason := r.localFailure(sb); reason != "" {
+		if reason := r.localFailure(key, sb); reason != "" {
 			if h, ok := r.localHolds[key]; !ok || !r.Now().Before(h.until) {
 				r.localHolds[key] = localHoldEntry{sandbox: sb.Name, reason: reason, until: r.Now().Add(r.localHoldDuration())}
 			}
@@ -368,6 +420,10 @@ func (r *SpinAppReconciler) countLocal(key string, owned []sandboxv1alpha1.Swift
 	for uid, k := range r.localCounted {
 		if k == key && !live[uid] {
 			delete(r.localCounted, uid)
+		}
+	}
+	for uid, k := range r.everReady {
+		if k == key && !live[uid] {
 			delete(r.everReady, uid)
 		}
 	}
@@ -387,10 +443,15 @@ func (r *SpinAppReconciler) forgetLocal(key string) {
 	for uid, k := range r.localCounted {
 		if k == key {
 			delete(r.localCounted, uid)
+		}
+	}
+	for uid, k := range r.everReady {
+		if k == key {
 			delete(r.everReady, uid)
 		}
 	}
 	delete(r.localHolds, key)
+	delete(r.placing, key)
 }
 
 // appsForPlacement enqueues every SpinApp of an application placement's

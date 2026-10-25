@@ -142,7 +142,10 @@ type SpinAppReconciler struct {
 	LocalHoldPeriod time.Duration
 	localHolds      map[string]localHoldEntry
 	localCounted    map[types.UID]string
-	everReady       map[types.UID]bool
+	everReady       map[types.UID]string
+	// placing records when a SpinApp's application placement was first
+	// seen missing.
+	placing map[string]time.Time
 }
 
 // SetupWithManager registers the controller, its watches and the field index.
@@ -378,6 +381,9 @@ func (r *SpinAppReconciler) reconcile(ctx context.Context, req ctrl.Request) (re
 
 	cache := r.compiledCache(ctx, &app, profile, features)
 	cache.local = r.localApplication(ctx, &app, profile, features)
+	if l := cache.local; l != nil && l.recheck > 0 && (cacheRecheck == 0 || l.recheck < cacheRecheck) {
+		cacheRecheck = l.recheck
+	}
 
 	tmpl, err := translate.BuildTemplate(&app, profile, r.Options.Resources, features)
 	if err != nil {

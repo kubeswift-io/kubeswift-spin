@@ -1,6 +1,7 @@
 package localapp
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -267,15 +268,114 @@ func TestSettingsValidate(t *testing.T) {
 	if err := settings().Validate(); err != nil {
 		t.Fatalf("valid: %v", err)
 	}
+	s := settings()
+	s.Registries = []string{"index.docker.io", "ghcr.io", "registry.example.com:5000"}
+	if err := s.Validate(); err != nil {
+		t.Fatalf("canonical registries: %v", err)
+	}
 	for name, mut := range map[string]func(*Settings){
 		"no runtimes": func(s *Settings) { s.Runtimes = nil },
 		"tag runtime": func(s *Settings) { s.Runtimes = []string{"ghcr.io/x:v1"} },
 		"zero limit":  func(s *Settings) { s.MaxPlacements = 0 },
+		"docker.io":   func(s *Settings) { s.Registries = []string{"docker.io"} },
+		"with path":   func(s *Settings) { s.Registries = []string{"ghcr.io/team"} },
 	} {
 		s := settings()
 		mut(&s)
 		if s.Validate() == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+// simulate applies Select as the cache manager does: Keep keys without a
+// placement are created now, Delete keys are removed, NewlyUnwanted are
+// marked.
+func simulate(wants []Want, existing []Existing, now time.Time, s Settings) ([]Existing, Selection) {
+	sel := Select(wants, existing, now, s)
+	byKey := map[Key]Existing{}
+	for _, e := range existing {
+		byKey[e.Key] = e
+	}
+	for _, k := range sel.Delete {
+		delete(byKey, k)
+	}
+	for _, k := range sel.NewlyUnwanted {
+		e := byKey[k]
+		at := now
+		e.UnwantedSince = &at
+		byKey[k] = e
+	}
+	for _, k := range sel.Keep {
+		if _, ok := byKey[k]; !ok {
+			byKey[k] = Existing{Key: k, Created: now}
+		}
+	}
+	out := make([]Existing, 0, len(byKey))
+	for _, e := range byKey {
+		out = append(out, e)
+	}
+	return out, sel
+}
+
+// The count limit holds when SpinApps older than the placed ones start
+// wanting placements, and they never displace prepared placements.
+func TestSelectCountLimitHolds(t *testing.T) {
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	key := func(i int) Key {
+		return Key{Namespace: "team", Pool: "warm", Ref: fmt.Sprintf("registry.example.com/a@sha256:%064x", i)}
+	}
+	s := settings()
+	s.MaxPlacements, s.MaxNewPerHour = 2, 100
+	var existing []Existing
+	var wants []Want
+	base := now
+	for round := 0; round < 3; round++ {
+		// Each round, two SpinApps older than every earlier one start wanting.
+		for i := 0; i < 2; i++ {
+			n := round*2 + i
+			wants = append(wants, Want{Key: key(n), Created: base.Add(-time.Duration(n+1) * time.Hour), App: fmt.Sprintf("app-%02d", n)})
+		}
+		now = now.Add(2 * time.Hour)
+		var sel Selection
+		existing, sel = simulate(wants, existing, now, s)
+		if len(existing) > s.MaxPlacements {
+			t.Fatalf("round %d: %d placements, limit %d", round, len(existing), s.MaxPlacements)
+		}
+		if len(sel.Keep) != 2 || (sel.Keep[0] != key(0) && sel.Keep[1] != key(0)) || (sel.Keep[0] != key(1) && sel.Keep[1] != key(1)) {
+			t.Fatalf("round %d: the first placements were displaced: %+v", round, sel.Keep)
+		}
+	}
+	// A limited key's existing placement (the limit was lowered) is deleted.
+	s.MaxPlacements = 1
+	existing, sel := simulate(wants, existing, now, s)
+	if len(existing) != 1 || len(sel.Limited) != len(wants)-1 {
+		t.Fatalf("lowered limit: %d placements, %+v", len(existing), sel)
+	}
+}
+
+// The hourly limit binds: a SpinApp whose image changes every minute gets
+// at most MaxPlacements new placements per hour with the defaults.
+func TestSelectChurnBounded(t *testing.T) {
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	s := settings()
+	s.MaxPlacements, s.MaxNewPerHour = 8, 10
+	var existing []Existing
+	created := map[Key]bool{}
+	start := now
+	for i := 0; i < 180; i++ {
+		k := Key{Namespace: "team", Pool: "warm", Ref: fmt.Sprintf("registry.example.com/a@sha256:%064x", i)}
+		existing, _ = simulate([]Want{{Key: k, Created: start, App: "app"}}, existing, now, s)
+		for _, e := range existing {
+			created[e.Key] = true
+		}
+		if len(existing) > s.MaxPlacements {
+			t.Fatalf("minute %d: %d placements", i, len(existing))
+		}
+		now = now.Add(time.Minute)
+	}
+	// Three hours: at most MaxPlacements per hour (plus the first hour's).
+	if n := len(created); n > 4*s.MaxPlacements {
+		t.Fatalf("%d placements created in three hours", n)
 	}
 }

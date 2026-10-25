@@ -115,6 +115,16 @@ func (s Settings) Validate() error {
 	if s.MaxPlacements < 1 || s.MaxNewPerHour < 1 || s.Retention < 0 {
 		return fmt.Errorf("local application limits must be positive")
 	}
+	for _, h := range s.Registries {
+		reg, err := name.NewRegistry(h, name.StrictValidation)
+		if err != nil || reg.RegistryStr() != h {
+			want := h
+			if err == nil {
+				want = reg.RegistryStr()
+			}
+			return fmt.Errorf("local application registry %q must be a registry host as images normalize it (%q; Docker Hub is index.docker.io)", h, want)
+		}
+	}
 	return nil
 }
 
@@ -195,7 +205,7 @@ func Decide(in Input) (*Key, *Skip) {
 	case !in.Supported:
 		return skip(ReasonUnsupported, "the installed KubeSwift does not serve optional OCI layout artifacts with placements (KubeSwift v0.19.3 or later is required)")
 	case p.SandboxPool == "":
-		return skip(ReasonNoWarmPool, "executor %q has no sandbox pool; local applications serve warm-pool replicas", p.ExecutorName)
+		return skip(ReasonNoWarmPool, "executor %q has no warm pool (annotation %s); local applications serve warm-pool replicas", p.ExecutorName, executor.AnnSandboxPool)
 	}
 	if len(app.Spec.Image) > 512 || !imagePattern.MatchString(app.Spec.Image) {
 		return skip(ReasonImageNotPinned, "spec.image is not pinned by digest; only repository@sha256:... images can start from a local copy")
@@ -206,7 +216,7 @@ func Decide(in Input) (*Key, *Skip) {
 	}
 	host, err := registryHost(ref)
 	if err != nil || plaintextHost(host) {
-		return skip(ReasonRegistryNotEligible, "the registry of spec.image is one KubeSwift may contact over plain HTTP (localhost, .localhost, or a loopback or private IP address); such applications are pulled in the guest")
+		return skip(ReasonRegistryNotEligible, "the registry of spec.image is one KubeSwift may contact over plain HTTP, or a local address (localhost, .localhost, or a loopback, private, link-local or unspecified IP address); new replicas start from the registry")
 	}
 	if len(s.Registries) > 0 && !slices.Contains(s.Registries, host) {
 		return skip(ReasonRegistryNotEligible, "the registry of spec.image is not in the platform's list (chart value localApplication.registries)")
@@ -222,7 +232,7 @@ func Decide(in Input) (*Key, *Skip) {
 			p.ExecutorName, executor.AnnRuntimeImagePullSecret)
 	}
 	if len(app.Spec.Components) > 0 {
-		return skip(ReasonComponentsSelected, "spec.components selects components; such applications start with spin up")
+		return skip(ReasonComponentsSelected, "spec.components selects components, which the local runner does not support; new replicas start from the registry")
 	}
 	runtime, err := compiledcache.PinnedReference(p.RuntimeImage)
 	if err != nil || !slices.Contains(s.Runtimes, runtime) {
@@ -342,6 +352,13 @@ func Prepared(pl *sandboxv1alpha1.SwiftArtifactPlacement, k Key) bool {
 	return false
 }
 
+// WantsPlacement reports whether a SpinApp can want a placement at all: it
+// is not being deleted and has replicas. The controller and the cache
+// manager both use it.
+func WantsPlacement(app *spinv1alpha1.SpinApp) bool {
+	return app.DeletionTimestamp.IsZero() && app.Spec.Replicas > 0
+}
+
 // Want is one SpinApp's request for a key.
 type Want struct {
 	Key     Key
@@ -373,8 +390,14 @@ type Selection struct {
 
 // Select decides a namespace's placements. It depends only on current
 // objects, so the controller and the cache manager compute the same result.
-// Wanted keys are served in a stable order (oldest SpinApp creation, then
-// name); retained placements count against the limit and yield first.
+//
+// Wanted keys that already have a placement are served first, then wanted
+// keys without one, each in a stable order (oldest SpinApp creation, then
+// name), so a SpinApp that starts wanting a placement never displaces a
+// prepared one. A placement created within the last hour is never deleted to
+// make room: it keeps counting against the hourly limit, which therefore
+// bounds how many placements a namespace creates per hour. Wanted keys beyond
+// a limit are Limited, and their existing placements are deleted.
 func Select(wants []Want, existing []Existing, now time.Time, s Settings) Selection {
 	var sel Selection
 	// One entry per key, ordered by its oldest wanting SpinApp.
@@ -402,50 +425,69 @@ func Select(wants []Want, existing []Existing, now time.Time, s Settings) Select
 	for _, e := range existing {
 		exists[e.Key] = e
 	}
-	// Wanted keys within the count limit; a key without a placement also
-	// needs room in the hourly limit.
+	young := func(e Existing) bool { return now.Sub(e.Created) < time.Hour }
 	recent := 0
 	for _, e := range existing {
-		if now.Sub(e.Created) < time.Hour {
+		if young(e) {
 			recent++
 		}
 	}
-	for _, w := range ordered {
-		_, has := exists[w.Key]
-		switch {
-		case len(sel.Keep) >= s.MaxPlacements:
-			sel.Limited = append(sel.Limited, w.Key)
-		case !has && recent >= s.MaxNewPerHour:
-			sel.Limited = append(sel.Limited, w.Key)
-		default:
-			sel.Keep = append(sel.Keep, w.Key)
-			if !has {
-				recent++
-			}
-		}
-	}
-	// Unwanted placements: retained until their retention ends, and only
-	// while the count limit has room after the wanted ones.
+	// Unwanted placements, the young ones first: they stay for the hour.
 	var unwanted []Existing
+	youngUnwanted := 0
 	for _, e := range existing {
 		if _, wanted := first[e.Key]; !wanted {
 			unwanted = append(unwanted, e)
+			if young(e) {
+				youngUnwanted++
+			}
 		}
 	}
-	sort.Slice(unwanted, func(i, j int) bool { return unwanted[i].Key.Hash() < unwanted[j].Key.Hash() })
+	sort.Slice(unwanted, func(i, j int) bool {
+		if young(unwanted[i]) != young(unwanted[j]) {
+			return young(unwanted[i])
+		}
+		return unwanted[i].Key.Hash() < unwanted[j].Key.Hash()
+	})
+	// Wanted keys with a placement keep it within the count limit.
+	for _, w := range ordered {
+		if _, has := exists[w.Key]; !has {
+			continue
+		}
+		if len(sel.Keep) < s.MaxPlacements {
+			sel.Keep = append(sel.Keep, w.Key)
+		} else {
+			sel.Limited = append(sel.Limited, w.Key)
+			sel.Delete = append(sel.Delete, w.Key)
+		}
+	}
+	// Wanted keys without one need room beside the young unwanted
+	// placements, and room in the hourly limit.
+	for _, w := range ordered {
+		if _, has := exists[w.Key]; has {
+			continue
+		}
+		if len(sel.Keep)+youngUnwanted >= s.MaxPlacements || recent >= s.MaxNewPerHour {
+			sel.Limited = append(sel.Limited, w.Key)
+			continue
+		}
+		sel.Keep = append(sel.Keep, w.Key)
+		recent++
+	}
+	// Unwanted placements: young ones are retained; older ones until their
+	// retention ends, while the count limit has room after the wanted ones.
 	room := s.MaxPlacements - len(sel.Keep)
 	for _, e := range unwanted {
-		switch {
-		case e.UnwantedSince == nil && room > 0:
-			sel.NewlyUnwanted = append(sel.NewlyUnwanted, e.Key)
-			sel.Retain = append(sel.Retain, e.Key)
-			room--
-		case e.UnwantedSince != nil && now.Sub(*e.UnwantedSince) < s.Retention && room > 0:
-			sel.Retain = append(sel.Retain, e.Key)
-			room--
-		default:
+		retained := young(e) || (room > 0 && (e.UnwantedSince == nil || now.Sub(*e.UnwantedSince) < s.Retention))
+		if !retained {
 			sel.Delete = append(sel.Delete, e.Key)
+			continue
 		}
+		if e.UnwantedSince == nil {
+			sel.NewlyUnwanted = append(sel.NewlyUnwanted, e.Key)
+		}
+		sel.Retain = append(sel.Retain, e.Key)
+		room--
 	}
 	return sel
 }

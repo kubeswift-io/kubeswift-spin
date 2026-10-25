@@ -138,21 +138,24 @@ metrics:
 localApplication:
   enabled: false
   # Must be true to enable the feature: confirms KubeSwift's node artifact
-  # cache is bounded (KubeSwift chart artifactCache.maxBytes or maxPercent),
+  # cache is bounded (KubeSwift chart sandboxMaterialize.artifactCache.maxBytes
+  # or maxPercent),
   # because tenants' application artifacts are placed on every pool node.
   nodeCacheBounded: false
   # Runtime images, besides runtimeImage, allowed to run local applications,
   # as repository@sha256:<digest>; their Spin must be the one the converter
   # supports.
   extraRuntimes: []
-  # When not empty, the only registry hosts eligible (after normalization:
-  # docker.io is index.docker.io). Empty allows any registry KubeSwift reaches
-  # over HTTPS; KubeSwift's control plane then contacts hosts tenants choose.
+  # When not empty, the only registry hosts eligible, written as images
+  # normalize them (Docker Hub is index.docker.io; docker.io is refused).
+  # Empty allows any registry KubeSwift reaches over HTTPS; KubeSwift's
+  # control plane then contacts hosts tenants choose.
   registries: []
   # Application placements per namespace, retained ones included.
   maxPlacementsPerNamespace: 8
   # How many of a namespace's placements may have been created in the last
-  # hour.
+  # hour. Placements younger than an hour are not deleted to make room, so
+  # a namespace creates at most the smaller of the two limits per hour.
   maxNewPerHour: 10
   # How long an unwanted placement is kept, so that a rollback finds it.
   retention: 24h

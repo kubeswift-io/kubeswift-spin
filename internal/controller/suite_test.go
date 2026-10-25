@@ -216,7 +216,7 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		}
 	}
 	if o.cacheManager && o.localApplication.Enabled {
-		app := &cachemanager.ApplicationReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Options: r.Options,
+		app := &cachemanager.ApplicationReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Defaults: r.Defaults, Options: r.Options,
 			Settings: o.localApplication, Detector: o.detector, PlacementsServed: true}
 		if err := app.SetupWithManager(mgr); err != nil {
 			cancel()
