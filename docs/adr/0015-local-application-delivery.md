@@ -1,6 +1,6 @@
 # 0015: Run warm replicas from a KubeSwift-mounted copy of the application artifact
 
-Status: accepted and implemented for kubeswift-spin v0.3.0 (unreleased)
+Status: accepted and implemented in kubeswift-spin v0.3.0
 ([#56](https://github.com/kubeswift-io/kubeswift-spin/issues/56)) after two
 rounds of architecture and security review. It amends [ADR 0004](0004-runtime-rootfs-and-application-artifact.md),
 [executor-contract.md](../executor-contract.md) and

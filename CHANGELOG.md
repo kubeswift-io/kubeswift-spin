@@ -7,18 +7,9 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## Unreleased
+## v0.3.0 (2026-10-26)
 
-### Changed
-
-- The cache signer's cosign moves to v3.1.4 (sigstore 1.11.1, sigstore KMS
-  client modules 1.11.1 for all providers). KubeSwift v0.20.0 still
-  verifies with cosign v3.1.3; it accepted the new signer's signatures in
-  the compiled-cache e2e on the lab.
-
-## v0.3.0-rc1 (2026-10-25)
-
-Release candidate of v0.3.0: optional local applications
+Optional local applications
 ([ADR 0015](docs/adr/0015-local-application-delivery.md),
 [docs/local-application.md](docs/local-application.md)), off by default.
 Warm replicas of an eligible SpinApp start Spin from a verified copy of
@@ -29,6 +20,16 @@ cache. The runtime image moves to Spin v4.2.5 (`spin-4.2.5-r1`), so
 upgrading replaces each replica that uses the default runtime image once.
 With local applications disabled, it behaves as v0.2.1 apart from the new
 runtime image.
+
+The v0.3.0-rc1 release artifacts were validated on the KVM lab with
+KubeSwift v0.20.0 (docs/compatibility.md): the upgrade from v0.2.1 and the
+rollback to it, every phase of the KVM end-to-end test including the
+private registry phase, and the compiled-cache and local-application
+end-to-end tests against a registry behind a private CA. v0.3.0 differs
+from v0.3.0-rc1 in documentation, version strings, a test script fix, and
+the cache signer's cosign (v3.1.4, below), which passed the compiled-cache
+end-to-end test before the release. Local applications and compiled caches
+have run on linux/amd64 only.
 
 ### Added
 
@@ -72,9 +73,12 @@ runtime image.
   crafted component id in an OCI application writing outside Spin's assets
   directory. Spin 4.2.5 uses Wasmtime 50.0.0
   (`runtimecontract.WasmtimeCacheVersion` is now `wasmtime-50.0.0`).
-- The cache signer image is built with Go 1.27.3, which the sigstore KMS
-  client modules 1.11.1 for Azure, AWS and HashiCorp Vault require; cosign
-  stays at v3.1.3, the version KubeSwift verifies with.
+- The cache signer's cosign moves to v3.1.4 (sigstore 1.11.1, sigstore KMS
+  client modules 1.11.1), built with Go 1.27.3. KubeSwift v0.20.0 verifies
+  with cosign v3.1.3 and accepts its signatures (compiled-cache e2e).
+- Test scripts read container and console logs completely before matching
+  them, so the runtime-image and local-application tests no longer fail
+  on SIGPIPE when the line is found.
 - The entrypoint drops `SPIN_LOCKED_URL`, `SPIN_WORKING_DIR`,
   `SPIN_LOCAL_APP_DIR`, `SPIN_LOG_DIR`, `RUNTIME_CONFIG_FILE`,
   `SPIN_HTTP_LISTEN_ADDR`, `SPIN_TLS_CERT` and `SPIN_TLS_KEY` from the

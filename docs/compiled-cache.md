@@ -24,8 +24,10 @@ KubeSwift v0.19.3 or later (see [Requirements](#requirements)).
 | Signing and verification policy | implemented |
 | Placement on warm-pool nodes and mounting in replicas | implemented |
 
-The kubeswift-spin v0.2.1 release candidate was validated on the amd64 KVM
-lab with KubeSwift v0.19.3, with the cache repository and the
+The kubeswift-spin v0.3.0 release candidate was validated on the amd64 KVM
+lab with KubeSwift v0.20.0, and the v0.3.0 signer (cosign v3.1.4) before
+the release ([compatibility](compatibility.md#validation-of-v030-rc1)).
+The v0.2.1 release candidate was validated with KubeSwift v0.19.3, with the cache repository and the
 applications in a registry behind a private CA ([compatibility](compatibility.md#validation-of-v021-rc1),
 [test/e2e](../test/e2e/README.md#compiled-caches),
 [performance](performance.md#compiled-wasmtime-cache-kubeswift-v0193-2026-10-24));
