@@ -62,7 +62,7 @@ Spin's own tracing; that build is not part of the repository.
 
 ## Current results
 
-Local applications (v0.3.0, unreleased) on KubeSwift v0.20.0, with and
+Local applications (v0.3.0) on KubeSwift v0.20.0, with and
 without the compiled cache:
 [Local applications (KubeSwift v0.20.0)](#local-applications-kubeswift-v0200-2026-10-25).
 The v0.2.1 release-time comparison and its compiled-cache measurements on

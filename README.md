@@ -20,14 +20,15 @@ SpinKube is the better choice.
 
 ## Status
 
-The current release is v0.2.1, a hardening release for compiled caches,
-which now need KubeSwift v0.19.3 ([CHANGELOG](CHANGELOG.md)). Its release
-candidate passed the whole end-to-end test suite, including the private
-registry phase, the compiled-cache end-to-end test against a registry
-behind a private CA, and the startup benchmark on a KVM lab cluster:
-Kubernetes 1.34 (k0s) with the Calico CNI on linux/amd64 nodes, Spin
-Operator v0.6.1 and KubeSwift v0.19.3. Earlier releases were validated on
-the same cluster with KubeSwift v0.19.1 (v0.2.0), v0.16.3 (v0.1.0: the
+The current release is v0.3.0, which adds optional local applications and
+moves to Spin v4.2.5 ([CHANGELOG](CHANGELOG.md)). Its release candidate
+passed the whole end-to-end test suite, including the private registry
+phase, the compiled-cache and local-application end-to-end tests against a
+registry behind a private CA, and the startup benchmark on a KVM lab
+cluster: Kubernetes 1.34 (k0s) with the Calico CNI on linux/amd64 nodes,
+Spin Operator v0.6.1 and KubeSwift v0.20.0. Earlier releases were
+validated on the same cluster with KubeSwift v0.19.3 (v0.2.1), v0.19.1
+(v0.2.0), v0.16.3 (v0.1.0: the
 end-to-end test suite, rolling updates, scaling and deletion under
 continuous traffic, network isolation during termination, warm pools) and
 v0.16.4 (v0.1.1: the drain period, rolling updates under traffic, warm
@@ -58,8 +59,7 @@ relying on it in production.
   verified by KubeSwift and mounted read-only in warm-pool replicas, so
   Spin starts serving without compiling the application first
   ([compiled caches](docs/compiled-cache.md)).
-- Optional local applications (unreleased, v0.3.0; KubeSwift v0.19.3 or
-  later): warm
+- Optional local applications (v0.3.0, KubeSwift v0.19.3 or later): warm
   replicas start Spin from a verified copy of their own digest-pinned
   application artifact that KubeSwift placed on the pool's nodes, instead
   of pulling it from the registry on every start
@@ -115,16 +115,15 @@ The images, chart and example artifacts are published on
 ([verification](docs/releasing.md#verifying-a-release)). The chart pins the
 controller, runtime and cache signer images by digest.
 
-The commands below install the v0.3.0-rc1 pre-release; for the current
-release, use `--version 0.2.1`. The SpinApp namespace (`demo` here) must
-exist before the chart creates an executor in it:
+The SpinApp namespace (`demo` here) must exist before the chart creates an
+executor in it:
 
 ```bash
 kubectl create namespace demo
 ```
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0-rc1 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -142,7 +141,7 @@ your values and takes everything else, including the image digests, from
 the new chart:
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0-rc1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0 \
   --namespace kubeswift-spin-system --reset-then-reuse-values
 ```
 
@@ -159,7 +158,7 @@ helm get values kubeswift-spin --namespace kubeswift-spin-system --output yaml >
 ```
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0-rc1 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0 \
   --namespace kubeswift-spin-system --values kubeswift-spin-values.yaml
 ```
 
@@ -174,7 +173,7 @@ Building from source: [CONTRIBUTING.md](CONTRIBUTING.md#build-from-source).
 ## Quick start
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.3.0-rc1/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.3.0/examples/hello-http/spinapp.yaml
 ```
 
 ```bash

@@ -84,7 +84,7 @@ To deploy a copy pushed to your own registry instead (see
 [examples](../README.md#publish-and-deploy)):
 
 ```bash
-make example-deploy EXAMPLE=serverless-ai EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.3.0-rc1 NAMESPACE=<namespace>
+make example-deploy EXAMPLE=serverless-ai EXAMPLE_REGISTRY=ghcr.io/<you> EXAMPLE_TAG=v0.3.0 NAMESPACE=<namespace>
 ```
 
 The token never appears in the SwiftSandbox: the rendered runtime
