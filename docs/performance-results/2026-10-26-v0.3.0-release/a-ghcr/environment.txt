@@ -1,0 +1,21 @@
+date: 2026-10-26T02:20:46Z
+commit: e43955058cc71005a37ebdf4a08ab2c8385f2bc5
+node: miles
+kubelet: v1.34.3+k0s
+kernel: 6.8.0-137-generic
+os: Ubuntu 24.04.4 LTS
+runtime: containerd://1.7.30
+cpu: 8
+memory: 65616956Ki
+controller images:
+  kubeswift-spin-system/kubeswift-spin ghcr.io/kubeswift-io/kubeswift-spin@sha256:dbffe1b7048424f86e53882ff70c395f60a6f811b9a8a43b7ada6441cb7e3a00
+  kubeswift-system/controller-manager ghcr.io/kubeswift-io/kubeswift/controller-manager:v0.20.0
+  spin-operator/spin-operator-controller-manager ghcr.io/spinframework/spin-operator:v0.6.1
+runtime image: ghcr.io/kubeswift-io/kubeswift-spin-runtime@sha256:66eceb6ebe250c298783d00f0c47e68acc42a9ec55702ad27292ac18e42016e5
+readiness startup: auto (default)
+probe interval: 50ms
+startupbench image: built from test/perf/startupbench at the commit above, held in a lab registry
+manifest: examples/hello-http/spinapp.yaml (sha256 ab87fadbbc47396eb5d48bf1a0849c2a43da7adf9a52c4e1112f3684646bfdec)
+app image override: ghcr.io/kubeswift-io/kubeswift-spin-examples/hello-http@sha256:87fde57df7309f77731ff72e538a6d79ea0e02cf84776a0fa32dcab4e90c8709
+runs per mode: 30; modes: warm; pool: 1 vCPU, 256Mi
+launcher logs: 1

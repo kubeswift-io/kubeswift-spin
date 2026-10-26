@@ -62,12 +62,36 @@ Spin's own tracing; that build is not part of the repository.
 
 ## Current results
 
+The v0.3.0 release-time comparison:
+[Release-time benchmark of v0.3.0](#release-time-benchmark-of-v030-kubeswift-v0200-2026-10-26).
 Local applications (v0.3.0) on KubeSwift v0.20.0, with and
 without the compiled cache:
 [Local applications (KubeSwift v0.20.0)](#local-applications-kubeswift-v0200-2026-10-25).
 The v0.2.1 release-time comparison and its compiled-cache measurements on
 KubeSwift v0.19.3 are in
 [Compiled Wasmtime cache (KubeSwift v0.19.3)](#compiled-wasmtime-cache-kubeswift-v0193-2026-10-24).
+
+### Release-time benchmark of v0.3.0 (KubeSwift v0.20.0, 2026-10-26)
+
+The v0.3.0 release artifacts, 30 warm starts of hello-http (its v0.3.0
+artifact on ghcr.io, as in the v0.2.1 comparison) on one node with
+`hack/perf-startup.sh`, compared with `PERF_BASELINE` against the v0.2.1
+release candidate's run (`2026-10-24-kubeswift-v0.19.3/a-ghcr`). Local
+applications and compiled caches were off, so this measures the registry
+path. The environment differs from the baseline in KubeSwift (v0.20.0
+against v0.19.3) and the runtime's Spin (4.2.5 against 4.2.1); the
+SwiftKernel was `kernels/sandbox:6.6.18` (the baseline does not record its
+kernel).
+
+| Milliseconds, p50 / p95 | v0.2.1 | v0.3.0 |
+|---|---:|---:|
+| SpinApp create to first direct response | 1516 / 1746 | 1518 / 1682 |
+| create to `Available` | 3157 / 3200 | 3143 / 3185 |
+| create to first Service response | 3314 / 3328 | 3303 / 3319 |
+| warm slot claim | 54 / 75 | 50 / 73 |
+
+`startupbench summarize -baseline` flagged nothing. Results:
+[performance-results/2026-10-26-v0.3.0-release](performance-results/2026-10-26-v0.3.0-release/).
 
 ### Release-time benchmark of v0.2.0 (KubeSwift v0.19.1, 2026-10-23)
 
