@@ -7,7 +7,7 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.3.0, v0.3.0-rc1, v0.2.1, v0.2.1-rc1, v0.2.0, v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); v0.2.0 differs from v0.2.0-rc1 only in documentation and version strings; v0.2.1-rc1 passed every KVM e2e phase and the compiled-cache e2e on KubeSwift v0.19.3 (see [Validation of v0.2.1-rc1](#validation-of-v021-rc1)), and v0.2.1 differs from it only in documentation, version strings and test scripts; v0.3.0-rc1 adds local applications and moves to Spin 4.2.5; its release artifacts passed every KVM e2e phase, the compiled-cache e2e and the local-application e2e on KubeSwift v0.20.0 (see [Validation of v0.3.0-rc1](#validation-of-v030-rc1)), and v0.3.0 differs from it in documentation, version strings, a test script fix and the cache signer's cosign v3.1.4, which passed the compiled-cache e2e before the release |
+| kubeswift-spin | v0.3.0, v0.3.0-rc1, v0.2.1, v0.2.1-rc1, v0.2.0, v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); v0.2.0 differs from v0.2.0-rc1 only in documentation and version strings; v0.2.1-rc1 passed every KVM e2e phase and the compiled-cache e2e on KubeSwift v0.19.3 (see [Validation of v0.2.1-rc1](#validation-of-v021-rc1)), and v0.2.1 differs from it only in documentation, version strings and test scripts; v0.3.0-rc1 adds local applications and moves to Spin 4.2.5; its release artifacts passed every KVM e2e phase, the compiled-cache e2e and the local-application e2e on KubeSwift v0.20.0 (see [Validation of v0.3.0-rc1](#validation-of-v030-rc1)), and v0.3.0 differs from it in documentation, version strings, a test script fix and the cache signer's cosign v3.1.4; the v0.3.0 release artifacts passed the same tests and the release-time benchmark (see [Validation of v0.3.0](#validation-of-v030)) |
 | Spin | v4.2.5 | runtime image (`make runtime-test`), examples (`make example-test`); the v0.3.0-rc1 release artifacts: every KVM e2e phase, the compiled-cache e2e and the local-application e2e (see [Validation of v0.3.0-rc1](#validation-of-v030-rc1)) |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
@@ -170,6 +170,35 @@ old replica's deletion; "withdrawn" is its endpoint turning not ready.
   occurred. SpinApp creation to `Available` was 1.88 and 1.98 seconds
   without a readiness check and 3.38 and 3.40 seconds with the example's
   check (client side, including the apply).
+
+### Validation of v0.3.0
+
+Environment: as for v0.3.0-rc1 below, using the artifacts the release
+workflow published for the tag v0.3.0. The runtime image (`spin-4.2.5-r1`)
+is the one v0.3.0-rc1 built; the release reused it.
+
+- Release artifacts: the files of the release matched `SHA256SUMS`; cosign
+  v3.1.3 verified the controller and cache signer images, the chart and the
+  seven example artifacts against the workflow identity of the tag, and the
+  runtime image against the release workflow identity; GitHub provenance
+  attestations verified for the three images and the chart; the chart pins
+  the digests in `images.txt`; the cache signer image runs cosign v3.1.4.
+- Upgrade and rollback: from v0.2.1 with `helm upgrade
+  --reset-then-reuse-values`, `helm rollback` to v0.2.1, and the upgrade
+  again; the controller started as v0.3.0.
+- `test/e2e/kvm-e2e.sh` with the v0.3.0 example artifacts passed every
+  check (74) of all nine phases, the private registry included.
+  hello-http was `Available` 9.0 seconds after creation from a cold start
+  and 1.9 seconds from a warm slot.
+- `test/e2e/compiled-cache-e2e.sh` in private mode passed every phase (151
+  checks) with the released cache signer (cosign v3.1.4) and KubeSwift
+  v0.20.0 (cosign v3.1.3), including the signature with another key and
+  the claim mismatch.
+- `test/e2e/local-application-e2e.sh` in private mode passed every phase
+  (96 checks).
+- Release-time benchmark: no regression against v0.2.1 (see
+  [performance.md](performance.md#release-time-benchmark-of-v030-kubeswift-v0200-2026-10-26)).
+- Not run: arm64 (no arm64 KVM hardware), a second cluster.
 
 ### Validation of v0.3.0-rc1
 
