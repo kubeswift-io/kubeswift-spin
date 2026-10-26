@@ -342,7 +342,7 @@ Current findings:
 | ID | Package | Classification | Reason |
 |---|---|---|---|
 | GO-2026-6094 | `github.com/google/cel-go` v0.29.2 (fixed in v0.30.0 according to the Go vulnerability database; the GitHub advisory GHSA-gcjh-h69q-9w9g lists v0.29.0, so Grype does not report it), indirect through `k8s.io/apiserver` and controller-runtime's metrics authorization | unreachable | The vulnerable symbols (`ext.NativeTypes`, `ext.ParseStructTag`) are not called: `govulncheck` reports no affected code, and OSV-Scanner's Go call analysis classifies it as uncalled, which does not fail the scan. cel-go stays at the version Kubernetes pins; it is upgraded with the Kubernetes dependencies. |
-| GO-2026-6225 | cosign v3.1.3 (`signer/cosign`), its Azure Container Registry credential helper | exception, review by 2027-01-31 | The helper can send Azure credentials from `AZURE_*` variables to registries that are not Azure. The chart refuses `azurekms://` keys and `AZURE_*` variables for the signer, so there are none to send. No fixed cosign release exists. |
+| GO-2026-6225 | cosign v3.1.4 (`signer/cosign`), its Azure Container Registry credential helper | exception, review by 2027-01-31 | The helper can send Azure credentials from `AZURE_*` variables to registries that are not Azure. The chart refuses `azurekms://` keys and `AZURE_*` variables for the signer, so there are none to send. No fixed cosign release exists. |
 | GO-2026-5932 | `golang.org/x/crypto/openpgp`, through cosign (`signer/cosign`) | exception, review by 2027-01-31 | Deprecated and unmaintained. The signer signs with a cosign or KMS key and never reads or verifies OpenPGP data. No fixed version exists. |
 
 ## Application artifacts

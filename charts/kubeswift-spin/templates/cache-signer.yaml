@@ -7,7 +7,7 @@
 {{- if and $s.key.secretName $s.key.kmsRef }}
 {{- fail "set only one of compiledCache.signer.key.secretName and compiledCache.signer.key.kmsRef" }}
 {{- end }}
-{{- /* cosign v3.1.3's Azure registry credential helper can send AZURE_*
+{{- /* cosign v3.1.4's Azure registry credential helper can send AZURE_*
 credentials to registries that are not Azure (GO-2026-6225, no fixed
 release), so the signer is never given them. */}}
 {{- if hasPrefix "azurekms://" $s.key.kmsRef }}
