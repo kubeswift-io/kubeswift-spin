@@ -156,7 +156,17 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 	if o.detector == nil {
 		// The real detector against the envtest API server, which serves
 		// the KubeSwift v0.19.3 CRDs: every optional feature is present.
-		o.detector = &capabilities.OpenAPIDetector{Discovery: discovery.NewDiscoveryClientForConfigOrDie(testCfg), TTL: time.Minute}
+		// As cmd/manager does, start only after one detection succeeded:
+		// a failed first detection is cached for the TTL and reads as no
+		// optional features, so the cache manager would want nothing. A
+		// fresh detector per attempt, since a failure is cached too.
+		var d *capabilities.OpenAPIDetector
+		eventually(t, "SwiftSandbox feature detection", func() error {
+			d = &capabilities.OpenAPIDetector{Discovery: discovery.NewDiscoveryClientForConfigOrDie(testCfg), TTL: time.Minute}
+			_, err := d.Sandbox(context.Background())
+			return err
+		})
+		o.detector = d
 	}
 	if o.maxReplicas == 0 {
 		o.maxReplicas = 10
@@ -232,6 +242,13 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		}
 	}()
 	t.Cleanup(h.stop)
+	// Let the informers sync before the test creates objects, so a slow
+	// sync does not use up the test's own waits.
+	syncCtx, syncCancel := context.WithTimeout(ctx, time.Minute)
+	defer syncCancel()
+	if !mgr.GetCache().WaitForCacheSync(syncCtx) {
+		t.Fatal("manager caches did not sync")
+	}
 	return h
 }
 
