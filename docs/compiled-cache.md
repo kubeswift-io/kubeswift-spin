@@ -232,8 +232,9 @@ these checks, made independently of the cache manager:
    directories, within `compiler.maxSize` and `maxEntries`), and its
    metadata names the record's source, runtime and architecture.
 
-It then signs the digest with cosign (v3.1.3, the version KubeSwift
-verifies with, built from source in the image) and the claims
+It then signs the digest with cosign (v3.1.4, built from source in the
+image; KubeSwift v0.20.0 verifies with v3.1.3, which accepts its signatures
+in the compiled-cache e2e) and the claims
 `spin.kubeswift.io/kind=wasmtime-cache`, `namespace`, `source`, `runtime`,
 `architecture` and `compiler`, inside the signed payload, and records the
 signed digest and key ID in `status.signature`. An artifact that fails a
@@ -254,7 +255,7 @@ This creates the Secret with `cosign.key`, `cosign.pub` and
 `compiledCache.signer.key.kmsRef` (for example `gcpkms://...`), give the
 signer's ServiceAccount access with `signer.serviceAccountAnnotations` or
 `signer.extraEnv`, and leave `secretName` empty. The chart refuses
-`azurekms://` and `AZURE_*` variables: cosign v3.1.3 can send Azure
+`azurekms://` and `AZURE_*` variables: cosign v3.1.4 can send Azure
 credentials to registries that are not Azure (GO-2026-6225), and no fixed
 release exists yet.
 

@@ -7,6 +7,15 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## Unreleased
+
+### Changed
+
+- The cache signer's cosign moves to v3.1.4 (sigstore 1.11.1, sigstore KMS
+  client modules 1.11.1 for all providers). KubeSwift v0.20.0 still
+  verifies with cosign v3.1.3; it accepted the new signer's signatures in
+  the compiled-cache e2e on the lab.
+
 ## v0.3.0-rc1 (2026-10-25)
 
 Release candidate of v0.3.0: optional local applications
