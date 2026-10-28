@@ -206,6 +206,14 @@ func startManager(t *testing.T, o harnessOpts) *harness {
 		cancel()
 		t.Fatal(err)
 	}
+	// As cmd/manager does, the controller deletes the placements of the
+	// features this manager has disabled.
+	if cleanup := (PlacementCleanup{LocalApplications: !o.localApplication.Enabled, CompiledCaches: !o.compiledCache.Configured()}); cleanup.Any() {
+		if err := (&PlacementCleanupReconciler{Client: mgr.GetClient(), Cleanup: cleanup}).SetupWithManager(mgr); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+	}
 	if o.cacheManager && o.compiledCache.Configured() {
 		ns := &cachemanager.NamespaceReconciler{Client: mgr.GetClient(), Defaults: r.Defaults, Options: r.Options, Settings: o.compiledCache, Delivery: o.delivery,
 			Detector: o.detector, Retention: time.Hour}

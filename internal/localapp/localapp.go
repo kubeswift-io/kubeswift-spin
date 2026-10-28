@@ -338,6 +338,26 @@ func Owned(pl *sandboxv1alpha1.SwiftArtifactPlacement, k Key) bool {
 	return a.Ref == k.Ref && layout == Layout && pull == k.PullSecret && len(a.Claims) == 0 && !a.RequirePlatformVerification
 }
 
+// KeyOf reconstructs the key a placement claims to be for.
+func KeyOf(pl *sandboxv1alpha1.SwiftArtifactPlacement) (Key, bool) {
+	if len(pl.Spec.Artifacts) != 1 {
+		return Key{}, false
+	}
+	a := pl.Spec.Artifacts[0]
+	k := Key{Namespace: pl.Namespace, Pool: pl.Spec.PoolRef.Name, Ref: a.Ref}
+	if a.PullSecretRef != nil {
+		k.PullSecret = a.PullSecretRef.Name
+	}
+	return k, true
+}
+
+// IsPlacement reports whether pl is the cache manager's placement for the
+// key its own spec names (Owned of KeyOf).
+func IsPlacement(pl *sandboxv1alpha1.SwiftArtifactPlacement) bool {
+	k, ok := KeyOf(pl)
+	return ok && Owned(pl, k)
+}
+
 // Prepared reports whether an owned placement has prepared every target
 // node, for its current generation.
 func Prepared(pl *sandboxv1alpha1.SwiftArtifactPlacement, k Key) bool {

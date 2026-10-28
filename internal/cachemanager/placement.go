@@ -33,12 +33,6 @@ const (
 	ReasonPlacementRejected = "PlacementRejected"
 )
 
-// AnnRecordUID names the record a placement was created for, by UID. The
-// cache manager changes or deletes a placement of an existing record only
-// when it matches: tenants can set labels, but cannot read record UIDs in
-// the release namespace.
-const AnnRecordUID = "spin.kubeswift.io/compiled-cache-uid"
-
 // placementRecheck is when a placement blocked by another object or a
 // refusal is looked at again; nothing the cache manager watches says when
 // that changes.
@@ -64,7 +58,7 @@ func ownPlacement(p *sandboxv1alpha1.SwiftArtifactPlacement, rec *cachev1alpha1.
 			return false
 		}
 	}
-	return p.Annotations[AnnRecordUID] == string(rec.UID)
+	return p.Annotations[compiledcache.AnnRecordUID] == string(rec.UID)
 }
 
 // recordsForPlacement enqueues the record of a placement. A placement whose
@@ -186,7 +180,7 @@ func (r *RecordReconciler) ensurePlacement(ctx context.Context, rec *cachev1alph
 	case apierrors.IsNotFound(err):
 		p := &sandboxv1alpha1.SwiftArtifactPlacement{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: rec.Spec.Namespace, Labels: placementLabels(rec.Name),
-				Annotations: map[string]string{AnnRecordUID: string(rec.UID)}},
+				Annotations: map[string]string{compiledcache.AnnRecordUID: string(rec.UID)}},
 			Spec: want,
 		}
 		if err := r.Client.Create(ctx, p); err != nil {

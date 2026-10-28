@@ -198,19 +198,22 @@ func run(o options) error {
 			return fmt.Errorf("--compiled-cache-repository is set, but the SpinCompiledCache API (%s) is not installed; install the chart with compiledCache.enabled=true", capabilities.CompiledCaches.String())
 		}
 	}
+	// The controller deletes the placements of disabled features: the cache
+	// manager, which keeps them while a feature is enabled, no longer does.
+	cleanup := controller.PlacementCleanup{LocalApplications: !localSettings.Enabled, CompiledCaches: !settings.Configured()}
 	placementsServed := false
-	if localSettings.Enabled {
+	if localSettings.Enabled || (o.mode == modeController && cleanup.Any()) {
 		if placementsServed, err = capabilities.Served(cs.Discovery(), capabilities.Placements); err != nil {
 			return fmt.Errorf("discover %s: %w", capabilities.Placements.String(), err)
 		}
-		if !placementsServed {
+		if localSettings.Enabled && !placementsServed {
 			setupLog.Info("local applications are enabled, but the SwiftArtifactPlacement API is not installed (KubeSwift v0.19.3 or later); SpinApps start from the registry")
 		}
 	}
 	namespaces := splitList(o.watchNamespaces)
 	switch o.mode {
 	case modeController:
-		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, controllerBase(), controllerChecks(settings, localSettings.Enabled && placementsServed)); err != nil {
+		if err := checkPermissions(context.Background(), cs, namespaces, poolsServed, controllerBase(), controllerChecks(settings, localSettings.Enabled && placementsServed, cleanup.Any() && placementsServed)); err != nil {
 			return err
 		}
 	case modeCacheManager:
@@ -261,10 +264,19 @@ func run(o options) error {
 		recordNS = settings.Namespace
 	}
 	cacheOpts := controller.CacheOptions(namespaces, recordNS)
-	if o.mode == modeController && localSettings.Enabled && placementsServed {
-		// The controller reads only application placements.
-		cacheOpts.ByObject[&sandboxapi.SwiftArtifactPlacement{}] = cache.ByObject{Label: labels.SelectorFromSet(labels.Set{
-			translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: localapp.ComponentPlacement})}
+	if o.mode == modeController && placementsServed {
+		// The controller reads application placements while local
+		// applications are enabled, and deletes those of disabled features.
+		components := []string{localapp.ComponentPlacement}
+		if cleanup.CompiledCaches {
+			components = append(components, compiledcache.ComponentPlacement)
+		}
+		placementSel, err := labels.Parse(fmt.Sprintf("%s=%s,%s in (%s)", translate.LabelManagedBy, translate.ManagedByValue,
+			compiledcache.LabelComponent, strings.Join(components, ",")))
+		if err != nil {
+			return err
+		}
+		cacheOpts.ByObject[&sandboxapi.SwiftArtifactPlacement{}] = cache.ByObject{Label: placementSel}
 	}
 	if o.mode == modeCacheManager {
 		// The cache manager only needs its compiler sandboxes, not the
@@ -368,6 +380,12 @@ func run(o options) error {
 		}
 		if err := r.SetupWithManager(ctx, mgr); err != nil {
 			return err
+		}
+		if cleanup.Any() && placementsServed {
+			c := &controller.PlacementCleanupReconciler{Client: mgr.GetClient(), Cleanup: cleanup}
+			if err := c.SetupWithManager(mgr); err != nil {
+				return err
+			}
 		}
 	}
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -573,9 +591,10 @@ func cacheManagerBase(compiler bool) []check {
 	return out
 }
 
-// controllerChecks are the controller's compiled-cache permissions: it only
-// reads records.
-func controllerChecks(s compiledcache.Settings, local bool) []namespacedCheck {
+// controllerChecks are the controller's compiled-cache permissions (it only
+// reads records), its application placement permissions (read only), and
+// the placement permissions of PlacementCleanup.
+func controllerChecks(s compiledcache.Settings, local, cleanup bool) []namespacedCheck {
 	var out []namespacedCheck
 	if s.Configured() {
 		out = append(out,
@@ -587,6 +606,13 @@ func controllerChecks(s compiledcache.Settings, local bool) []namespacedCheck {
 		out = append(out,
 			namespacedCheck{"", check{"sandbox.kubeswift.io", "swiftartifactplacements", "", "list"}},
 			namespacedCheck{"", check{"sandbox.kubeswift.io", "swiftartifactplacements", "", "watch"}})
+	}
+	if cleanup {
+		// Placements of disabled features (PlacementCleanup).
+		out = append(out,
+			namespacedCheck{"", check{"sandbox.kubeswift.io", "swiftartifactplacements", "", "list"}},
+			namespacedCheck{"", check{"sandbox.kubeswift.io", "swiftartifactplacements", "", "watch"}},
+			namespacedCheck{"", check{"sandbox.kubeswift.io", "swiftartifactplacements", "", "delete"}})
 	}
 	if s.Configured() || local {
 		out = append(out,

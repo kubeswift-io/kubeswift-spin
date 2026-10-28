@@ -193,7 +193,12 @@ func (r *SpinAppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	}
 	localApps := r.LocalApplication.Enabled && r.PlacementsServed
 	if localApps {
-		b = b.Watches(&sandboxv1alpha1.SwiftArtifactPlacement{}, handler.EnqueueRequestsFromMapFunc(r.appsForPlacement))
+		// Only application placements: the informer may also hold the
+		// compiled-cache placements that PlacementCleanup deletes.
+		b = b.Watches(&sandboxv1alpha1.SwiftArtifactPlacement{}, handler.EnqueueRequestsFromMapFunc(r.appsForPlacement),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
+				return o.GetLabels()[compiledcache.LabelComponent] == localapp.ComponentPlacement
+			})))
 	}
 	if (r.CompiledCache.Configured() && r.CompiledCachesServed) || localApps {
 		// The namespace labels decide whether SpinApps get either feature.

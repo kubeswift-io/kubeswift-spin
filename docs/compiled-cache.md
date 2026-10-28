@@ -533,10 +533,12 @@ stop using one:
    remove the namespace label to stop new records there.
 2. Restart the affected SpinApps' replicas, for example by scaling to zero
    and back, so new replicas start without the cache.
-3. To disable the feature, set `compiledCache.enabled=false` only after
-   step 1: without the cache manager, nothing deletes placements, and
-   `kubectl delete swiftartifactplacements -A -l spin.kubeswift.io/component=placement`
-   removes what is left.
+3. To disable the feature, set `compiledCache.enabled=false`. The
+   controller then deletes every compiled-cache placement, including those
+   that v0.3.0 and earlier left behind when the feature was turned off;
+   application placements of local applications are not affected. The
+   records stay (the chart keeps the SpinCompiledCache CRD), and their
+   placements come back if the feature is enabled again.
 
 ## What a SpinApp reports
 

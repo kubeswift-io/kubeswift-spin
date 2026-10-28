@@ -7,6 +7,32 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## Unreleased
+
+### Fixed
+
+- Turning off local applications (`localApplication.enabled=false`) or
+  compiled caches (`compiledCache.enabled=false`) left that feature's
+  SwiftArtifactPlacements behind: the chart stopped running the part of
+  the cache manager that deletes them, so they stayed in their namespaces
+  and reported `PoolNotFound` once their pool was deleted. The controller
+  now deletes the placements of disabled features, including those an
+  earlier release left behind, and never those of an enabled feature or
+  objects kubeswift-spin did not create.
+
+### Upgrade notes
+
+- With either feature disabled (the default), the chart grants the
+  controller list, watch and delete on `swiftartifactplacements`. A
+  controller deployed without that permission exits at startup with the
+  missing permissions listed.
+- After the upgrade, placements of disabled features are deleted, so
+  remove nothing by hand. To keep a feature's placements, enable the
+  feature before upgrading.
+- Turning a feature on or off changes both Deployments; while the old
+  controller or cache manager is still running, a placement may be
+  created and deleted again until the rollout finishes.
+
 ## v0.3.0 (2026-10-26)
 
 Optional local applications
