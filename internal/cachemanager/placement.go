@@ -33,12 +33,6 @@ const (
 	ReasonPlacementRejected = "PlacementRejected"
 )
 
-// AnnRecordUID names the record a placement was created for, by UID. The
-// cache manager changes or deletes a placement of an existing record only
-// when it matches: tenants can set labels, but cannot read record UIDs in
-// the release namespace.
-const AnnRecordUID = "spin.kubeswift.io/compiled-cache-uid"
-
 // placementRecheck is when a placement blocked by another object or a
 // refusal is looked at again; nothing the cache manager watches says when
 // that changes.
@@ -64,7 +58,7 @@ func ownPlacement(p *sandboxv1alpha1.SwiftArtifactPlacement, rec *cachev1alpha1.
 			return false
 		}
 	}
-	return p.Annotations[AnnRecordUID] == string(rec.UID)
+	return p.Annotations[compiledcache.AnnRecordUID] == string(rec.UID)
 }
 
 // recordsForPlacement enqueues the record of a placement. A placement whose
@@ -74,6 +68,12 @@ func (r *RecordReconciler) recordsForPlacement(_ context.Context, o client.Objec
 		return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: r.Settings.Namespace, Name: name}}}
 	}
 	return nil
+}
+
+// notPlacement keeps (from deletePlacements) what lacks a mark of the cache
+// manager's placements.
+func notPlacement(p *sandboxv1alpha1.SwiftArtifactPlacement) bool {
+	return !compiledcache.IsPlacement(p)
 }
 
 // placements lists the placements of record (in every namespace when ns is
@@ -125,10 +125,15 @@ func (r *RecordReconciler) place(ctx context.Context, rec *cachev1alpha1.SpinCom
 	}
 	ns := rec.Spec.Namespace
 	if err := r.deletePlacements(ctx, ns, rec.Name, func(p *sandboxv1alpha1.SwiftArtifactPlacement) bool {
-		// Another record's object with forged labels is never deleted here;
-		// one of this record's is kept only for a pool it still needs.
-		return !ownPlacement(p, rec) ||
-			(slices.Contains(pools, p.Spec.PoolRef.Name) && p.Name == compiledcache.PlacementName(rec.Name, p.Spec.PoolRef.Name))
+		// One of this record's is kept only for a pool it still needs. A
+		// placement with every mark of the cache manager's but another
+		// record UID was made for an earlier record of this name (deleted
+		// and recreated): it is deleted, so the pool's placement can be
+		// created again. Anything without every mark is never deleted here.
+		if ownPlacement(p, rec) {
+			return slices.Contains(pools, p.Spec.PoolRef.Name) && p.Name == compiledcache.PlacementName(rec.Name, p.Spec.PoolRef.Name)
+		}
+		return !compiledcache.IsPlacement(p)
 	}); err != nil {
 		return 0, err
 	}
@@ -186,7 +191,7 @@ func (r *RecordReconciler) ensurePlacement(ctx context.Context, rec *cachev1alph
 	case apierrors.IsNotFound(err):
 		p := &sandboxv1alpha1.SwiftArtifactPlacement{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: rec.Spec.Namespace, Labels: placementLabels(rec.Name),
-				Annotations: map[string]string{AnnRecordUID: string(rec.UID)}},
+				Annotations: map[string]string{compiledcache.AnnRecordUID: string(rec.UID)}},
 			Spec: want,
 		}
 		if err := r.Client.Create(ctx, p); err != nil {
@@ -203,14 +208,16 @@ func (r *RecordReconciler) ensurePlacement(ctx context.Context, rec *cachev1alph
 	case err != nil:
 		return st, fmt.Errorf("read SwiftArtifactPlacement %s/%s: %w", rec.Spec.Namespace, name, err)
 	}
+	if !cur.DeletionTimestamp.IsZero() {
+		// Being deleted (a placement of an earlier record of this name
+		// included): created again once it is gone.
+		st.Reason = "Preparing"
+		return st, nil
+	}
 	// Never take over an object the cache manager did not create for this
 	// record and pool (two pools whose names share a hash prefix included).
 	if !ownPlacement(&cur, rec) || cur.Spec.PoolRef.Name != pool {
 		return conflict()
-	}
-	if !cur.DeletionTimestamp.IsZero() {
-		st.Reason = "Preparing"
-		return st, nil
 	}
 	if !apiequality.Semantic.DeepEqual(cur.Spec, want) {
 		cur.Spec = want

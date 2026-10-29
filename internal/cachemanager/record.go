@@ -182,11 +182,13 @@ func (r *RecordReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	var rec cachev1alpha1.SpinCompiledCache
 	if err := r.APIReader.Get(ctx, req.NamespacedName, &rec); err != nil {
 		if apierrors.IsNotFound(err) {
-			// The record is gone: so are its compilers and placements.
+			// The record is gone: so are its compilers and placements. Its
+			// UID is unknown now, so a placement must have every other mark
+			// of the cache manager's (as PlacementCleanup requires).
 			if err := r.deleteCompilers(ctx, "", req.Name, nil); err != nil {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{}, r.deletePlacements(ctx, "", req.Name, nil)
+			return ctrl.Result{}, r.deletePlacements(ctx, "", req.Name, notPlacement)
 		}
 		return ctrl.Result{}, err
 	}
@@ -194,7 +196,9 @@ func (r *RecordReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := r.deleteCompilers(ctx, rec.Spec.Namespace, rec.Name, nil); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, r.deletePlacements(ctx, rec.Spec.Namespace, rec.Name, nil)
+		return ctrl.Result{}, r.deletePlacements(ctx, rec.Spec.Namespace, rec.Name, func(p *sandboxv1alpha1.SwiftArtifactPlacement) bool {
+			return !ownPlacement(p, &rec)
+		})
 	}
 	logger := log.FromContext(ctx).WithValues("record", rec.Name, "namespace", rec.Spec.Namespace)
 	ctx = log.IntoContext(ctx, logger)

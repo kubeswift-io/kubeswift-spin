@@ -97,7 +97,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	for i := range pls.Items {
 		pl := &pls.Items[i]
 		byName[pl.Name] = pl
-		k, ok := keyOf(pl)
+		k, ok := localapp.KeyOf(pl)
 		if !ok || !localapp.Owned(pl, k) {
 			continue // not ours: never modified
 		}
@@ -309,19 +309,6 @@ func samePlacementSpec(a, b sandboxv1alpha1.SwiftArtifactPlacementSpec) bool {
 		}
 	}
 	return true
-}
-
-// keyOf reconstructs the key a placement claims to be for.
-func keyOf(pl *sandboxv1alpha1.SwiftArtifactPlacement) (localapp.Key, bool) {
-	if len(pl.Spec.Artifacts) != 1 {
-		return localapp.Key{}, false
-	}
-	a := pl.Spec.Artifacts[0]
-	k := localapp.Key{Namespace: pl.Namespace, Pool: pl.Spec.PoolRef.Name, Ref: a.Ref}
-	if a.PullSecretRef != nil {
-		k.PullSecret = a.PullSecretRef.Name
-	}
-	return k, true
 }
 
 func (r *ApplicationReconciler) logConflict(ctx context.Context, want *sandboxv1alpha1.SwiftArtifactPlacement) {

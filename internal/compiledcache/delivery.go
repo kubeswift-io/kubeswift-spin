@@ -12,6 +12,7 @@ import (
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
 	"github.com/kubeswift-io/kubeswift-spin/internal/runtimecontract"
 	sandboxv1alpha1 "github.com/kubeswift-io/kubeswift-spin/internal/sandboxapi"
+	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
 )
 
 // ArtifactName is the name of the compiled cache in a replica's
@@ -25,6 +26,12 @@ const ArtifactLayout = "unpacked"
 // ComponentPlacement labels the SwiftArtifactPlacements of the cache
 // manager.
 const ComponentPlacement = "placement"
+
+// AnnRecordUID names the record a placement was created for, by UID. The
+// cache manager changes or deletes a placement of an existing record only
+// when it matches: tenants can set labels, but cannot read record UIDs in
+// the release namespace.
+const AnnRecordUID = executor.Prefix + "compiled-cache-uid"
 
 // Fetch timeouts of a replica's optional cache artifact. A replica checked
 // out of a warm pool uses the cache only if its node already holds it
@@ -136,4 +143,17 @@ func (d Delivery) Decorate(sb *sandboxv1alpha1.SwiftSandbox, id Identity, artifa
 func PlacementName(record, pool string) string {
 	h := sha256.Sum256([]byte(pool))
 	return record + "-" + hex.EncodeToString(h[:])[:16]
+}
+
+// IsPlacement reports whether pl has every mark of a placement the cache
+// manager creates: the managed-by, component and record labels, a record
+// UID annotation, the name derived from the record and the pool, and one
+// compiled-cache artifact. It does not prove the record exists; the cache
+// manager checks that UID itself.
+func IsPlacement(pl *sandboxv1alpha1.SwiftArtifactPlacement) bool {
+	record := pl.Labels[LabelRecord]
+	return pl.Labels[translate.LabelManagedBy] == translate.ManagedByValue && pl.Labels[LabelComponent] == ComponentPlacement &&
+		record != "" && pl.Annotations[AnnRecordUID] != "" && pl.Spec.PoolRef.Name != "" &&
+		pl.Name == PlacementName(record, pl.Spec.PoolRef.Name) &&
+		len(pl.Spec.Artifacts) == 1 && pl.Spec.Artifacts[0].Name == ArtifactName
 }

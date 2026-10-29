@@ -264,19 +264,25 @@ is created; otherwise it starts from the registry.
   rolling the controller back below v0.3.0: older controllers reject
   unknown `spin.kubeswift.io/` executor annotations. They also keep the
   `LocalApplication` condition as it was, and leave application placements
-  in place (delete them as below).
+  in place; delete them with:
+
+  ```bash
+  kubectl delete swiftartifactplacements -A -l spin.kubeswift.io/component=application-placement
+  ```
+
 - A runtime image older than v0.3.0 ignores the artifact and starts from
   the registry.
 - Setting `localApplication.enabled=false`, removing the namespace label or
   the executor annotation stops new replicas from carrying the artifact.
   With the namespace label or the executor annotation removed, the cache
   manager deletes the unwanted placements after
-  `localApplication.retention`. With `localApplication.enabled=false` it no
-  longer manages them; delete them with:
-
-  ```bash
-  kubectl delete swiftartifactplacements -A -l spin.kubeswift.io/component=application-placement
-  ```
+  `localApplication.retention`. With `localApplication.enabled=false` the
+  controller deletes the application placements in the namespaces it
+  watches, including those that v0.3.0 left behind when the feature was
+  turned off, once they are five minutes old; placements of compiled
+  caches are not affected. Running replicas are not replaced (see
+  [Rollouts](#rollouts)). Placements in namespaces the controller does not
+  watch are left; delete them with the command above.
 
 ## Limits of this revision
 

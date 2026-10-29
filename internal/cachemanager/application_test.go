@@ -95,7 +95,9 @@ func TestApplicationPlacementLifecycle(t *testing.T) {
 	laReconcile(t, r)
 	k := laKey()
 	pl, ok := getPlacement(t, c, k.PlacementName())
-	if !ok || !localapp.Owned(pl, k) || pl.Spec.Artifacts[0].Layout != "oci" || pl.Spec.Artifacts[0].Ref != laImage {
+	// The controller's cleanup recognizes it once local applications are
+	// disabled.
+	if !ok || !localapp.Owned(pl, k) || !localapp.IsPlacement(pl) || pl.Spec.Artifacts[0].Layout != "oci" || pl.Spec.Artifacts[0].Ref != laImage {
 		t.Fatalf("placement not created as owned: %+v", pl)
 	}
 	// Idempotent.
@@ -207,5 +209,124 @@ func TestApplicationPlacementNotWanted(t *testing.T) {
 	pl, _ := getPlacement(t, c, laKey().PlacementName())
 	if pl.Annotations[localapp.AnnUnwantedSince] == "" {
 		t.Fatal("placement of a disabled feature not marked unwanted")
+	}
+}
+
+var laImageB = "registry.example.com/apps/hello@sha256:" + strings.Repeat("b", 64)
+
+func laPoolExecutor(name, pool string) *spinv1alpha1.SpinAppExecutor {
+	e := laExecutor()
+	e.Name = name
+	e.Annotations[executor.AnnSandboxPool] = pool
+	return e
+}
+
+func laPlacementNames(t *testing.T, c client.Client) map[string]bool {
+	t.Helper()
+	var pls sandboxv1alpha1.SwiftArtifactPlacementList
+	if err := c.List(context.Background(), &pls); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	for _, pl := range pls.Items {
+		out[pl.Name] = pl.Annotations[localapp.AnnUnwantedSince] != ""
+	}
+	return out
+}
+
+// A rollout from digest A to B: B's placement is created at once; A's is
+// kept for the retention period (old replicas and a rollback use it), then
+// deleted.
+func TestApplicationPlacementDigestRollout(t *testing.T) {
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	app := laApp("hello", laImage)
+	r, c := laReconciler(t, &now, laNamespace(true), laExecutor(), app)
+	laReconcile(t, r)
+	a := laKey().PlacementName()
+	b := localapp.Key{Namespace: "team", Pool: "warm", Ref: laImageB}.PlacementName()
+
+	app.Spec.Image = laImageB
+	if err := c.Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	laReconcile(t, r)
+	if got := laPlacementNames(t, c); len(got) != 2 || !got[a] || got[b] {
+		t.Fatalf("after the rollout (name: unwanted): %v", got)
+	}
+	now = now.Add(25 * time.Hour)
+	laReconcile(t, r)
+	if got := laPlacementNames(t, c); len(got) != 1 || got[b] {
+		t.Fatalf("after the retention: %v", got)
+	}
+}
+
+// Two SpinApps with different digests on one pool have a placement each;
+// deleting one never touches the other's.
+func TestApplicationPlacementsSharedPool(t *testing.T) {
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	one := laApp("one", laImage)
+	r, c := laReconciler(t, &now, laNamespace(true), laExecutor(), one, laApp("two", laImageB))
+	laReconcile(t, r)
+	a := laKey().PlacementName()
+	b := localapp.Key{Namespace: "team", Pool: "warm", Ref: laImageB}.PlacementName()
+	pb, _ := getPlacement(t, c, b)
+	if err := c.Delete(context.Background(), one); err != nil {
+		t.Fatal(err)
+	}
+	laReconcile(t, r)
+	if got := laPlacementNames(t, c); len(got) != 2 || !got[a] || got[b] {
+		t.Fatalf("after deleting one (name: unwanted): %v", got)
+	}
+	now = now.Add(25 * time.Hour)
+	laReconcile(t, r)
+	if got := laPlacementNames(t, c); len(got) != 1 || got[b] {
+		t.Fatalf("after the retention: %v", got)
+	}
+	if pl, _ := getPlacement(t, c, b); pl.ResourceVersion != pb.ResourceVersion {
+		t.Fatal("the other SpinApp's placement was changed")
+	}
+}
+
+// One digest on two pools has a placement per pool; a pool the
+// application leaves loses only its own.
+func TestApplicationPlacementsPerPool(t *testing.T) {
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	other := laApp("other", laImage)
+	other.Spec.Executor = "second"
+	r, c := laReconciler(t, &now, laNamespace(true), laExecutor(), laPoolExecutor("second", "warm2"), laApp("hello", laImage), other)
+	laReconcile(t, r)
+	warm := laKey().PlacementName()
+	warm2 := localapp.Key{Namespace: "team", Pool: "warm2", Ref: laImage}.PlacementName()
+	if got := laPlacementNames(t, c); len(got) != 2 || got[warm] || got[warm2] {
+		t.Fatalf("placements (name: unwanted): %v", got)
+	}
+	if err := c.Delete(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	laReconcile(t, r)
+	now = now.Add(25 * time.Hour)
+	laReconcile(t, r)
+	if got := laPlacementNames(t, c); len(got) != 1 || got[warm] {
+		t.Fatalf("after the pool was left: %v", got)
+	}
+}
+
+// A pool that is missing for a while (KubeSwift reports PoolNotFound) does
+// not end the placement while an executor still names the pool.
+func TestApplicationPlacementKeptWhilePoolIsMissing(t *testing.T) {
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	r, c := laReconciler(t, &now, laNamespace(true), laExecutor(), laApp("hello", laImage))
+	laReconcile(t, r)
+	pl, _ := getPlacement(t, c, laKey().PlacementName())
+	pl.Status.Conditions = []metav1.Condition{{Type: sandboxv1alpha1.PlacementConditionPrepared, Status: metav1.ConditionFalse,
+		Reason: "PoolNotFound", LastTransitionTime: metav1.Now()}}
+	if err := c.Status().Update(context.Background(), pl); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(48 * time.Hour)
+	laReconcile(t, r)
+	got, ok := getPlacement(t, c, laKey().PlacementName())
+	if !ok || got.UID != pl.UID || got.Annotations[localapp.AnnUnwantedSince] != "" {
+		t.Fatalf("placement of a missing pool changed: %+v", got)
 	}
 }

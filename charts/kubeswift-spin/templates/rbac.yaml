@@ -220,3 +220,35 @@ subjects:
     name: {{ include "kubeswift-spin.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
 {{- end }}
+{{- if not (and .Values.compiledCache.enabled .Values.localApplication.enabled) }}
+---
+# Rendered unless both compiled caches and local applications are enabled.
+# The controller deletes the SwiftArtifactPlacements that carry
+# kubeswift-spin's marks for a disabled feature, which the cache manager no
+# longer deletes. It never creates or updates them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-placement-cleanup
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["sandbox.kubeswift.io"]
+    resources: ["swiftartifactplacements"]
+    verbs: ["list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubeswift-spin.fullname" . }}-placement-cleanup
+  labels:
+    {{- include "kubeswift-spin.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubeswift-spin.fullname" . }}-placement-cleanup
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeswift-spin.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

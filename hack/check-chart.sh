@@ -28,6 +28,16 @@ render "${cc[@]}" --set compiledCache.signer.key.secretName=cache-signing-key "$
 if render --set localApplication.enabled=true --set localApplication.nodeCacheBounded=true >/dev/null 2>&1; then
   echo "localApplication rendered without runtimeImage.digest" >&2; exit 1
 fi
+# The controller may delete placements exactly when a feature is disabled:
+# it then removes that feature's placements.
+cleanup() { grep -c '^  name: kubeswift-spin-placement-cleanup$' || true; }
+for args in "" "${la[*]}" "${cc[*]} --set compiledCache.signer.key.secretName=k"; do
+  # shellcheck disable=SC2086
+  [[ "$(render $args | cleanup)" == 3 ]] || { echo "no placement cleanup RBAC with a feature disabled ($args)" >&2; exit 1; }
+done
+both="$(render "${cc[@]}" --set compiledCache.signer.key.secretName=k "${la[@]}")"
+[[ "$(cleanup <<<"$both")" == 0 ]] \
+  || { echo "placement cleanup RBAC rendered with both features enabled" >&2; exit 1; }
 if render --set runtimeImage.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111 --set localApplication.enabled=true >/dev/null 2>&1; then
   echo "localApplication rendered without localApplication.nodeCacheBounded" >&2; exit 1
 fi

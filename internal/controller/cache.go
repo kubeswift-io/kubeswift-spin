@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"fmt"
+	"strings"
+
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -9,6 +12,8 @@ import (
 
 	cachev1alpha1 "github.com/kubeswift-io/kubeswift-spin/api/v1alpha1"
 
+	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
+	"github.com/kubeswift-io/kubeswift-spin/internal/localapp"
 	"github.com/kubeswift-io/kubeswift-spin/internal/translate"
 )
 
@@ -36,4 +41,21 @@ func CacheOptions(namespaces []string, recordNamespace string) cache.Options {
 		}
 	}
 	return opts
+}
+
+// PlacementSelector selects the SwiftArtifactPlacements the controller
+// caches: application placements, which it reads while local applications
+// are enabled and deletes while they are disabled, and compiled-cache
+// placements while compiled caches are disabled (PlacementCleanup).
+func PlacementSelector(cleanup PlacementCleanup) labels.Selector {
+	components := []string{localapp.ComponentPlacement}
+	if cleanup.CompiledCaches {
+		components = append(components, compiledcache.ComponentPlacement)
+	}
+	sel, err := labels.Parse(fmt.Sprintf("%s=%s,%s in (%s)", translate.LabelManagedBy, translate.ManagedByValue,
+		compiledcache.LabelComponent, strings.Join(components, ",")))
+	if err != nil {
+		panic(err) // constant label keys and values
+	}
+	return sel
 }

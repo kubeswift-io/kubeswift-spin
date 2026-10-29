@@ -61,8 +61,8 @@ are KubeSwift's responsibility; kubeswift-spin neither has nor needs them.
 
 ## Kubernetes API access
 
-The chart's ClusterRole, and its leader-election Role for the rows marked
-release namespace only (see `charts/kubeswift-spin/templates/rbac.yaml`):
+The chart's controller ClusterRoles, and its leader-election Role for the
+rows marked release namespace only (see `charts/kubeswift-spin/templates/rbac.yaml`):
 
 | Resource | Verbs | Why |
 |---|---|---|
@@ -71,6 +71,7 @@ release namespace only (see `charts/kubeswift-spin/templates/rbac.yaml`):
 | `spinapps/finalizers` | update | required to set `blockOwnerDeletion` on owner references; no finalizer is added |
 | `swiftsandboxes` | get, list, watch, create, delete | realize replicas; specs are immutable so there is no update |
 | `swiftsandboxpools` | get, list, watch | warm-pool compatibility check |
+| `swiftartifactplacements` (ClusterRole `<fullname>-placement-cleanup`, unless both compiled caches and local applications are enabled) | list, watch, delete | delete the placements of disabled features ([Compiled caches](#compiled-caches)) |
 | `events.k8s.io` `events` | create, patch | Events |
 | `leases` (release namespace only) | get, create, update | leader election |
 | core `events` (release namespace only) | create, patch | the LeaderElection Event, which controller-runtime records through the core/v1 API |
@@ -666,6 +667,23 @@ the chart adds:
 `hack/check_chart_policy.py` ties each rule set to the ServiceAccount
 allowed to hold it, so the controller cannot be granted the cache manager's
 write access by a chart change.
+
+With either feature disabled (the default), the chart also grants the
+controller list, watch and delete on `swiftartifactplacements`,
+cluster-wide, and never create or update. It deletes the placements of the
+disabled features, which the cache manager no longer deletes: only a
+placement that carries every mark the cache manager puts on that
+feature's placements (the labels, the key annotation, the key's name and
+the key fields of the spec for local applications; the labels, a record
+UID annotation, the name derived from the record and the pool, and a
+single compiled-cache artifact for compiled caches), by UID and resource
+version precondition. The marks are on the placement itself, so a
+principal that forges them can only cause the deletion of a placement it
+can already create or modify, and a SpinApp's fields never select which
+placement is deleted. Update on a placement therefore implies delete
+through the controller: grant tenants update on placements only where
+delete is acceptable. The cache manager applies the same marks when it
+deletes the placements of a record that no longer exists.
 
 Tenants must not be able to write in the release namespace: install
 kubeswift-spin into a namespace of its own. Namespaces that use compiled

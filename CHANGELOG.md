@@ -7,6 +7,45 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
+## Unreleased
+
+### Fixed
+
+- Turning off local applications (`localApplication.enabled=false`) or
+  compiled caches (`compiledCache.enabled=false`) left that feature's
+  SwiftArtifactPlacements behind: the chart stopped running the part of
+  the cache manager that deletes them, so they stayed in their namespaces
+  and reported `PoolNotFound` once their pool was deleted. The controller
+  now deletes the placements of disabled features in the namespaces it
+  watches, including those an earlier release left behind. It deletes only
+  placements that carry every mark kubeswift-spin puts on that feature's
+  placements, at least five minutes old, and never those of an enabled
+  feature.
+- When a SpinCompiledCache record no longer exists, the cache manager
+  deletes only the placements that carry every mark of its placements;
+  it used to match on the record's labels alone. A record deleted and
+  recreated under the same name no longer leaves its earlier placement in
+  the way (`PlacementConflict` until it was deleted by hand); the cache
+  manager replaces it.
+
+### Upgrade notes
+
+- With either feature disabled (the default), the chart adds a
+  ClusterRole and ClusterRoleBinding `<fullname>-placement-cleanup` that
+  grant the controller list, watch and delete on `swiftartifactplacements`.
+  Where the SwiftArtifactPlacement API is installed, a controller without
+  that permission exits at startup and lists the missing permissions.
+- After the upgrade the controller deletes the placements of disabled
+  features, including those earlier releases left behind; no manual
+  cleanup is needed. To keep a feature's placements, enable the feature
+  before or in the same upgrade.
+- Turning a feature on or off changes the controller Deployment and
+  creates, changes or removes the cache manager Deployment. A placement is
+  deleted only once it is five minutes old, so an old controller or cache
+  manager still running during the rollout does not delete what the other
+  creates. A placement created shortly before its feature is turned off is
+  deleted when it reaches that age.
+
 ## v0.3.0 (2026-10-26)
 
 Optional local applications

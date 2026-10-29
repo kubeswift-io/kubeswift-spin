@@ -51,7 +51,9 @@ func TestPlacementPerPoolMatchesTheReplicaArtifact(t *testing.T) {
 	id := compiledcache.IdentityOf(rec)
 	replica := r.Delivery.ReplicaArtifact(id, rec.Status.Compile.Artifact, true)
 	for _, p := range ps {
-		if p.Namespace != "team-a" || p.Name != compiledcache.PlacementName(rec.Name, p.Spec.PoolRef.Name) || !ownPlacement(&p, got) {
+		// The controller's cleanup recognizes it once compiled caches are
+		// disabled.
+		if p.Namespace != "team-a" || p.Name != compiledcache.PlacementName(rec.Name, p.Spec.PoolRef.Name) || !ownPlacement(&p, got) || !compiledcache.IsPlacement(&p) {
 			t.Fatalf("placement %s/%s labels %v", p.Namespace, p.Name, p.Labels)
 		}
 		a := p.Spec.Artifacts[0]
@@ -211,7 +213,7 @@ func TestPlacementOfAnotherPoolIsAConflict(t *testing.T) {
 	rec := trustedRecord("warm-a")
 	other := &sandboxv1alpha1.SwiftArtifactPlacement{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a",
 		Name: compiledcache.PlacementName(rec.Name, "warm-a"), Labels: placementLabels(rec.Name),
-		Annotations: map[string]string{AnnRecordUID: string(rec.UID)}}}
+		Annotations: map[string]string{compiledcache.AnnRecordUID: string(rec.UID)}}}
 	other.Spec.PoolRef.Name = "warm-z"
 	other.Spec.Artifacts = []sandboxv1alpha1.PlacementArtifact{{Name: "x", Ref: "registry.example.com/x@" + digestA}}
 	r, c := newRecordReconciler(t, time.Now(), rec, other)
@@ -288,5 +290,104 @@ func TestPlacementUpdateWaitsForTheNewGeneration(t *testing.T) {
 	got = reconcileRecord(t, r, c)
 	if s := got.Status.Placements[0]; s.Prepared || s.PreparedNodes != 0 {
 		t.Fatalf("an older generation's Prepared counted: %+v", s)
+	}
+}
+
+// A record has placements only while it is trusted: one that is pending,
+// still compiling, failed, exported but unsigned or rejected loses those a
+// trusted state left.
+func TestPlacementsOnlyForTrustedRecords(t *testing.T) {
+	for name, mutate := range map[string]func(*cachev1alpha1.SpinCompiledCache){
+		"pending": func(r *cachev1alpha1.SpinCompiledCache) { r.Status.Compile, r.Status.Signature = nil, nil },
+		"compiling": func(r *cachev1alpha1.SpinCompiledCache) {
+			r.Status.Compile.FinishedAt, r.Status.Compile.Artifact = nil, ""
+		},
+		"failed": func(r *cachev1alpha1.SpinCompiledCache) {
+			r.Status.Compile.Artifact, r.Status.Compile.Failures = "", 3
+			r.Status.Signature = nil
+		},
+		"unsigned": func(r *cachev1alpha1.SpinCompiledCache) { r.Status.Signature = nil },
+		"rejected": func(r *cachev1alpha1.SpinCompiledCache) { r.Status.Signature.Rejected = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := trustedRecord("warm-a")
+			r, c := newRecordReconciler(t, time.Now(), rec)
+			got := reconcileRecord(t, r, c)
+			if len(listPlacements(t, c)) != 1 {
+				t.Fatal("trusted record not placed")
+			}
+			mutate(got)
+			if err := c.Status().Update(context.Background(), got); err != nil {
+				t.Fatal(err)
+			}
+			got = reconcileRecord(t, r, c)
+			if ps := listPlacements(t, c); len(ps) != 0 || len(got.Status.Placements) != 0 {
+				t.Fatalf("placements %d, status %+v", len(ps), got.Status.Placements)
+			}
+		})
+	}
+}
+
+// KubeSwift reporting PoolNotFound changes nothing: the placement stays
+// while the record's consumers still name the pool.
+func TestPlacementKeptWhilePoolIsMissing(t *testing.T) {
+	rec := trustedRecord("warm-a")
+	r, c := newRecordReconciler(t, time.Now(), rec)
+	reconcileRecord(t, r, c)
+	p := listPlacements(t, c)[0]
+	p.Status = sandboxv1alpha1.SwiftArtifactPlacementStatus{ObservedGeneration: p.Generation,
+		Conditions: []metav1.Condition{{Type: sandboxv1alpha1.PlacementConditionPrepared, Status: metav1.ConditionFalse, Reason: "PoolNotFound",
+			ObservedGeneration: p.Generation, LastTransitionTime: metav1.Now()}}}
+	if err := c.Status().Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	got := reconcileRecord(t, r, c)
+	if ps := listPlacements(t, c); len(ps) != 1 || ps[0].UID != p.UID || got.Status.Placements[0].Reason != "PoolNotFound" {
+		t.Fatalf("placements %+v, status %+v", ps, got.Status.Placements)
+	}
+}
+
+// Once the record is gone, its placements are deleted only if they carry
+// every other mark of the cache manager's: an object that only has the
+// record's labels is kept.
+func TestPlacementsOfAGoneRecordNeedEveryMark(t *testing.T) {
+	rec := trustedRecord("warm-a")
+	r, c := newRecordReconciler(t, time.Now(), rec)
+	reconcileRecord(t, r, c)
+	labelled := &sandboxv1alpha1.SwiftArtifactPlacement{ObjectMeta: metav1.ObjectMeta{Namespace: "team-b", Name: "planted",
+		Labels: placementLabels(rec.Name)}}
+	labelled.Spec.PoolRef.Name = "warm-a"
+	labelled.Spec.Artifacts = []sandboxv1alpha1.PlacementArtifact{{Name: "x", Ref: "registry.example.com/x@" + digestA}}
+	if err := c.Create(context.Background(), labelled); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Delete(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "kss", Name: "spincc-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	ps := listPlacements(t, c)
+	if len(ps) != 1 || ps[0].Name != "planted" {
+		t.Fatalf("placements left: %d", len(ps))
+	}
+}
+
+// A record deleted and recreated under the same name (a new UID) does not
+// leave its earlier placement in the way: the stale placement, which has
+// every mark but the old UID, is replaced.
+func TestPlacementOfAnEarlierRecordIsReplaced(t *testing.T) {
+	rec := trustedRecord("warm-a")
+	old := &sandboxv1alpha1.SwiftArtifactPlacement{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a",
+		Name: compiledcache.PlacementName(rec.Name, "warm-a"), Labels: placementLabels(rec.Name),
+		Annotations: map[string]string{compiledcache.AnnRecordUID: "old-uid"}}}
+	old.Spec.PoolRef.Name = "warm-a"
+	old.Spec.Artifacts = []sandboxv1alpha1.PlacementArtifact{{Name: compiledcache.ArtifactName, Ref: testRepo + "@" + digestA}}
+	r, c := newRecordReconciler(t, time.Now(), rec, old)
+	reconcileRecord(t, r, c)
+	got := reconcileRecord(t, r, c)
+	ps := listPlacements(t, c)
+	if len(ps) != 1 || !ownPlacement(&ps[0], got) || got.Status.Placements[0].Reason == ReasonPlacementConflict {
+		t.Fatalf("placements %+v, status %+v", ps, got.Status.Placements)
 	}
 }
