@@ -20,9 +20,14 @@ SpinKube is the better choice.
 
 ## Status
 
-The current release is v0.3.0, which adds optional local applications and
-moves to Spin v4.2.5 ([CHANGELOG](CHANGELOG.md)). Its release candidate
-passed the whole end-to-end test suite, including the private registry
+The current release is v0.3.1, a patch release: disabling local
+applications or compiled caches now removes the SwiftArtifactPlacements of
+that feature, including those v0.3.0 left behind
+([CHANGELOG](CHANGELOG.md)). Its placement lifecycle was validated on the
+KVM lab described below with KubeSwift v0.21.2 (see
+[docs/compatibility.md](docs/compatibility.md#validation-of-v031)).
+v0.3.0 added optional local applications and moved to Spin v4.2.5. Its
+release candidate passed the whole end-to-end test suite, including the private registry
 phase, the compiled-cache and local-application end-to-end tests against a
 registry behind a private CA, and the startup benchmark on a KVM lab
 cluster: Kubernetes 1.34 (k0s) with the Calico CNI on linux/amd64 nodes,
@@ -123,7 +128,7 @@ kubectl create namespace demo
 ```
 
 ```bash
-helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0 \
+helm install kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.1 \
   --namespace kubeswift-spin-system --create-namespace \
   --set 'executors[0].name=kubeswift' --set 'executors[0].namespaces={demo}'
 ```
@@ -141,7 +146,7 @@ your values and takes everything else, including the image digests, from
 the new chart:
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.1 \
   --namespace kubeswift-spin-system --reset-then-reuse-values
 ```
 
@@ -158,7 +163,7 @@ helm get values kubeswift-spin --namespace kubeswift-spin-system --output yaml >
 ```
 
 ```bash
-helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.0 \
+helm upgrade kubeswift-spin oci://ghcr.io/kubeswift-io/charts/kubeswift-spin --version 0.3.1 \
   --namespace kubeswift-spin-system --values kubeswift-spin-values.yaml
 ```
 
@@ -173,7 +178,7 @@ Building from source: [CONTRIBUTING.md](CONTRIBUTING.md#build-from-source).
 ## Quick start
 
 ```bash
-kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.3.0/examples/hello-http/spinapp.yaml
+kubectl -n demo apply -f https://raw.githubusercontent.com/kubeswift-io/kubeswift-spin/v0.3.1/examples/hello-http/spinapp.yaml
 ```
 
 ```bash

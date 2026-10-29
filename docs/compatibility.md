@@ -7,10 +7,11 @@ that ran; nothing else is implied.
 
 | Component | Version | How it was tested |
 |---|---|---|
-| kubeswift-spin | v0.3.0, v0.3.0-rc1, v0.2.1, v0.2.1-rc1, v0.2.0, v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); v0.2.0 differs from v0.2.0-rc1 only in documentation and version strings; v0.2.1-rc1 passed every KVM e2e phase and the compiled-cache e2e on KubeSwift v0.19.3 (see [Validation of v0.2.1-rc1](#validation-of-v021-rc1)), and v0.2.1 differs from it only in documentation, version strings and test scripts; v0.3.0-rc1 adds local applications and moves to Spin 4.2.5; its release artifacts passed every KVM e2e phase, the compiled-cache e2e and the local-application e2e on KubeSwift v0.20.0 (see [Validation of v0.3.0-rc1](#validation-of-v030-rc1)), and v0.3.0 differs from it in documentation, version strings, a test script fix and the cache signer's cosign v3.1.4; the v0.3.0 release artifacts passed the same tests and the release-time benchmark (see [Validation of v0.3.0](#validation-of-v030)) |
+| kubeswift-spin | v0.3.1, v0.3.0, v0.3.0-rc1, v0.2.1, v0.2.1-rc1, v0.2.0, v0.2.0-rc1, v0.1.1, v0.1.0 | v0.1.0: all tests below (see [Validation of v0.1.0](#validation-of-v010)); v0.1.1 adds the drain period, validated on KubeSwift v0.16.4 (see [Drain period on KubeSwift v0.16.4](#drain-period-on-kubeswift-v0164)); v0.2.0-rc1 adds compiled caches; its release artifacts passed the KVM e2e and the compiled-cache e2e on KubeSwift v0.19.1 (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); v0.2.0 differs from v0.2.0-rc1 only in documentation and version strings; v0.2.1-rc1 passed every KVM e2e phase and the compiled-cache e2e on KubeSwift v0.19.3 (see [Validation of v0.2.1-rc1](#validation-of-v021-rc1)), and v0.2.1 differs from it only in documentation, version strings and test scripts; v0.3.0-rc1 adds local applications and moves to Spin 4.2.5; its release artifacts passed every KVM e2e phase, the compiled-cache e2e and the local-application e2e on KubeSwift v0.20.0 (see [Validation of v0.3.0-rc1](#validation-of-v030-rc1)), and v0.3.0 differs from it in documentation, version strings, a test script fix and the cache signer's cosign v3.1.4; the v0.3.0 release artifacts passed the same tests and the release-time benchmark (see [Validation of v0.3.0](#validation-of-v030)); v0.3.1 corrects the placement lifecycle, validated on KubeSwift v0.21.2 (see [Validation of v0.3.1](#validation-of-v031)) |
 | Spin | v4.2.5 | runtime image (`make runtime-test`), examples (`make example-test`); the v0.3.0-rc1 release artifacts: every KVM e2e phase, the compiled-cache e2e and the local-application e2e (see [Validation of v0.3.0-rc1](#validation-of-v030-rc1)) |
 | spin-sdk (Rust, examples) | 7.0.0 | examples built with Rust 1.97.1 |
 | Spin Operator | v0.6.1 | Go API and CRDs in envtest; operator installed in the kind integration test (`WITH_SPIN_OPERATOR=1`) and on the KVM e2e cluster |
+| KubeSwift | v0.21.2 | placement lifecycle of kubeswift-spin v0.3.1 on the lab cluster: published v0.3.0 leaving an application placement behind, the upgrade removing it, enabling, restarting, disabling and re-enabling local applications, SpinApp deletion and re-creation, and a pool deleted and recreated (see [Validation of v0.3.1](#validation-of-v031)) |
 | KubeSwift | v0.20.0 | with the kubeswift-spin v0.3.0-rc1 release artifacts on the lab cluster: every KVM e2e phase including the private registry, the compiled-cache e2e and the local-application e2e against a registry behind a private CA, with the node artifact cache bounded and SwiftKernel `kernels/sandbox:6.6.18` (see [Validation of v0.3.0-rc1](#validation-of-v030-rc1)); the local application benchmark with a development build |
 | KubeSwift | v0.19.3 | contract test of `internal/sandboxapi` against the v0.19.3 Go types and CRDs; v0.19.3 sandbox and placement CRDs in envtest. The required version for compiled caches from kubeswift-spin v0.2.1. With kubeswift-spin v0.2.1-rc1 on the lab cluster: every KVM e2e phase including the private registry, the compiled-cache e2e against a registry behind a private CA, and the startup benchmark (see [Validation of v0.2.1-rc1](#validation-of-v021-rc1)) |
 | KubeSwift | v0.19.1 | compiled caches: the compiled-cache end-to-end test (seven examples, trust boundaries, restarts, teardown) and the compiled-cache startup benchmark on the lab cluster with a development build of v0.2.0-rc1 (see [Compiled caches on KubeSwift v0.19.1](#compiled-caches-on-kubeswift-v0191)); the KVM e2e (all phases but 6) and the compiled-cache e2e with the v0.2.0-rc1 release artifacts (see [Validation of v0.2.0-rc1](#validation-of-v020-rc1)); contract test of `internal/sandboxapi` against the v0.19.1 Go types and CRDs; v0.19.1 sandbox and placement CRDs in envtest, in kubeswift-spin v0.2.0. The required version for compiled caches in kubeswift-spin v0.2.0; v0.2.1 requires v0.19.3 |
@@ -170,6 +171,42 @@ old replica's deletion; "withdrawn" is its endpoint turning not ready.
   occurred. SpinApp creation to `Available` was 1.88 and 1.98 seconds
   without a readiness check and 3.38 and 3.40 seconds with the example's
   check (client side, including the apply).
+
+### Validation of v0.3.1
+
+Environment: the lab cluster of [Validation of v0.3.0](#validation-of-v030)
+with the KubeSwift v0.21.2 release images and Spin Operator v0.6.1. The
+checks below used a development build of the controller from the source
+of v0.3.1 before its version strings changed (#76, d424fa3), installed
+with the chart from that source; the hello-http example artifact of
+v0.3.0 and the v0.3.0 runtime image; one warm pool with one slot.
+
+- Published v0.3.0 with local applications enabled prepared the
+  application placement (`Prepared`). After `localApplication.enabled=false`
+  the placement stayed `Prepared`; after the SpinApp and its pool were
+  deleted it reported `PoolNotFound` and stayed.
+- Upgrading to the development build with the same values deleted that
+  placement once it was five minutes old.
+- With local applications enabled the placement reached `Prepared` and the
+  SpinApp `LocalApplication=True/Attached`. Restarting the controller and
+  the cache manager kept the same placement (same UID). Deleting the
+  SpinApp marked the placement unwanted; creating it again cleared the
+  mark. `localApplication.enabled=false` deleted the placement when it
+  reached five minutes of age; enabling the feature again created a new
+  placement that reached `Prepared`.
+- With the feature enabled, deleting the pool while the executor still
+  named it kept the placement (`PoolNotFound`) for two and a half minutes;
+  recreating the pool brought it back to `Prepared`.
+- With both features disabled, a placement shaped like a compiled-cache
+  placement of a missing record was deleted; an unlabelled placement and
+  one with kubeswift-spin's labels but no key annotation were kept.
+
+Compiled caches were not exercised on the cluster: their signing key,
+private registry and CA were not set up. Their lifecycle, alone and
+together with local applications, is covered by the envtest suite
+(`TestPlacementLifecycleFeatureMatrix`), as is a controller still cleaning
+up beside a cache manager that wants the placement
+(`TestPlacementCleanupDuringRollout`).
 
 ### Validation of v0.3.0
 
