@@ -222,9 +222,10 @@ subjects:
 {{- end }}
 {{- if not (and .Values.compiledCache.enabled .Values.localApplication.enabled) }}
 ---
-# The controller deletes the SwiftArtifactPlacements kubeswift-spin created
-# for a feature that is now disabled (compiled caches or local
-# applications), which the cache manager no longer deletes.
+# Rendered unless both compiled caches and local applications are enabled.
+# The controller deletes the SwiftArtifactPlacements that carry
+# kubeswift-spin's marks for a disabled feature, which the cache manager no
+# longer deletes. It never creates or updates them.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -5,11 +5,16 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
@@ -147,5 +152,88 @@ func TestPlacementCleanupIgnoresMissingPlacement(t *testing.T) {
 	r := &PlacementCleanupReconciler{Client: c, Cleanup: PlacementCleanup{LocalApplications: true, CompiledCaches: true}}
 	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "team", Name: "gone"}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A placement younger than MinAge is kept and looked at again once it is
+// old enough: an old controller still running beside a new cache manager
+// (a rollout that enables the feature) must not delete what it creates.
+func TestPlacementCleanupWaitsForMinAge(t *testing.T) {
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	pl := localapp.Placement(localapp.Key{Namespace: "team", Pool: "warm", Ref: laAppRef})
+	pl.CreationTimestamp = metav1.NewTime(now.Add(-time.Minute))
+	c := fake.NewClientBuilder().WithScheme(scheme.New()).WithObjects(pl).Build()
+	r := &PlacementCleanupReconciler{Client: c, Cleanup: PlacementCleanup{LocalApplications: true}, MinAge: 5 * time.Minute,
+		Now: func() time.Time { return now }}
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pl)}
+	res, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RequeueAfter != 4*time.Minute+time.Second {
+		t.Fatalf("requeue after %v", res.RequeueAfter)
+	}
+	if err := c.Get(context.Background(), req.NamespacedName, &sandboxv1alpha1.SwiftArtifactPlacement{}); err != nil {
+		t.Fatalf("young placement deleted: %v", err)
+	}
+	now = now.Add(4*time.Minute + time.Second)
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(context.Background(), req.NamespacedName, &sandboxv1alpha1.SwiftArtifactPlacement{}); err == nil {
+		t.Fatal("placement kept past MinAge")
+	}
+}
+
+// The controller caches application placements in every configuration
+// and compiled-cache placements only while compiled caches are disabled.
+func TestPlacementSelector(t *testing.T) {
+	app := map[string]string{translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: localapp.ComponentPlacement}
+	cache := map[string]string{translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: compiledcache.ComponentPlacement}
+	foreign := map[string]string{translate.LabelManagedBy: "someone-else", compiledcache.LabelComponent: localapp.ComponentPlacement}
+	compiler := map[string]string{translate.LabelManagedBy: translate.ManagedByValue, compiledcache.LabelComponent: compiledcache.ComponentCompiler}
+	for _, tc := range []struct {
+		cleanup PlacementCleanup
+		cache   bool
+	}{
+		{PlacementCleanup{}, false},
+		{PlacementCleanup{LocalApplications: true}, false},
+		{PlacementCleanup{CompiledCaches: true}, true},
+		{PlacementCleanup{LocalApplications: true, CompiledCaches: true}, true},
+	} {
+		sel := PlacementSelector(tc.cleanup)
+		if !sel.Matches(labels.Set(app)) || sel.Matches(labels.Set(foreign)) || sel.Matches(labels.Set(compiler)) {
+			t.Fatalf("%+v: %s", tc.cleanup, sel)
+		}
+		if sel.Matches(labels.Set(cache)) != tc.cache {
+			t.Fatalf("%+v: compiled-cache placements selected: %v", tc.cleanup, !tc.cache)
+		}
+	}
+}
+
+// A conflict (the placement changed or was replaced since the cache read)
+// is looked at again; any other delete error is returned for a retry.
+func TestPlacementCleanupDeleteErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err     error
+		requeue bool
+	}{
+		"conflict": {apierrors.NewConflict(schema.GroupResource{Resource: "swiftartifactplacements"}, "p", nil), true},
+		"server":   {apierrors.NewInternalError(context.DeadlineExceeded), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pl := localapp.Placement(localapp.Key{Namespace: "team", Pool: "warm", Ref: laAppRef})
+			c := fake.NewClientBuilder().WithScheme(scheme.New()).WithObjects(pl).WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(context.Context, client.WithWatch, client.Object, ...client.DeleteOption) error { return tc.err },
+			}).Build()
+			r := &PlacementCleanupReconciler{Client: c, Cleanup: PlacementCleanup{LocalApplications: true}}
+			res, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pl)})
+			if tc.requeue && (err != nil || res.RequeueAfter == 0) {
+				t.Fatalf("result %+v, error %v", res, err)
+			}
+			if !tc.requeue && err == nil {
+				t.Fatal("error not returned")
+			}
+		})
 	}
 }

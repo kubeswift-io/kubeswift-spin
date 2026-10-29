@@ -277,9 +277,12 @@ is created; otherwise it starts from the registry.
   With the namespace label or the executor annotation removed, the cache
   manager deletes the unwanted placements after
   `localApplication.retention`. With `localApplication.enabled=false` the
-  controller deletes every application placement at once, including those
-  that v0.3.0 left behind when the feature was turned off; placements of
-  compiled caches are not affected. Running replicas keep their mount.
+  controller deletes the application placements in the namespaces it
+  watches, including those that v0.3.0 left behind when the feature was
+  turned off, once they are five minutes old; placements of compiled
+  caches are not affected. Running replicas are not replaced (see
+  [Rollouts](#rollouts)). Placements in namespaces the controller does not
+  watch are left; delete them with the command above.
 
 ## Limits of this revision
 

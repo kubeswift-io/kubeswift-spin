@@ -214,14 +214,8 @@ func (r *SpinAppReconciler) limited(ctx context.Context, k localapp.Key) bool {
 	var existing []localapp.Existing
 	for i := range pls.Items {
 		pl := &pls.Items[i]
-		if len(pl.Spec.Artifacts) != 1 {
-			continue
-		}
-		ek := localapp.Key{Namespace: pl.Namespace, Pool: pl.Spec.PoolRef.Name, Ref: pl.Spec.Artifacts[0].Ref}
-		if pl.Spec.Artifacts[0].PullSecretRef != nil {
-			ek.PullSecret = pl.Spec.Artifacts[0].PullSecretRef.Name
-		}
-		if !localapp.Owned(pl, ek) {
+		ek, ok := localapp.KeyOf(pl)
+		if !ok || !localapp.Owned(pl, ek) {
 			continue
 		}
 		e := localapp.Existing{Key: ek, Created: pl.CreationTimestamp.Time}

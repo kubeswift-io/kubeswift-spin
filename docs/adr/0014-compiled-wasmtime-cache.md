@@ -63,7 +63,7 @@ v0.19.1):
 
 | Component | Identity | Writes |
 |---|---|---|
-| SpinApp controller (existing) | its own ServiceAccount | SpinApp status, replica SwiftSandboxes (adds the cache artifact to new replicas) |
+| SpinApp controller (existing) | its own ServiceAccount | SpinApp status, replica SwiftSandboxes (adds the cache artifact to new replicas); since v0.3.1, deletes the SwiftArtifactPlacements of a disabled feature |
 | Cache manager (`manager --mode=cache-manager`, same image) | its own ServiceAccount | `SpinCompiledCache` records (spec, compile and placement status, conditions), compiler SwiftSandboxes, SwiftArtifactPlacements |
 | Cache signer (own image with cosign) | its own ServiceAccount, the signing key | `status.signature` of records, signatures in the cache registry |
 | KubeSwift | | export, verification, placement, mount |
@@ -398,7 +398,9 @@ KubeSwift first.
   compile mode in the runtime image, new chart values and RBAC, and
   administrator setup (export policy and credential, verification policy,
   signer key, cache repository, namespace labels).
-- The controller's RBAC grows only by read access to records.
+- The controller's RBAC grows only by read access to records. Since
+  v0.3.1 it also deletes the placements left when the feature is disabled
+  (see the amendment).
 - Correctness depends on KubeSwift v0.19.3 behavior: optional artifacts,
   policy verification and claims, placement, output export and spec
   immutability. kubeswift-spin uses them only when the schema shows them.
@@ -414,3 +416,18 @@ KubeSwift first.
 The first revision of this ADR, with the proof-of-concept measurements on
 KubeSwift v0.16.4 (405 ms saved between dispatch and the first response
 at p50 for hello-http), was reviewed in kubeswift-io/kubeswift-spin#27.
+
+## Amendment: placements of a disabled feature (v0.3.1)
+
+Up to v0.3.0, setting `compiledCache.enabled=false` left the records'
+placements behind: without the cache manager's record controller nothing
+deleted them. Since v0.3.1 the controller deletes them, as it does for
+local applications; [ADR 0015](0015-local-application-delivery.md)
+describes the rule, the alternatives considered and the rollout window. A
+compiled-cache placement is deleted only if it carries the cache manager's
+labels, a record UID annotation, the name derived from the record and the
+pool, and a single compiled-cache artifact. The records stay (the chart
+keeps the CRD), so the placements of records that are still trusted come
+back when the feature is enabled again. Since v0.3.1 the cache manager
+also requires those marks when it deletes the placements of a record that
+no longer exists, where it used to match on the labels alone.

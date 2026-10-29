@@ -162,7 +162,7 @@ hold (see Failure hold). The feature is off unless the platform turns it on.
 | Component | Role |
 |---|---|
 | `internal/localapp` (pure) | Opt-in, eligibility, the placement key, name and spec, the limit selection, the artifact decoration, reasons. Used by the controller and the cache manager, as `compiledcache` is. |
-| Controller | Decides eligibility, attaches the artifact to new warm replicas after the fingerprint, holds after failures, reports the `LocalApplication` condition. Reads placements; writes none. |
+| Controller | Decides eligibility, attaches the artifact to new warm replicas after the fingerprint, holds after failures, reports the `LocalApplication` condition. Reads placements; writes none (since v0.3.1 it deletes those of a disabled feature, see the amendment). |
 | Cache manager | Creates, updates and deletes the application placements. |
 | Runtime entrypoint | Verifies the mounted layout, copies what Spin needs into its tmpfs, builds the locked application, starts Spin locally or falls back. |
 | KubeSwift | Fetches, authorizes, caches and mounts the artifact; never sees Spin semantics. |
@@ -592,7 +592,9 @@ not read consoles.
   namespaces whenever either feature is on, and a watch that maps placements
   to SpinApps.
 - `hack/check_chart_policy.py` gains one approved rule set per feature
-  combination and asserts that the controller never writes placements.
+  combination and asserts that the controller never writes placements
+  (since v0.3.1 it may delete those of a disabled feature, see the
+  amendment).
   docs/security-model.md is updated (RBAC table, cache manager, application
   artifacts, residual risks).
 
@@ -708,3 +710,44 @@ first, and the controller logs the assumption at startup, as in ADR 0014.
   in Spin, a supported
   way to run a pre-resolved locked application
   ([spinframework/spin#3753](https://github.com/spinframework/spin/issues/3753)).
+
+## Amendment: placements of a disabled feature (v0.3.1)
+
+v0.3.0 left application placements behind when `localApplication.enabled`
+was turned off: the chart stops running the application placement
+controller of the cache manager, the only component that deleted them, so
+they stayed and reported `PoolNotFound` once their pool was deleted. The
+same held for compiled-cache placements ([ADR 0014](0014-compiled-wasmtime-cache.md)).
+
+Since v0.3.1 the controller, which always runs, deletes the placements of
+a disabled feature. The ownership table above changes: the cache manager
+still creates, updates and deletes the placements of an enabled feature;
+the controller deletes the placements of a disabled one, and never creates
+or updates a placement. It deletes only a placement that carries every
+mark the cache manager puts on that feature's placements (for local
+applications the labels, the key annotation, the key's name and the key
+fields of the spec), at least five minutes old, by UID and resource
+version precondition. The chart grants it list, watch and delete on
+`swiftartifactplacements` whenever a feature is disabled, and
+`hack/check_chart_policy.py` approves that rule set for the controller
+only, instead of asserting that the controller never writes placements.
+
+Alternatives considered:
+
+- Owner references: an application placement is shared by the SpinApps of
+  a key, and a compiled-cache placement's record is in another namespace.
+  Neither owner goes away when the feature is turned off.
+- A finalizer: nothing would remove it once the cache manager stops.
+- Running the cache manager whenever a placement may exist, or a drain
+  mode of it: a second Deployment and its broader placement RBAC on every
+  default install.
+- A Helm hook Job: misses installs not made with Helm and placements
+  created by an old pod during the rollout.
+
+The controller and the cache manager hold separate leases. While a rollout
+that turns a feature on or off runs, an old controller that cleans up may
+run beside a new cache manager that wants the placements, or the reverse.
+The five-minute minimum age keeps them from deleting and recreating a
+placement in a loop, even if the rollout stalls; placements left behind
+by an earlier release are older and go at once. The controller cleans up
+only in the namespaces it watches.

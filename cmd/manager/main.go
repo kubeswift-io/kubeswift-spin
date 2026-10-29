@@ -267,16 +267,7 @@ func run(o options) error {
 	if o.mode == modeController && placementsServed {
 		// The controller reads application placements while local
 		// applications are enabled, and deletes those of disabled features.
-		components := []string{localapp.ComponentPlacement}
-		if cleanup.CompiledCaches {
-			components = append(components, compiledcache.ComponentPlacement)
-		}
-		placementSel, err := labels.Parse(fmt.Sprintf("%s=%s,%s in (%s)", translate.LabelManagedBy, translate.ManagedByValue,
-			compiledcache.LabelComponent, strings.Join(components, ",")))
-		if err != nil {
-			return err
-		}
-		cacheOpts.ByObject[&sandboxapi.SwiftArtifactPlacement{}] = cache.ByObject{Label: placementSel}
+		cacheOpts.ByObject[&sandboxapi.SwiftArtifactPlacement{}] = cache.ByObject{Label: controller.PlacementSelector(cleanup)}
 	}
 	if o.mode == modeCacheManager {
 		// The cache manager only needs its compiler sandboxes, not the
@@ -382,7 +373,7 @@ func run(o options) error {
 			return err
 		}
 		if cleanup.Any() && placementsServed {
-			c := &controller.PlacementCleanupReconciler{Client: mgr.GetClient(), Cleanup: cleanup}
+			c := &controller.PlacementCleanupReconciler{Client: mgr.GetClient(), Cleanup: cleanup, MinAge: controller.DefaultPlacementCleanupMinAge}
 			if err := c.SetupWithManager(mgr); err != nil {
 				return err
 			}

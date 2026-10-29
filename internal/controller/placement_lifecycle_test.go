@@ -10,7 +10,11 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/config"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/kubeswift-io/kubeswift-spin/internal/compiledcache"
 	"github.com/kubeswift-io/kubeswift-spin/internal/executor"
@@ -87,22 +91,31 @@ func keepPlacements(t *testing.T, ns string, want map[string]types.UID) {
 }
 
 // trustRecord makes the namespace's only record trusted, as the compiler
-// and the signer would, and returns its name.
+// and the signer would, and returns its name. It waits for the cache
+// manager to record its compile attempt and then completes that attempt: a
+// status written before the attempt is recorded would be replaced by it.
 func trustRecord(t *testing.T, s compiledcache.Settings, ns string) string {
 	t.Helper()
 	var name string
-	eventually(t, "one record", func() error {
+	var uid types.UID
+	eventually(t, "one record with a recorded compile attempt", func() error {
 		recs := listRecords(t, s.Namespace, ns)
 		if len(recs) != 1 {
 			return fmt.Errorf("%d records", len(recs))
 		}
 		name = recs[0].Name
+		c := recs[0].Status.Compile
+		if c == nil || c.Sandbox == nil {
+			return fmt.Errorf("no compile attempt recorded")
+		}
+		uid = c.Sandbox.UID
 		return nil
 	})
 	art := s.Repository + "/" + ns + "/wasmtime-cache@" + ccDigestB
+	now := time.Now().UTC().Format(time.RFC3339)
 	patchRecordStatus(t, s.Namespace, name, map[string]any{
-		"compile":   map[string]any{"attempt": 1, "artifact": art},
-		"signature": map[string]any{"artifact": art, "keyID": "k1", "signedAt": time.Now().UTC().Format(time.RFC3339)},
+		"compile":   map[string]any{"artifact": art, "finishedAt": now},
+		"signature": map[string]any{"artifact": art, "keyID": "k1", "sandboxUID": string(uid), "signedAt": now},
 	})
 	return name
 }
@@ -200,5 +213,62 @@ func TestPlacementCleanupOfLeftovers(t *testing.T) {
 	expectPlacements(t, ns, unlabelled.Name, forged.Name, noUID.Name)
 	consistently(t, "foreign placements kept", 3*time.Second, func() error {
 		return sameNames(placements(t, ns), []string{unlabelled.Name, forged.Name, noUID.Name})
+	})
+
+	// One that appears while the controller runs goes too.
+	late := localapp.Placement(localapp.Key{Namespace: ns, Pool: "late-pool", Ref: laAppRef})
+	mustCreate(t, late)
+	expectPlacements(t, ns, unlabelled.Name, forged.Name, noUID.Name)
+}
+
+// startCleanup runs only the placement cleanup of an old controller for
+// which local applications are disabled.
+func startCleanup(t *testing.T, minAge time.Duration) func() {
+	t.Helper()
+	mgr, err := ctrl.NewManager(testCfg, ctrl.Options{Scheme: testScheme, Metrics: metricsserver.Options{BindAddress: "0"},
+		Controller: config.Controller{SkipNameValidation: ptr.To(true)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &PlacementCleanupReconciler{Client: mgr.GetClient(), Cleanup: PlacementCleanup{LocalApplications: true}, MinAge: minAge}
+	if err := r.SetupWithManager(mgr); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := mgr.Start(ctx); err != nil {
+			t.Errorf("cleanup manager: %v", err)
+		}
+	}()
+	stop := func() { cancel(); <-done }
+	t.Cleanup(stop)
+	return stop
+}
+
+// TestPlacementCleanupDuringRollout runs a new cache manager that wants an
+// application placement beside an old controller that still cleans up
+// after local applications, as while a rollout that enables the feature
+// runs. Without a minimum age they delete and recreate the placement in a
+// loop; with it the placement stays.
+func TestPlacementCleanupDuringRollout(t *testing.T) {
+	startManager(t, harnessOpts{localApplication: laSettings(), cacheManager: true})
+	ns := laNamespace(t, true)
+	mustCreate(t, laExecutor(ns, true), laApp(ns, "hello", laAppRef))
+	app := localapp.Key{Namespace: ns, Pool: "spin-pool", Ref: laAppRef}.PlacementName()
+	first := expectPlacements(t, ns, app)[app]
+
+	stop := startCleanup(t, DefaultPlacementCleanupMinAge)
+	keepPlacements(t, ns, map[string]types.UID{app: first})
+	stop()
+
+	// The loop the minimum age prevents.
+	startCleanup(t, 0)
+	eventually(t, "placement recreated by the cache manager after the cleanup deleted it", func() error {
+		if uid := placements(t, ns)[app]; uid == "" || uid == first {
+			return fmt.Errorf("placement %s uid %q", app, uid)
+		}
+		return nil
 	})
 }
