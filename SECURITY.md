@@ -23,7 +23,7 @@ issue belongs, report it here and we will help route it.
 
 ## Supported versions
 
-The latest release is v0.3.0. Until v1.0, security fixes are made on `main`
+The latest release is v0.3.1. Until v1.0, security fixes are made on `main`
 and in the latest release only.
 
 ## Security model

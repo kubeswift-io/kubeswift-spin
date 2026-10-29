@@ -7,44 +7,69 @@ uses semantic versioning.
 Releases that change the rendered SwiftSandbox spec (and therefore replace
 running replicas on upgrade) say so under "Upgrade notes".
 
-## Unreleased
+## v0.3.1 (2026-10-29)
+
+A patch release that corrects the lifecycle of the SwiftArtifactPlacements
+kubeswift-spin creates. No API or configuration change is required, and
+the runtime image is unchanged (`spin-4.2.5-r1`), so upgrading from v0.3.0
+replaces no running replica.
 
 ### Fixed
 
-- Turning off local applications (`localApplication.enabled=false`) or
-  compiled caches (`compiledCache.enabled=false`) left that feature's
-  SwiftArtifactPlacements behind: the chart stopped running the part of
-  the cache manager that deletes them, so they stayed in their namespaces
-  and reported `PoolNotFound` once their pool was deleted. The controller
-  now deletes the placements of disabled features in the namespaces it
-  watches, including those an earlier release left behind. It deletes only
-  placements that carry every mark kubeswift-spin puts on that feature's
-  placements, at least five minutes old, and never those of an enabled
-  feature.
-- When a SpinCompiledCache record no longer exists, the cache manager
-  deletes only the placements that carry every mark of its placements;
-  it used to match on the record's labels alone. A record deleted and
-  recreated under the same name no longer leaves its earlier placement in
-  the way (`PlacementConflict` until it was deleted by hand); the cache
-  manager replaces it.
+- Disabling local applications (`localApplication.enabled=false`) or
+  compiled caches (`compiledCache.enabled=false`) now removes the
+  placements that only that feature owns. Up to v0.3.0 they stayed in
+  their namespaces, kept the artifact prepared on the pool's nodes and
+  reported `PoolNotFound` once their pool was deleted, until someone
+  deleted them by hand. The controller now deletes them in the namespaces
+  it watches; placements of a feature that is still enabled are never
+  touched.
+- Placements that v0.3.0 and earlier left behind are removed
+  automatically after the upgrade; no manual cleanup is needed.
+- A placement is deleted only once it is at least five minutes old. While
+  a rollout that turns a feature on or off runs, the old and the new
+  controller and cache manager can run side by side; the minimum age
+  keeps them from creating and deleting the same placement in a loop.
+  Disabling a feature therefore removes a placement younger than five
+  minutes when it reaches that age.
+- Only placements that carry every ownership mark kubeswift-spin puts on
+  them (labels, the key or record UID annotation, the derived name and the
+  matching artifact) are deleted. Placements that kubeswift-spin did not
+  create, or that miss any mark, are left alone. When a
+  SpinCompiledCache record no longer exists, the cache manager now applies
+  the same rule to its placements; it used to match on the record's labels
+  alone.
+- A compiled-cache record deleted and recreated under the same name (a
+  new UID) no longer leaves its earlier placement in the way
+  (`PlacementConflict` until it was deleted by hand); the cache manager
+  replaces it.
+
+Unchanged:
+
+- A temporary `PoolNotFound` never causes a placement to be deleted:
+  while an executor still names the pool, the placement is kept and is
+  prepared again once the pool exists.
+- With local applications enabled, a placement no SpinApp wants any more
+  (the SpinApp was deleted or rolled to another digest) is still kept for
+  `localApplication.retention` (default 24 hours) so that a rollback finds
+  it.
 
 ### Upgrade notes
 
-- With either feature disabled (the default), the chart adds a
-  ClusterRole and ClusterRoleBinding `<fullname>-placement-cleanup` that
-  grant the controller list, watch and delete on `swiftartifactplacements`.
-  Where the SwiftArtifactPlacement API is installed, a controller without
-  that permission exits at startup and lists the missing permissions.
-- After the upgrade the controller deletes the placements of disabled
-  features, including those earlier releases left behind; no manual
-  cleanup is needed. To keep a feature's placements, enable the feature
-  before or in the same upgrade.
-- Turning a feature on or off changes the controller Deployment and
-  creates, changes or removes the cache manager Deployment. A placement is
-  deleted only once it is five minutes old, so an old controller or cache
-  manager still running during the rollout does not delete what the other
-  creates. A placement created shortly before its feature is turned off is
-  deleted when it reaches that age.
+- The chart grants the controller list, watch and delete on
+  `swiftartifactplacements` automatically, through a ClusterRole and
+  ClusterRoleBinding `<fullname>-placement-cleanup`, whenever compiled
+  caches or local applications are disabled (the default). It never
+  grants create, update or patch. Where the SwiftArtifactPlacement API is
+  installed, a controller deployed without that permission exits at
+  startup and lists the missing permissions.
+- To keep a feature's placements, enable the feature before or in the
+  same upgrade.
+- Cleanup covers the namespaces the controller watches
+  (`controller.watchNamespaces`); placements in other namespaces are left
+  (docs/local-application.md and docs/compiled-cache.md give the
+  `kubectl delete` command). kubeswift-spin assumes one release owns a
+  given set of watched namespaces.
 
 ## v0.3.0 (2026-10-26)
 
