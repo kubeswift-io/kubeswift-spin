@@ -4,7 +4,7 @@ go 1.26.10
 
 require (
 	github.com/google/go-containerregistry v0.22.1
-	github.com/kubeswift-io/kubeswift v0.19.3
+	github.com/kubeswift-io/kubeswift v0.21.2
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
